@@ -1,99 +1,117 @@
 SESSION STATUS — ZTE Lightweight
 =================================
-Date:        2026-04-20
-Session ID:  096554fe-4b79-407e-bf18-bf9823b51f57
+Date:        2026-05-22
 Branch:      main
-HEAD commit: 5ce757e  feat: implement DB-based policy enforcement and service-a
+HEAD commit: af5089e  docs: update README with Stage 6 commit hash
 
 ================================================================
-SESSION SUMMARY
+COMPLETED STAGES
 ================================================================
 
-This session covered Tasks 002 and 003.
-
---- Task 002: Keycloak Realm Automation ---
-Prompt file: prompts-hist/002_keycloak_automation.txt
-ADR:         docs/adr/ADR-002-identity-provider-configuration-strategy.md
-Commits:     f8d044d (feat), 29a108c (fix)
-
+--- Stage 1: Infrastructure Bootstrap ---
+Commit:      ddd0fbd
 Key work:
-  - Created keycloak/realm-export.json (zte-realm, zte-gateway client, ADMIN/USER roles, zte-admin user)
-  - Docker Compose: --import-realm flag + directory-level bind mount (file-level mount breaks on WSL2
-    due to inode change on edit → Docker Desktop loses the reference)
-  - scripts/set-keycloak-password.sh: kcadm.sh set-password for zte-admin (Admin@123!)
+  - Gradle 8.12 multi-project build (Kotlin DSL, version catalog)
+  - Docker Compose: PostgreSQL 16, Keycloak 24.0.4
+  - gateway-service Spring Boot 3.4 skeleton with Spring Cloud Gateway
+  - auth-library placeholder module
+ADR: ADR-001-architecture-pattern-gateway-vs-sidecar.md
+
+--- Stage 2: Identity Provider ---
+Commits:     5ddac01 (feat), b05a6b3 (fix)
+Key work:
+  - keycloak/realm-export.json: zte-realm, zte-gateway client, ADMIN/USER roles,
+    zte-admin user, zte-test-user (added in Stage 6 for integration tests)
+  - Docker Compose --import-realm + directory-level bind mount (WSL2 inode fix)
+  - scripts/set-keycloak-password.sh: kcadm.sh set-password for zte-admin
   - gateway-service/application.yml: Spring Security OAuth2 resource server → Keycloak JWKS
-  - Verified: token acquisition from zte-realm works
+ADR: ADR-002-identity-provider-configuration-strategy.md
 
-Issues resolved:
-  - Keycloak crash-loop: removed _comment_password field (strict Jackson deserializer)
-  - WSL2 inode issue: switched to directory-level volume mount ./keycloak:/opt/keycloak/data/import:ro
-
---- Task 003: DB-Based Policy Enforcement + service-a ---
-Prompt file: prompts-hist/003_policy_engine.txt
-ADR:         docs/adr/ADR-003-reactive-policy-engine.md
-Commit:      5ce757e (feat)
-
+--- Stage 3: DB-Based Policy Enforcement ---
+Commit:      bf873a5
 Key work:
-  - V2 Flyway migration: access_policies table + seed (ADMIN → /api/v1/service-a/**, GET,POST)
-  - AccessPolicy record, AccessPolicyRepository (R2DBC), PolicyService (Mono.cache 5 min, fail-closed)
-  - ZteAuthorizationFilter: GlobalFilter extracting realm_access.roles, checking DB policy, 403 JSON on deny
-  - service-a module: Spring Boot, GET /api/v1/service-a/hello, port 8081
-  - Gateway route + docker-compose service-a entry
+  - V2 Flyway migration: access_policies table + seed rows
+  - AccessPolicy record, AccessPolicyRepository (R2DBC), PolicyService (Mono.cache 5 min)
+  - ZteAuthorizationFilter: GlobalFilter, HIGHEST_PRECEDENCE+100, fail-closed 403 JSON
+  - service-a module: Spring Boot WebFlux, GET /api/v1/service-a/hello, port 8081
+  - Gateway routes: /api/v1/service-a/**, /api/v1/service-b/**
+ADR: ADR-003-reactive-policy-engine.md
 
 Critical fix (HTTP 500 → 403):
-  Root cause: NettyRoutingFilter was still forwarding to service-a after the filter wrote a 403,
-  because response.setComplete() does NOT suppress Gateway routing.
-  Fix applied:
-    1. Filter order: Ordered.HIGHEST_PRECEDENCE + 100 (runs before routing filters)
-    2. exchange.getAttributes().put(GATEWAY_ALREADY_ROUTED_ATTR, true) in writeForbidden()
-    3. response.writeWith(Mono.just(buffer)) with explicit JSON DataBuffer
+  Root cause: NettyRoutingFilter still forwarding after filter wrote a 403.
+  Fix: filter order HIGHEST_PRECEDENCE + 100 + GATEWAY_ALREADY_ROUTED_ATTR in writeForbidden().
 
-Dual-datasource fix:
-  Spring Boot 3.4 does not reliably auto-select JDBC DataSource for Flyway when
-  spring-boot-starter-data-r2dbc is also on the classpath.
-  Fix: explicit spring.flyway.url/user/password in application.yml
+--- Stage 4: mTLS & On-Behalf-Of Delegation ---
+Commit:      e917be9
+Key work:
+  - certs/generate-certs.sh: ZTE-CA, client.p12, service-a.p12, service-b.p12, truststore.p12
+  - auth-library/ReloadableSslContextFactory: AtomicReference<SslContext> hot-swap (per-connection lambda)
+  - auth-library/UserContextTokenService: HMAC-SHA256 OBO JWT (sub, roles, iss, 30s TTL)
+  - auth-library/ZteAuditLogger: structured [ZTE-AUDIT] log events
+  - gateway-service/MtlsHttpClientConfig: Netty HttpClient with client.p12
+    @ConditionalOnProperty(zte.mtls.enabled) added later for integration test support
+  - gateway-service/UserContextPropagationFilter: strips injected headers, creates OBO token
+  - gateway-service/RequestAuditFilter: logs sub/azp/path, injects trusted X-User-Id
+  - service-b: port 8082 HTTPS/mTLS + 9082 management; UserContextController validates OBO
+  - service-a/HelloController: calls service-b via mTLS WebClient, forwards X-ZTE-User-Context
+  - Docker Compose: service-a + service-b with cert mounts, management ports exposed
+ADR: ADR-004-mtls-implementation.md
+
+--- Stage 5: Unit Tests ---
+Commit:      07382bf
+Key work:
+  - gateway-service/filter/ZteAuthorizationFilterTest: mocked PolicyService, StepVerifier
+  - gateway-service/filter/UserContextPropagationFilterTest: OBO header generated, injection stripped
+  - auth-library/obo/UserContextTokenServiceTest: TTL expiry + HMAC signature validation
+  - Bug fix: switchIfEmpty double-invocation in ZteAuthorizationFilter (Mono cold evaluation)
+Prompt file: prompts-hist/006_unit_tests.txt
+
+--- Stage 6: E2E Integration Tests ---
+Commit:      c28fe21
+Key work:
+  - src/it source set + integrationTest Gradle task (separated from unit tests)
+  - BaseZteIntegrationTest: singleton pattern (Postgres 16 + Keycloak 24.0.4 + WireMock in-process)
+  - HappyPathIT: real JWT from Keycloak, gateway filter chain, WireMock stub verification
+  - ZeroTrustBreachIT: no token→401, expired→401, USER role→403, spoofed OBO header→stripped
+  - WSL2 Docker fix: api.version=1.45 + testcontainers.properties strategy pin
+  - zte-test-user added to realm-export.json; URL slash bug fixed in BaseZteIntegrationTest
+  - 7/7 integration scenarios passing
+Prompt file: prompts-hist/007_full_integration_tests.txt
+ADR: ADR-005-integration-testing-strategy.md
 
 ================================================================
-VERIFICATION RESULTS (2026-04-20, post-fix)
+RUNNING SERVICES
 ================================================================
 
-  Test 1: ADMIN token → GET /api/v1/service-a/hello
-          HTTP 200 — "Hello from Protected Service A — caller: <uuid>" ✅
+  PostgreSQL  : localhost:5432         (Docker — zte_db, schema at V2)
+  Keycloak    : http://localhost:8180  (Docker — zte-realm imported)
+  Gateway     : http://localhost:8080  (./gradlew :gateway-service:bootRun — requires certs)
+  service-a   : https://localhost:8081 (./gradlew :service-a:bootRun — requires certs)
+  service-b   : https://localhost:8082 (./gradlew :service-b:bootRun — requires certs)
 
-  Test 2: No token → GET /api/v1/service-a/hello
-          HTTP 401 ✅
-
-  Test 3: USER-role token → GET /api/v1/service-a/hello
-          HTTP 403 — {"error":"Forbidden","message":"No policy grants access to this resource"} ✅
-
-================================================================
-RUNNING SERVICES AT SESSION END
-================================================================
-
-  Gateway   : http://localhost:8080  (PID 7622 — ./gradlew :gateway-service:bootRun)
-  service-a : http://localhost:8081  (./gradlew :service-a:bootRun or Docker)
-  PostgreSQL: localhost:5432         (Docker — zte_db, schema at V2)
-  Keycloak  : http://localhost:8180  (Docker — zte-realm imported)
+  NOTE: Generate dev certs first: chmod +x certs/generate-certs.sh && ./certs/generate-certs.sh
 
 ================================================================
-PENDING — STAGE 4
+STAGE 7+ BACKLOG
 ================================================================
 
-  004  Request audit logging (request_logs table, V3 migration, RequestAuditFilter)
-  005  Distributed tracing (Micrometer Tracing + Zipkin in Docker Compose)
-  006  auth-library implementation (shared JWT helpers, mTLS)
-  007  Rate limiting (RequestRateLimiter, Redis-backed)
-  008  /admin/policies/refresh actuator endpoint (cache invalidation)
-  009  Integration test suite (@SpringBootTest + Testcontainers)
-  010  service-b second downstream (multi-service policy fan-out proof)
-  011  Docker Compose production profile (resource limits, restart policies)
-  012  ABAC extension (condition column on access_policies, SpEL vs JWT claims)
+  - DB-based request audit log (request_logs table, V3 Flyway migration)
+    → RequestAuditFilter exists but logs to SLF4J only; no DB persistence
+  - Distributed tracing: Micrometer Tracing + Zipkin in Docker Compose
+  - Rate limiting: Spring Cloud Gateway RequestRateLimiter (Redis-backed)
+  - /admin/policies/refresh actuator endpoint: force PolicyService cache invalidation
+  - Docker Compose production profile: resource limits, health-check restart policies
+  - ABAC extension: condition column on access_policies (SpEL vs JWT claims)
+  - Full mTLS system test: real service-a/b containers (covers TLS handshake rejection)
 
 ================================================================
 NEXT STEPS TO RESUME
 ================================================================
 
-  1. docker-compose up -d          # ensure PostgreSQL + Keycloak are running
-  2. ./gradlew :gateway-service:bootRun --no-daemon &
-  3. Obtain ADMIN token from zte-realm (see scripts/set-keycloak-password.sh for creds)
-  4. Begin Task 004 (request audit logging) or any Stage 4 item above
+  1. chmod +x certs/generate-certs.sh && ./certs/generate-certs.sh
+  2. docker compose up -d          # ensure PostgreSQL + Keycloak are running
+  3. ./gradlew :gateway-service:bootRun &
+  4. ./gradlew :service-a:bootRun &
+  5. ./gradlew :service-b:bootRun &
+  6. Obtain ADMIN token and exercise the full chain (see README.md Quick Start)
+  7. Begin any Stage 7+ backlog item above

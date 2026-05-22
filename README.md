@@ -102,7 +102,7 @@ zte-lightweight/
 
 | ADR | Title | Status |
 |---|---|---|
-| [ADR-001](docs/adr/ADR-001-api-gateway-pattern.md) | API Gateway as ZT Entry Point | Accepted |
+| [ADR-001](docs/adr/ADR-001-architecture-pattern-gateway-vs-sidecar.md) | API Gateway as ZT Entry Point | Accepted |
 | [ADR-002](docs/adr/ADR-002-identity-provider-configuration-strategy.md) | Identity Provider Configuration Strategy (Keycloak native import) | Accepted |
 | [ADR-003](docs/adr/ADR-003-reactive-policy-engine.md) | Reactive Policy Engine — R2DBC + In-Process Cache | Accepted |
 | [ADR-004](docs/adr/ADR-004-mtls-implementation.md) | mTLS Implementation and On-Behalf-Of User Context Delegation | Accepted |
