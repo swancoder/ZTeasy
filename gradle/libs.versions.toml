@@ -7,6 +7,7 @@ jjwt               = "0.12.6"
 keycloak-testcontainers = "3.3.1"
 wiremock               = "3.0.4"
 kotlin                 = "2.0.21"
+spring-dotenv          = "4.0.0"
 
 [libraries]
 # Spring Boot starters
@@ -40,6 +41,7 @@ netty-handler             = { module = "io.netty:netty-handler" }
 # Kotlin (version managed by kotlin plugin; stdlib version pinned by Spring Boot BOM)
 kotlin-stdlib             = { module = "org.jetbrains.kotlin:kotlin-stdlib" }
 jackson-kotlin            = { module = "com.fasterxml.jackson.module:jackson-module-kotlin" }
+spring-dotenv             = { module = "me.paulschwarz:spring-dotenv", version.ref = "spring-dotenv" }
 
 # Test
 spring-test               = { module = "org.springframework.boot:spring-boot-starter-test" }

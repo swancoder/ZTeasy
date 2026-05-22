@@ -22,6 +22,9 @@ dependencies {
     implementation(libs.spring.actuator)
     implementation(libs.kotlin.stdlib)
     implementation(libs.jackson.kotlin)
+    // Loads .env from working directory into Spring Environment at startup.
+    // The .env file is gitignored; .env.example documents required keys.
+    implementation(libs.spring.dotenv)
 
     testImplementation(libs.spring.test)
 }
