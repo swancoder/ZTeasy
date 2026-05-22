@@ -113,6 +113,7 @@ zte-lightweight/
 | [ADR-003](docs/adr/ADR-003-reactive-policy-engine.md) | Reactive Policy Engine — R2DBC + In-Process Cache | Accepted |
 | [ADR-004](docs/adr/ADR-004-mtls-implementation.md) | mTLS Implementation and On-Behalf-Of User Context Delegation | Accepted |
 | [ADR-005](docs/adr/ADR-005-integration-testing-strategy.md) | Integration Testing Strategy — Testcontainers + WireMock | Accepted |
+| [ADR-006](docs/adr/ADR-006-pre-commit-documentation-automation.md) | Pre-Commit Documentation Automation via Claude Code Slash Command | Accepted |
 
 ---
 
