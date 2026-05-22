@@ -15,7 +15,8 @@
 
 
 ## Build & Development Commands
-- **Build Project:** `./gradlew build`
+- **Build Project:** `./gradlew build` (requires `ANTHROPIC_API_KEY` env var for zt-agents)
+- **Build (skip zt-agents):** `./gradlew build -x :zt-agents:compileKotlin` (no API key needed)
 - **Run Unit Tests:** `./gradlew test`
 - **Run Integration Tests:** `./gradlew integrationTest` (requires Docker; starts Postgres + Keycloak via Testcontainers)
 - **Run All Tests:** `./gradlew test integrationTest`
@@ -41,6 +42,7 @@
 - `./auth-library`: Shared security logic — `SecurityConfig`, `ZteAuditLogger`, `ReloadableSslContextFactory`, `UserContextTokenService`.
 - `./service-a`: First protected downstream service (port 8081 HTTPS/mTLS, 9081 management).
 - `./service-b`: Second protected downstream service — validates OBO token (port 8082 HTTPS/mTLS, 9082 management).
+- `./zt-agents`: AI security copilot (Kotlin Spring Boot WebFlux, port 8083) — Policy Auditor Agent (Anthropic Claude).
 - `./certs`: Dev certificate scripts (`generate-certs.sh`) and generated PKCS12 files (gitignored).
 - `./prompts-hist`: Log of all Gemini-generated instructions.
 - `./docs/adr`: Architectural Decision Records.
@@ -102,9 +104,20 @@
 - [x] 7/7 scenarios green
 - ADR: ADR-005-integration-testing-strategy.md
 
+### Stage 7 — AI Security Copilot (`zt-agents`) `COMPLETE` (this commit)
+- [x] `zt-agents` — Kotlin Spring Boot WebFlux module (port 8083)
+- [x] `AnthropicClient` — WebClient wrapper: model `claude-sonnet-4-6`, 120s timeout, `x-api-key` / `anthropic-version` headers
+- [x] `GatewayClient` — fetches `GET /api/v1/internal/policies` from gateway
+- [x] `PolicyAuditorService` — orchestrates: fetch → format → LLM → Markdown report
+- [x] `PolicyAuditorController` — `POST /api/v1/agents/auditor/run` returns `{"report": "..."}`
+- [x] `gateway-service/InternalPolicyController` — `GET /api/v1/internal/policies` (live DB, bypasses cache)
+- [x] `gateway-service/InternalSecurityConfig` — `@Order(-100)` permitAll for `/api/v1/internal/**`
+- [x] `ANTHROPIC_API_KEY` env var; model/timeout/max-tokens configurable via properties
+- ADR: ADR-007-policy-auditor-agent.md
+
 ---
 
-## Stage 7+ Backlog (Not Yet Implemented)
+## Stage 8+ Backlog (Not Yet Implemented)
 
 - [ ] DB-based request audit log (`request_logs` table, V3 Flyway migration) — currently log-only via `RequestAuditFilter`
 - [ ] Distributed tracing: Micrometer Tracing + Zipkin in Docker Compose

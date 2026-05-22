@@ -81,7 +81,8 @@ zte-lightweight/
 │   ├── UserContextPropagationFilter  OBO token injection (HIGHEST_PRECEDENCE+200)
 │   ├── MtlsHttpClientConfig         Netty HttpClient with client.p12
 │   ├── PolicyService                 R2DBC policy cache (Mono.cache, 5-min TTL)
-│   └── GatewayRouteConfig            Routes: /api/v1/service-a/**, /api/v1/service-b/**
+│   ├── GatewayRouteConfig            Routes: /api/v1/service-a/**, /api/v1/service-b/**
+│   └── InternalPolicyController      GET /api/v1/internal/policies (agent data provider)
 │
 ├── service-a/             Protected downstream — port 8081 (HTTPS/mTLS), 9081 (mgmt)
 │   ├── HelloController    Calls service-b, returns combined response
@@ -89,6 +90,11 @@ zte-lightweight/
 │
 ├── service-b/             Deep downstream — port 8082 (HTTPS/mTLS), 9082 (mgmt)
 │   └── UserContextController         Validates OBO token, returns user context
+│
+├── zt-agents/             AI security copilot — port 8083 (Kotlin Spring Boot WebFlux)
+│   ├── PolicyAuditorService          Fetches policies → prompts Claude → returns Markdown
+│   ├── AnthropicClient               WebClient wrapper for Anthropic Messages API
+│   └── GatewayClient                 Fetches /api/v1/internal/policies from gateway
 │
 ├── certs/
 │   └── generate-certs.sh  Generates ZTE-CA, client.p12, service-a.p12, service-b.p12
@@ -114,6 +120,48 @@ zte-lightweight/
 | [ADR-004](docs/adr/ADR-004-mtls-implementation.md) | mTLS Implementation and On-Behalf-Of User Context Delegation | Accepted |
 | [ADR-005](docs/adr/ADR-005-integration-testing-strategy.md) | Integration Testing Strategy — Testcontainers + WireMock | Accepted |
 | [ADR-006](docs/adr/ADR-006-pre-commit-documentation-automation.md) | Pre-Commit Documentation Automation via Claude Code Slash Command | Accepted |
+| [ADR-007](docs/adr/ADR-007-policy-auditor-agent.md) | Policy Auditor Agent — Internal Endpoint + WebClient Anthropic Integration | Accepted |
+
+---
+
+## AI Security Copilot — `zt-agents`
+
+The `zt-agents` module adds an AI-native security copilot to the ZTE stack.
+
+### Agent 1: Policy Auditor
+
+Fetches all access policies from the gateway and sends them to Claude for a zero-trust
+compliance analysis. Returns a structured Markdown security report.
+
+**Endpoint:** `POST /api/v1/agents/auditor/run` (port 8083)
+
+**Prerequisites:** Set `ANTHROPIC_API_KEY` before starting `zt-agents`.
+
+```bash
+# 1. Export your Anthropic API key
+export ANTHROPIC_API_KEY=sk-ant-...
+
+# 2. Start the gateway (must be running — zt-agents fetches policies from it)
+./gradlew :gateway-service:bootRun
+
+# 3. Start zt-agents
+./gradlew :zt-agents:bootRun
+
+# 4. Run the policy audit (expect 10–60 s while Claude analyses the policies)
+curl -s --max-time 150 -X POST http://localhost:8083/api/v1/agents/auditor/run | python3 -m json.tool
+```
+
+**Expected response shape:**
+```json
+{
+    "report": "## Executive Summary\n...\n## Risk Findings\n..."
+}
+```
+
+**Security notes:**
+- The gateway's internal endpoint (`GET /api/v1/internal/policies`) is network-restricted
+  (Docker bridge) and requires no JWT for MVP. See ADR-007 for the production upgrade path.
+- Never commit `ANTHROPIC_API_KEY`. Use `.env` files (gitignored) or Vault in production.
 
 ---
 
@@ -167,3 +215,4 @@ curl -s -H "Authorization: Bearer $TOKEN" http://localhost:8080/api/v1/service-a
 | 4 | mTLS (ReloadableSslContextFactory), OBO delegation, service-b, ZteAuditLogger | `fce58a9` |
 | 5 | Unit tests for filters + auth-library; fix switchIfEmpty double-invocation bug | `22dbe1b` |
 | 6 | E2E integration test suite: Testcontainers (Postgres + Keycloak) + WireMock; 7/7 passing | `c28fe21` |
+| 7 | `zt-agents` AI copilot module (Kotlin): Policy Auditor Agent + gateway internal endpoint | this PR |

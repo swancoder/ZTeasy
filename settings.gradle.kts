@@ -14,5 +14,6 @@ include(
     "gateway-service",
     "auth-library",
     "service-a",
-    "service-b"
+    "service-b",
+    "zt-agents"
 )
