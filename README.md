@@ -93,6 +93,12 @@ zte-lightweight/
 ├── certs/
 │   └── generate-certs.sh  Generates ZTE-CA, client.p12, service-a.p12, service-b.p12
 │
+├── scripts/
+│   └── install-hooks.sh   Installs .githooks/pre-commit into local .git/hooks/
+│
+├── .claude/commands/
+│   └── pre-commit-docs.md /pre-commit-docs slash command — docs guardian pre-commit check
+│
 └── docs/adr/              Architectural Decision Records
 ```
 

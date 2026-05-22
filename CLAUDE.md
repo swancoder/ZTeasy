@@ -33,6 +33,7 @@
 
 ## Custom Skills & Tools
 - `project-health-check`: Custom skill to verify Docker health and Gradle build status.
+- `pre-commit-docs`: Slash command (`/pre-commit-docs`) — reads the staged diff and updates README.md, CLAUDE.md, docs/adr/, and prompts-hist/ before each commit. Definition: `.claude/commands/pre-commit-docs.md`.
 - `generate-adr`: (Planned) Helper to scaffold a new ADR file with required CoT/Critique sections.
 
 ## Key Directories

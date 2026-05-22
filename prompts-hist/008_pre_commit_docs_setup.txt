@@ -1,0 +1,15 @@
+DATE: 2026-05-22
+TASK: Pre-commit documentation automation
+
+WHAT WAS BUILT:
+- .claude/commands/pre-commit-docs.md — Claude Code slash command (/pre-commit-docs)
+  that reads git diff --staged and updates README.md, CLAUDE.md, docs/adr/, prompts-hist/
+  before each commit.
+- scripts/install-hooks.sh — helper to copy .githooks/pre-commit into .git/hooks/.
+
+KEY DESIGN CHOICES:
+- Slash command as a Markdown prompt file (Claude Code native pattern).
+- Explicit checklist in the command: understand diff → check each doc location → edit → report.
+- install-hooks.sh anticipates a future .githooks/pre-commit entry point (not yet created).
+
+ADR: ADR-006-pre-commit-documentation-automation.md
