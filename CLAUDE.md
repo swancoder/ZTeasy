@@ -23,7 +23,7 @@
 - **Generate Dev Certs:** `chmod +x certs/generate-certs.sh && ./certs/generate-certs.sh`
 - **Infrastructure:** `docker compose up -d` / `docker compose down`
 - **Clean DB:** `./gradlew flywayClean` (use with caution)
-- **Check Ports:** `netstat -an | grep -E "8080|8081|8082|5432|8180"` (Gateway, Service-A, Service-B, DB, Keycloak)
+- **Check Ports:** `netstat -an | grep -E "8080|8081|8082|8083|5432|8180"` (Gateway, Service-A, Service-B, ZT-Agents, DB, Keycloak)
 
 ## Code Style & Standards
 - **Language:** Java 21 (Modern features only: Records, Pattern Matching).
@@ -104,7 +104,7 @@
 - [x] 7/7 scenarios green
 - ADR: ADR-005-integration-testing-strategy.md
 
-### Stage 7 — AI Security Copilot (`zt-agents`) `COMPLETE` (this commit)
+### Stage 7 — AI Security Copilot (`zt-agents`) `COMPLETE` (commit `c85e77f`)
 - [x] `zt-agents` — Kotlin Spring Boot WebFlux module (port 8083)
 - [x] `AnthropicClient` — WebClient wrapper: model `claude-sonnet-4-6`, 120s timeout, `x-api-key` / `anthropic-version` headers
 - [x] `GatewayClient` — fetches `GET /api/v1/internal/policies` from gateway
