@@ -1,0 +1,37 @@
+Task: Design and implement the core proxying and interception layer for ZTeasy — a
+Zero Trust Data Gateway for AI agents.
+
+Context & Requirements:
+1. Transport: The gateway proxies Model Context Protocol (MCP) traffic over HTTP/SSE.
+   Clients connect via GET /sse to receive events and send JSON-RPC commands via
+   POST /message.
+2. Identity: Integrate Keycloak. Extract the agent_id from the OAuth2 Bearer token
+   on incoming requests.
+3. Synchronous Policy Interception: Intercept the POST /message request. Parse the
+   JSON-RPC payload to extract the tool name and arguments. Check this against a
+   dummy policy engine (synchronous call).
+4. Graceful Deny via SSE: If the policy engine denies the request, DO NOT forward
+   the POST request to the backend. Instead, construct a successful JSON-RPC
+   response (matching the request's message ID) with the payload indicating denial
+   (e.g., "Action denied by ZTeasy Security Policy") and inject this response
+   directly into the client's active SSE stream.
+5. Async Audit (TSDB prep): Implement an audit stub AuditService. It must
+   asynchronously log every event (Process ID, Agent ID, Tool Name, Status,
+   Timestamp) without blocking the proxy thread, ready to be connected to a
+   Time-Series Database (e.g., InfluxDB).
+6. Response Masking Stub: Provide an interception stub in the SSE response stream
+   (returning from the backend to the client) where PII data masking logic will be
+   implemented later.
+
+Deliverables:
+- Project structure overview.
+- The core routing and interception configuration (e.g., Spring WebFlux Router /
+  Ktor Routes).
+- The Session Manager (to map POST requests to active SSE sessions for injecting
+  denial messages).
+- The Stubs: PolicyEngine, AuditService, and DataMaskingFilter.
+
+Ensure the code is clean, non-blocking (reactive), and strictly written in English
+(both code and comments). Do not generate basic project setup boilerplate (like
+pom.xml/build.gradle) unless strictly necessary for demonstrating specific
+dependencies. Focus on the core reactive proxy logic.

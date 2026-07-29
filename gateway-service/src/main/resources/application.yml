@@ -76,6 +76,10 @@ service-a:
 service-b:
   uri: ${SERVICE_B_URI:https://localhost:8082}
 
+# ── MCP proxy: downstream MCP server fronted by GET /sse + POST /message ──
+mcp-backend:
+  uri: ${MCP_BACKEND_URI:http://localhost:9090}
+
 # ── mTLS outbound (gateway → service-a / service-b) ──
 zte:
   mtls:

@@ -82,7 +82,14 @@ zte-lightweight/
 │   ├── MtlsHttpClientConfig         Netty HttpClient with client.p12
 │   ├── PolicyService                 R2DBC policy cache (Mono.cache, 5-min TTL)
 │   ├── GatewayRouteConfig            Routes: /api/v1/service-a/**, /api/v1/service-b/**
-│   └── InternalPolicyController      GET /api/v1/internal/policies (agent data provider)
+│   ├── InternalPolicyController      GET /api/v1/internal/policies (agent data provider)
+│   └── mcp/                          MCP proxy — GET /sse, POST /message (see ADR-009)
+│       ├── McpProxyHandler           Policy check, deny-via-SSE, backend forward
+│       ├── McpSessionManager         sessionId → SSE sink (cross-request injection)
+│       ├── McpBackendClient          WebClient forward to mcp-backend.uri
+│       ├── policy/DummyMcpPolicyEngine   In-memory deny-list (synchronous check)
+│       ├── audit/LoggingMcpAuditService  Non-blocking audit sink (TSDB-ready stub)
+│       └── mask/NoOpDataMaskingFilter    PII masking stub
 │
 ├── service-a/             Protected downstream — port 8081 (HTTPS/mTLS), 9081 (mgmt)
 │   ├── HelloController    Calls service-b, returns combined response
@@ -122,6 +129,34 @@ zte-lightweight/
 | [ADR-006](docs/adr/ADR-006-pre-commit-documentation-automation.md) | Pre-Commit Documentation Automation via Claude Code Slash Command | Accepted |
 | [ADR-007](docs/adr/ADR-007-policy-auditor-agent.md) | Policy Auditor Agent — Internal Endpoint + WebClient Anthropic Integration | Accepted |
 | [ADR-008](docs/adr/ADR-008-dotenv-configuration-management.md) | `.env`-Based Configuration Management for `zt-agents` | Accepted |
+| [ADR-009](docs/adr/ADR-009-mcp-proxy-interception-layer.md) | MCP Proxy & Interception Layer — WebFlux Router + Session Manager | Accepted |
+
+---
+
+## MCP Proxy
+
+`gateway-service` fronts Model Context Protocol (MCP) traffic over HTTP+SSE, intercepting
+every tool call for a policy decision before it reaches the backend MCP server. See
+[ADR-009](docs/adr/ADR-009-mcp-proxy-interception-layer.md) for why this is a plain WebFlux
+router rather than a Gateway route.
+
+**Endpoints:** `GET /sse` (open a session), `POST /message?sessionId=<id>` (send a JSON-RPC
+`tools/call`). Both require a JWT, same as every other route.
+
+**Flow:**
+1. Client opens `GET /sse`. The gateway generates a `sessionId` and immediately pushes an
+   `endpoint` event: `data: /message?sessionId=<id>` (standard MCP HTTP+SSE handshake).
+2. Client sends a JSON-RPC call to `POST /message?sessionId=<id>`. `agent_id` comes from the
+   JWT `sub` claim; the tool name and arguments come from `params.name` / `params.arguments`.
+3. `DummyMcpPolicyEngine` evaluates synchronously (in-memory deny-list — see ADR-009). The
+   POST always returns `202 Accepted`; the actual result arrives over the SSE stream:
+   - **Denied:** a JSON-RPC success envelope with `result.isError = true` is injected into
+     the session directly — the backend is never called.
+   - **Allowed:** the call is forwarded to `mcp-backend.uri` (configurable — set
+     `MCP_BACKEND_URI` to point at any MCP server, e.g. this repo's `hubspot-mcp` sibling
+     project), passed through the `DataMaskingFilter` stub, then injected into the session.
+4. Every decision is recorded asynchronously via `LoggingMcpAuditService` (non-blocking sink,
+   logs today, TSDB-ready).
 
 ---
 
@@ -218,3 +253,4 @@ curl -s -H "Authorization: Bearer $TOKEN" http://localhost:8080/api/v1/service-a
 | 5 | Unit tests for filters + auth-library; fix switchIfEmpty double-invocation bug | `22dbe1b` |
 | 6 | E2E integration test suite: Testcontainers (Postgres + Keycloak) + WireMock; 7/7 passing | `c28fe21` |
 | 7 | `zt-agents` AI copilot module (Kotlin): Policy Auditor Agent + gateway internal endpoint | `c85e77f` |
+| 8 | MCP proxy: GET /sse + POST /message, session manager, policy/audit/masking stubs | _pending commit_ |

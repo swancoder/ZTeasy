@@ -3,7 +3,6 @@
 ## Project Overview
 **Product:** Lightweight Zero Trust Environment (ZTE) MVP.
 **Goal:** Demonstrate AI-driven development (Gemini as Architect, Claude as Engineer).
-**Tech Stack:** Java 21, Gradle (Kotlin DSL), Spring Boot 3.4+, PostgreSQL, Keycloak, Docker.
 
 ## Execution Protocols (Mandatory)
 1. **Chain of Thought (CoT):** Always output a `### THOUGHTS` block before any implementation.
@@ -28,7 +27,7 @@
 ## Code Style & Standards
 - **Language:** Java 21 (Modern features only: Records, Pattern Matching).
 - **Architecture:** API Gateway Pattern.
-- **Naming:** CamelCase for classes/methods, kebab-case for URLs and configs.
+- **Naming:** kebab-case for URLs and configs.
 - **Security:** Zero Trust principles � no implicit trust, mTLS for all inter-service traffic.
 - **Auth:** OIDC/OAuth2 via Keycloak.
 
@@ -116,9 +115,20 @@
 - [x] `spring-dotenv` — loads `.env` (from `.env.example` template) into Spring `Environment`, env vars still take precedence
 - ADR: ADR-007-policy-auditor-agent.md, ADR-008-dotenv-configuration-management.md
 
+### Stage 8 — MCP Proxy & Interception Layer `COMPLETE`
+- [x] `gateway-service/mcp` — WebFlux `RouterFunction`s (not Gateway routes — see ADR-009): `GET /sse`, `POST /message`
+- [x] `McpSessionManager` — `sessionId → Sinks.Many<ServerSentEvent<String>>`, bridges POST result injection into the open SSE connection
+- [x] `McpProxyHandler` — MCP HTTP+SSE handshake (`endpoint` event), JWT `sub` → `agent_id`, parses `tools/call` params
+- [x] `DummyMcpPolicyEngine` — synchronous in-memory deny-list (`export_all_data`, `delete_all`, `drop_table`, and `delete`/`drop` substrings)
+- [x] Deny path: `JsonRpcResponse.denied(...)` — successful JSON-RPC envelope with `result.isError=true`, injected via SSE; backend never called
+- [x] Allow path: `McpBackendClient` forwards to `mcp-backend.uri` (`MCP_BACKEND_URI`), result passed through `DataMaskingFilter` stub (`NoOpDataMaskingFilter`)
+- [x] `LoggingMcpAuditService` — non-blocking `Sinks.Many` + `Schedulers.boundedElastic()` subscriber, TSDB-ready stub
+- [x] Unit tests: `McpSessionManagerTest`, `DummyMcpPolicyEngineTest`
+- ADR: ADR-009-mcp-proxy-interception-layer.md
+
 ---
 
-## Stage 8+ Backlog (Not Yet Implemented)
+## Stage 9+ Backlog (Not Yet Implemented)
 
 - [ ] DB-based request audit log (`request_logs` table, V3 Flyway migration) — currently log-only via `RequestAuditFilter`
 - [ ] Distributed tracing: Micrometer Tracing + Zipkin in Docker Compose
