@@ -121,6 +121,7 @@ zte-lightweight/
 | [ADR-005](docs/adr/ADR-005-integration-testing-strategy.md) | Integration Testing Strategy — Testcontainers + WireMock | Accepted |
 | [ADR-006](docs/adr/ADR-006-pre-commit-documentation-automation.md) | Pre-Commit Documentation Automation via Claude Code Slash Command | Accepted |
 | [ADR-007](docs/adr/ADR-007-policy-auditor-agent.md) | Policy Auditor Agent — Internal Endpoint + WebClient Anthropic Integration | Accepted |
+| [ADR-008](docs/adr/ADR-008-dotenv-configuration-management.md) | `.env`-Based Configuration Management for `zt-agents` | Accepted |
 
 ---
 
@@ -135,11 +136,12 @@ compliance analysis. Returns a structured Markdown security report.
 
 **Endpoint:** `POST /api/v1/agents/auditor/run` (port 8083)
 
-**Prerequisites:** Set `ANTHROPIC_API_KEY` before starting `zt-agents`.
+**Prerequisites:** Set `ANTHROPIC_API_KEY` before starting `zt-agents` (see [ADR-008](docs/adr/ADR-008-dotenv-configuration-management.md)).
 
 ```bash
-# 1. Export your Anthropic API key
-export ANTHROPIC_API_KEY=sk-ant-...
+# 1. Copy the .env template and fill in your Anthropic API key
+cp .env.example .env
+# edit .env and set ANTHROPIC_API_KEY=sk-ant-...
 
 # 2. Start the gateway (must be running — zt-agents fetches policies from it)
 ./gradlew :gateway-service:bootRun
