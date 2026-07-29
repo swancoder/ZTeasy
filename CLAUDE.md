@@ -15,7 +15,7 @@
 
 
 ## Build & Development Commands
-- **Build Project:** `./gradlew build` (requires `ANTHROPIC_API_KEY` env var for zt-agents)
+- **Build Project:** `./gradlew build` (requires `ANTHROPIC_API_KEY` env var for zt-agents, settable via `.env` — see ADR-008)
 - **Build (skip zt-agents):** `./gradlew build -x :zt-agents:compileKotlin` (no API key needed)
 - **Run Unit Tests:** `./gradlew test`
 - **Run Integration Tests:** `./gradlew integrationTest` (requires Docker; starts Postgres + Keycloak via Testcontainers)
@@ -113,7 +113,8 @@
 - [x] `gateway-service/InternalPolicyController` — `GET /api/v1/internal/policies` (live DB, bypasses cache)
 - [x] `gateway-service/InternalSecurityConfig` — `@Order(-100)` permitAll for `/api/v1/internal/**`
 - [x] `ANTHROPIC_API_KEY` env var; model/timeout/max-tokens configurable via properties
-- ADR: ADR-007-policy-auditor-agent.md
+- [x] `spring-dotenv` — loads `.env` (from `.env.example` template) into Spring `Environment`, env vars still take precedence
+- ADR: ADR-007-policy-auditor-agent.md, ADR-008-dotenv-configuration-management.md
 
 ---
 
