@@ -33,8 +33,9 @@ import static com.github.tomakehurst.wiremock.core.WireMockConfiguration.wireMoc
  *       the {@code access_policies} table (ADMIN → /api/v1/service-a/**).</li>
  *   <li><b>Keycloak 24.0.4</b> — {@code zte-realm} imported from
  *       {@code realm-export.json}; {@code zte-admin} password set via Admin Client.</li>
- *   <li><b>WireMock</b> — replaces service-a and service-b; stubs reset before
- *       each test via {@link #resetStubs()}.</li>
+ *   <li><b>WireMock</b> — replaces service-a, service-b, and the MCP backend
+ *       ({@code mcp-backend.uri}); stubs reset before each test via
+ *       {@link #resetStubs()}.</li>
  * </ul>
  */
 @SpringBootTest(
@@ -110,6 +111,9 @@ abstract class BaseZteIntegrationTest {
         // Downstream services → WireMock (HTTP, no mTLS needed in test)
         registry.add("service-a.uri", () -> "http://localhost:" + WIREMOCK.port());
         registry.add("service-b.uri", () -> "http://localhost:" + WIREMOCK.port());
+
+        // MCP backend (McpBackendClient) → WireMock as well; see McpProxyIT
+        registry.add("mcp-backend.uri", () -> "http://localhost:" + WIREMOCK.port());
     }
 
     // ── Dynamic port injection ────────────────────────────────────────────────

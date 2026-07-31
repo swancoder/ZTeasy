@@ -46,8 +46,9 @@ auditable — the opposite of a mesh's "hide it in the sidecar" approach. See
 | 9+ | Backlog (audit persistence, tracing, rate limiting, ABAC, MCP hardening…) | ⬜ Planned | — | see §9.2 |
 
 **Test status:** all unit tests green (`./gradlew test`); E2E integration suite
-green (`./gradlew integrationTest`, 7/7 scenarios — REST chain only). **The MCP
-proxy has unit tests but no integration test yet** — see §8.3 and §10.
+green (`./gradlew integrationTest`, 10/10 scenarios — 7 REST chain + 3 MCP
+proxy). `McpProxyIT` covers the full `GET /sse` → `POST /message` →
+SSE-injection round trip (deny path, allow path, unknown-session 400) — see §8.4.
 
 ---
 
@@ -302,11 +303,20 @@ interception; not a real authorization model. `agentId` is threaded through
 the whole call path already, so wiring in a real per-agent grant is additive,
 not a rewrite.
 
-### 8.4 Gaps (carried from ADR-009 + implementation-time critique)
+### 8.4 Testing
 
-- No integration test exercising the full `GET /sse` → `POST /message` → SSE
-  injection round trip (unit tests cover `McpSessionManager` and
-  `DummyMcpPolicyEngine` in isolation only).
+`McpProxyIT` (`gateway-service/src/it`) exercises the full round trip against
+the real running gateway (Testcontainers Postgres + Keycloak, WireMock
+standing in for the MCP backend, same pattern as `HappyPathIT`): opens
+`GET /sse`, extracts the `sessionId` from the `endpoint` handshake event, fires
+`POST /message`, and asserts the result lands on the still-open SSE stream —
+covering the deny path (backend never called), the allow path (forwarded to
+WireMock, result relayed), and an unknown-`sessionId` 400. `McpSessionManagerTest`
+and `DummyMcpPolicyEngineTest` (unit) continue to cover those two components in
+isolation.
+
+### 8.5 Gaps (carried from ADR-009 + implementation-time critique)
+
 - `McpBackendClient` assumes one JSON response per call; a backend that
   itself streams multiple events per tool call isn't relayed incrementally.
 - `McpSessionManager`'s session map is in-memory, single-instance — doesn't
@@ -342,10 +352,10 @@ Stages 1–8, plus the two undated additions (pre-commit doc automation,
       (covers TLS handshake rejection — current gap per ADR-005 §"mTLS
       Testing Gap").
 
-### 9.3 Backlog — MCP proxy hardening (from §8.4)
+### 9.3 Backlog — MCP proxy hardening (from §8.5)
 
-- [ ] Integration test: full `GET /sse` → `POST /message` → SSE-injection
-      round trip (highest-value next test for this component).
+- [x] Integration test: full `GET /sse` → `POST /message` → SSE-injection
+      round trip — `McpProxyIT` (see §8.4).
 - [ ] Per-agent authorization in `McpPolicyEngine` (replace the static
       deny-list; `agentId` is already threaded through, so this is additive).
 - [ ] Bounded buffer + overflow policy for `LoggingMcpAuditService`.
@@ -385,9 +395,9 @@ Stages 1–8, plus the two undated additions (pre-commit doc automation,
 | Medium | Server-side TLS cert rotation requires a restart (no hot-reload API) | ADR-004 | 1-year dev certs; production needs cert-manager + rolling restart |
 | Medium | 5-minute policy cache window — a revoked-role JWT still works until refresh | ADR-003 | Accepted for MVP; `/admin/policies/refresh` is backlog (§9.2) |
 | Medium | mTLS transport-layer enforcement untested in the integration suite (WireMock has no TLS) | ADR-005 | Full mTLS Testcontainers system test is backlog (§9.2) |
-| Medium | MCP session state in-memory, single-instance | ADR-009 / §8.4 | Documented; needs sticky routing or shared store before scaling out |
-| Low–Med | `DummyMcpPolicyEngine` denies by tool name only, not per-agent | ADR-009 / §8.4 | `agentId` already threaded through; backlog item §9.3 |
-| Low | `LoggingMcpAuditService` buffer is unbounded | §8.4 | Backlog item §9.3 |
+| Medium | MCP session state in-memory, single-instance | ADR-009 / §8.5 | Documented; needs sticky routing or shared store before scaling out |
+| Low–Med | `DummyMcpPolicyEngine` denies by tool name only, not per-agent | ADR-009 / §8.5 | `agentId` already threaded through; backlog item §9.3 |
+| Low | `LoggingMcpAuditService` buffer is unbounded | §8.5 | Backlog item §9.3 |
 | Low | All DB policies held in one in-memory `Mono` — fine at MVP scale (<100 rows) | ADR-003 | Revisit if the policy table grows large |
 
 ---

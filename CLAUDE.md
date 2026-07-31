@@ -125,6 +125,7 @@
 - [x] Allow path: `McpBackendClient` forwards to `mcp-backend.uri` (`MCP_BACKEND_URI`), result passed through `DataMaskingFilter` stub (`NoOpDataMaskingFilter`)
 - [x] `LoggingMcpAuditService` — non-blocking `Sinks.Many` + `Schedulers.boundedElastic()` subscriber, TSDB-ready stub
 - [x] Unit tests: `McpSessionManagerTest`, `DummyMcpPolicyEngineTest`
+- [x] `McpProxyIT` — full `GET /sse` → `POST /message` → SSE-injection round trip (deny path, allow path via WireMock, unknown-sessionId 400)
 - ADR: ADR-009-mcp-proxy-interception-layer.md
 
 ---

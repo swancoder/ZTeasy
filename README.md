@@ -162,6 +162,11 @@ router rather than a Gateway route.
 4. Every decision is recorded asynchronously via `LoggingMcpAuditService` (non-blocking sink,
    logs today, TSDB-ready).
 
+**Tested by:** `McpProxyIT` (`gateway-service/src/it`) — full `GET /sse` → `POST /message` →
+SSE-injection round trip against a real running gateway (Testcontainers + WireMock standing
+in for the MCP backend), covering the deny path, the allow path, and an unknown-`sessionId`
+400. Run with `./gradlew :gateway-service:integrationTest`.
+
 ---
 
 ## AI Security Copilot — `zt-agents`
