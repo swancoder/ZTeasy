@@ -43,7 +43,7 @@ auditable — the opposite of a mesh's "hide it in the sidecar" approach. See
 | 7 | AI Security Copilot (`zt-agents`, Policy Auditor) | ✅ Complete | `c85e77f` | [007](adr/ADR-007-policy-auditor-agent.md) |
 | — | `.env`-based config for `zt-agents` | ✅ Complete | `d721915` | [008](adr/ADR-008-dotenv-configuration-management.md) |
 | 8 | MCP Proxy & Interception Layer | ✅ Complete | `cb5da35` | [009](adr/ADR-009-mcp-proxy-interception-layer.md) |
-| 9 | Agent OAuth2 Client Credentials Auth (dead-end stub) | ✅ Complete | _pending commit_ | [010](adr/ADR-010-agent-oauth2-client-credentials.md) |
+| 9 | Agent OAuth2 Client Credentials Auth (dead-end stub) | ✅ Complete | `e79994e` | [010](adr/ADR-010-agent-oauth2-client-credentials.md) |
 | 10+ | Backlog (audit persistence, tracing, rate limiting, ABAC, MCP re-enable…) | ⬜ Planned | — | see §9.2 |
 
 **Test status:** all unit tests green (`./gradlew test`, including the new
