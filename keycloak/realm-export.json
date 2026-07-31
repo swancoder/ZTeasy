@@ -93,6 +93,38 @@
           }
         }
       ]
+    },
+    {
+      "clientId": "agent-a",
+      "name": "MCP Agent A",
+      "description": "Confidential OIDC client for Agent A (hubspot-mcp). Client Credentials grant only — no interactive user flow.",
+      "enabled": true,
+      "protocol": "openid-connect",
+      "clientAuthenticatorType": "client-secret",
+      "secret": "agent-a-secret-dev-only",
+      "publicClient": false,
+      "bearerOnly": false,
+      "standardFlowEnabled": false,
+      "implicitFlowEnabled": false,
+      "directAccessGrantsEnabled": false,
+      "serviceAccountsEnabled": true,
+      "authorizationServicesEnabled": false
+    },
+    {
+      "clientId": "agent-b",
+      "name": "MCP Agent B",
+      "description": "Confidential OIDC client for Agent B (hubspot-mcp). Client Credentials grant only — no interactive user flow.",
+      "enabled": true,
+      "protocol": "openid-connect",
+      "clientAuthenticatorType": "client-secret",
+      "secret": "agent-b-secret-dev-only",
+      "publicClient": false,
+      "bearerOnly": false,
+      "standardFlowEnabled": false,
+      "implicitFlowEnabled": false,
+      "directAccessGrantsEnabled": false,
+      "serviceAccountsEnabled": true,
+      "authorizationServicesEnabled": false
     }
   ],
 

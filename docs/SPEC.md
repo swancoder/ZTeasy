@@ -2,12 +2,12 @@
 
 **Product:** Lightweight Zero Trust Environment (ZTE) MVP — a Zero Trust Data Gateway,
 now extended toward fronting AI agent (MCP) traffic, not just plain REST.
-**Status as of:** 2026-07-30 · Stage 8 of 8 implemented stages complete.
+**Status as of:** 2026-07-31 · Stage 9 of 9 implemented stages complete.
 
 This document is the single technical reference for the system as built. It
 consolidates what's spread across `README.md` (quick start, chain-of-trust
 summary), `CLAUDE.md` (terse per-stage changelog for AI-assisted sessions), and
-nine ADRs (individual decisions) into one place: what exists, how it fits
+ten ADRs (individual decisions) into one place: what exists, how it fits
 together, what's configurable, what's tested, and what's left. It does not
 replace the ADRs — every decision below links to the ADR that argues it.
 
@@ -43,12 +43,15 @@ auditable — the opposite of a mesh's "hide it in the sidecar" approach. See
 | 7 | AI Security Copilot (`zt-agents`, Policy Auditor) | ✅ Complete | `c85e77f` | [007](adr/ADR-007-policy-auditor-agent.md) |
 | — | `.env`-based config for `zt-agents` | ✅ Complete | `d721915` | [008](adr/ADR-008-dotenv-configuration-management.md) |
 | 8 | MCP Proxy & Interception Layer | ✅ Complete | `cb5da35` | [009](adr/ADR-009-mcp-proxy-interception-layer.md) |
-| 9+ | Backlog (audit persistence, tracing, rate limiting, ABAC, MCP hardening…) | ⬜ Planned | — | see §9.2 |
+| 9 | Agent OAuth2 Client Credentials Auth (dead-end stub) | ✅ Complete | _pending commit_ | [010](adr/ADR-010-agent-oauth2-client-credentials.md) |
+| 10+ | Backlog (audit persistence, tracing, rate limiting, ABAC, MCP re-enable…) | ⬜ Planned | — | see §9.2 |
 
-**Test status:** all unit tests green (`./gradlew test`); E2E integration suite
-green (`./gradlew integrationTest`, 10/10 scenarios — 7 REST chain + 3 MCP
-proxy). `McpProxyIT` covers the full `GET /sse` → `POST /message` →
-SSE-injection round trip (deny path, allow path, unknown-session 400) — see §8.4.
+**Test status:** all unit tests green (`./gradlew test`, including the new
+`McpProxySecurityWebFluxTest` slice); E2E integration suite green
+(`./gradlew integrationTest`, 11/11 scenarios — 7 REST chain + 4 MCP proxy).
+`McpProxyIT` covers the full `GET /sse` → `POST /message` → SSE-injection
+round trip using Agent A/B's real client-credentials tokens (stub response,
+unknown-session 400, no-token 401) — see §8.4.
 
 ---
 
@@ -67,12 +70,13 @@ SSE-injection round trip (deny path, allow path, unknown-session 400) — see §
                               │   ② UserContextPropagationFilter (OBO)     │
                               │   ③ GatewayRouteConfig → service-a/b       │
                               │                                             │
-                              │  MCP path (ADR-009):                       │
+                              │  MCP path (ADR-009, ADR-010):               │
                               │   GET /sse ──► McpSessionManager           │
                               │   POST /message ──► McpProxyHandler        │
-                              │     → DummyMcpPolicyEngine (sync check)    │
-                              │     → deny: inject via SSE, OR             │
-                              │     → allow: McpBackendClient → backend    │
+                              │     → Stage 9 dead-end stub: logs clientId │
+                              │       (JWT azp), injects stub via SSE.     │
+                              │       DummyMcpPolicyEngine/McpBackendClient│
+                              │       wired but not called (ADR-010).      │
                               │                                             │
                               │  Agent data path (ADR-007):                │
                               │   GET /api/v1/internal/policies            │
@@ -130,10 +134,13 @@ Stage 4):
 | 3 | Who is the internal caller? | mTLS client cert (ZTE-CA) | `MtlsHttpClientConfig` + service HTTPS listeners |
 | 4 | On whose behalf? | Signed OBO token (`X-ZTE-User-Context`, HMAC-SHA256, 30s TTL) | `UserContextPropagationFilter` → `UserContextTokenService` |
 
-The MCP proxy (§8) adds a fifth, narrower dimension for AI agents specifically:
-**which tool may this agent invoke, right now** — enforced synchronously,
-per-call, independent of the four checks above (which still gate the JWT
-itself).
+The MCP proxy (§8) adds a fifth question for AI agents specifically: **is this
+caller who it claims to be?** — Agent A/B authenticate via OAuth2 Client
+Credentials (ADR-010), and `McpProxyHandler` extracts and logs the client
+identity (`azp`). As of Stage 9 this identity is not yet *authorized*
+against — **which tool may this agent invoke, right now** — is a real
+question `DummyMcpPolicyEngine` can answer, but it is currently wired and
+unused (dead-end stub, see §8.2); re-enabling it is backlog item §9.3.
 
 For the full request-by-request trust narrative (User → Gateway → Service A →
 Service B) see `README.md` §"Chain of Trust" — reproduced there with a

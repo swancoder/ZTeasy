@@ -145,6 +145,23 @@ abstract class BaseZteIntegrationTest {
         return fetchToken(USER_USERNAME);
     }
 
+    /**
+     * Returns a JWT access token for an MCP agent client ({@code agent-a} /
+     * {@code agent-b}) via the Client Credentials grant — see ADR-010. Unlike
+     * {@link #getAdminToken()}/{@link #getUserToken()}, there is no username —
+     * the token identifies the client itself (via the {@code azp} claim).
+     */
+    protected String getAgentToken(String clientId, String clientSecret) {
+        return RestAssured.given()
+                .contentType(ContentType.URLENC)
+                .formParam("grant_type",    "client_credentials")
+                .formParam("client_id",     clientId)
+                .formParam("client_secret", clientSecret)
+                .post(KEYCLOAK.getAuthServerUrl() + "/realms/zte-realm/protocol/openid-connect/token")
+                .then().statusCode(200)
+                .extract().path("access_token");
+    }
+
     private String fetchToken(String username) {
         return RestAssured.given()
                 .contentType(ContentType.URLENC)

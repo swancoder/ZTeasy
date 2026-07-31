@@ -30,4 +30,19 @@ public record JsonRpcResponse(String jsonrpc, Object id, Map<String, Object> res
     public static JsonRpcResponse backendError(Object id, String message) {
         return new JsonRpcResponse("2.0", id, null, new JsonRpcError(-32000, message));
     }
+
+    /**
+     * Dead-end stub response (see ADR-010): confirms the caller authenticated
+     * successfully and names which client the gateway saw, without evaluating
+     * policy or forwarding to any backend MCP server.
+     */
+    public static JsonRpcResponse stubbed(Object id, String clientId) {
+        return success(id, Map.of(
+                "content", List.of(Map.of(
+                        "type", "text",
+                        "text", "ZTeasy gateway: authenticated as '" + clientId
+                                + "'. This is a stub response — no backend MCP server was called.")),
+                "isError", false
+        ));
+    }
 }

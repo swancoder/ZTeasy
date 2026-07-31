@@ -134,6 +134,7 @@ zte-lightweight/
 | [ADR-007](docs/adr/ADR-007-policy-auditor-agent.md) | Policy Auditor Agent — Internal Endpoint + WebClient Anthropic Integration | Accepted |
 | [ADR-008](docs/adr/ADR-008-dotenv-configuration-management.md) | `.env`-Based Configuration Management for `zt-agents` | Accepted |
 | [ADR-009](docs/adr/ADR-009-mcp-proxy-interception-layer.md) | MCP Proxy & Interception Layer — WebFlux Router + Session Manager | Accepted |
+| [ADR-010](docs/adr/ADR-010-agent-oauth2-client-credentials.md) | Agent Auth via OAuth2 Client Credentials, and a Deliberate Dead-End Stub | Accepted |
 
 ---
 
@@ -150,22 +151,47 @@ router rather than a Gateway route.
 **Flow:**
 1. Client opens `GET /sse`. The gateway generates a `sessionId` and immediately pushes an
    `endpoint` event: `data: /message?sessionId=<id>` (standard MCP HTTP+SSE handshake).
-2. Client sends a JSON-RPC call to `POST /message?sessionId=<id>`. `agent_id` comes from the
-   JWT `sub` claim; the tool name and arguments come from `params.name` / `params.arguments`.
-3. `DummyMcpPolicyEngine` evaluates synchronously (in-memory deny-list — see ADR-009). The
-   POST always returns `202 Accepted`; the actual result arrives over the SSE stream:
-   - **Denied:** a JSON-RPC success envelope with `result.isError = true` is injected into
-     the session directly — the backend is never called.
-   - **Allowed:** the call is forwarded to `mcp-backend.uri` (configurable — set
-     `MCP_BACKEND_URI` to point at any MCP server, e.g. this repo's `hubspot-mcp` sibling
-     project), passed through the `DataMaskingFilter` stub, then injected into the session.
-4. Every decision is recorded asynchronously via `LoggingMcpAuditService` (non-blocking sink,
-   logs today, TSDB-ready).
+2. Client sends a JSON-RPC call to `POST /message?sessionId=<id>`. `clientId` comes from the
+   JWT `azp` claim (falling back to `sub`); the tool name and arguments come from
+   `params.name` / `params.arguments`.
+3. **As of Stage 9 (ADR-010), the gateway is a deliberate dead-end**: it does not call
+   `DummyMcpPolicyEngine` or forward to any backend. It logs the authenticated `clientId` and
+   injects a stub JSON-RPC success response naming that client into the SSE stream. The POST
+   still always returns `202 Accepted` — the transport contract from Stage 8 is unchanged,
+   only what gets computed. See ADR-010 for what re-enabling policy + forwarding looks like.
+4. Every call is recorded asynchronously via `LoggingMcpAuditService` (non-blocking sink,
+   logs today, TSDB-ready) with status `"STUBBED"`.
 
 **Tested by:** `McpProxyIT` (`gateway-service/src/it`) — full `GET /sse` → `POST /message` →
-SSE-injection round trip against a real running gateway (Testcontainers + WireMock standing
-in for the MCP backend), covering the deny path, the allow path, and an unknown-`sessionId`
-400. Run with `./gradlew :gateway-service:integrationTest`.
+SSE-injection round trip against a real running gateway (Testcontainers + WireMock), using
+Agent A/Agent B's actual client-credentials tokens; asserts the backend is never called, plus
+401-without-token and unknown-`sessionId` 400. Also `McpProxySecurityWebFluxTest` (`src/test`)
+— a fast `@WebFluxTest` slice covering the same auth boundary without Docker. Run with
+`./gradlew test integrationTest`.
+
+---
+
+## Agent Authentication (Stage 9)
+
+Agent A and Agent B (the `hubspot-mcp` sibling project) authenticate to this gateway via
+OAuth2 **Client Credentials** — a service authenticating as itself, not on behalf of a user.
+See [ADR-010](docs/adr/ADR-010-agent-oauth2-client-credentials.md).
+
+Two confidential clients live in the existing `zte-realm` (`keycloak/realm-export.json`):
+`agent-a` and `agent-b`, both Client-Credentials-only (no interactive login). Fetch a token
+and call the MCP proxy:
+
+```bash
+TOKEN=$(curl -s -X POST http://localhost:8180/realms/zte-realm/protocol/openid-connect/token \
+  -d "grant_type=client_credentials&client_id=agent-a&client_secret=agent-a-secret-dev-only" \
+  | python3 -c "import sys,json; print(json.load(sys.stdin)['access_token'])")
+
+curl -s -N -H "Authorization: Bearer $TOKEN" http://localhost:8080/sse
+# → data: /message?sessionId=<id>  (open a second terminal to POST while this stays open)
+```
+
+Or run the full round trip via `hubspot-mcp/run_agents.sh` (see that repo's README) — it
+does the token fetch, `GET /sse` handshake, and `POST /message` for both agents automatically.
 
 ---
 
@@ -263,3 +289,4 @@ curl -s -H "Authorization: Bearer $TOKEN" http://localhost:8080/api/v1/service-a
 | 6 | E2E integration test suite: Testcontainers (Postgres + Keycloak) + WireMock; 7/7 passing | `c28fe21` |
 | 7 | `zt-agents` AI copilot module (Kotlin): Policy Auditor Agent + gateway internal endpoint | `c85e77f` |
 | 8 | MCP proxy: GET /sse + POST /message, session manager, policy/audit/masking stubs | `cb5da35` |
+| 9 | Agent OAuth2 Client Credentials auth (agent-a/agent-b), dead-end stub response | _pending commit_ |

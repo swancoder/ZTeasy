@@ -128,10 +128,24 @@
 - [x] `McpProxyIT` — full `GET /sse` → `POST /message` → SSE-injection round trip (deny path, allow path via WireMock, unknown-sessionId 400)
 - ADR: ADR-009-mcp-proxy-interception-layer.md
 
+### Stage 9 — Agent OAuth2 Client Credentials Auth (dead-end stub) `COMPLETE`
+- [x] `keycloak/realm-export.json` — new confidential clients `agent-a`/`agent-b` in the existing `zte-realm` (Client Credentials only: `serviceAccountsEnabled=true`, `standardFlowEnabled=false`, `directAccessGrantsEnabled=false`)
+- [x] No new SecurityConfiguration — existing `auth-library.SecurityConfig` (`anyExchange().authenticated()`) already covered `/sse` and `/message`
+- [x] `McpProxyHandler.currentAgentId` — now prefers the `azp` claim (client_id) over `sub`, matching `RequestAuditFilter`'s existing convention
+- [x] `McpProxyHandler.process` — dead-end stub: no longer calls `McpPolicyEngine`/`McpBackendClient`; logs `clientId`, audits `"STUBBED"`, emits `JsonRpcResponse.stubbed(id, clientId)` via SSE. Stage 8's 202/SSE-session transport contract unchanged — `policyEngine`/`backendClient`/`dataMaskingFilter` stay wired for a one-method re-enable later
+- [x] `McpProxySecurityWebFluxTest` — `@WebFluxTest` slice: 401 without token (`/sse`, `/message`), 200/202 with a mocked JWT, unknown-session 400, verifies policy engine + backend are never touched
+- [x] `McpProxyIT` updated — agent-a/agent-b client-credentials scenarios (stub names the authenticated client, backend never called), 401-without-token, unknown-sessionId 400
+- [x] `hubspot-mcp/auth.py` — OAuth2 Client Credentials helper (`token_for_agent`)
+- [x] `hubspot-mcp/agent_simulator.py` — rewritten: real MCP HTTP+SSE client (`GatewaySession`) against the gateway, replacing the old stdio-direct simulation
+- ADR: ADR-010-agent-oauth2-client-credentials.md
+
 ---
 
-## Stage 9+ Backlog (Not Yet Implemented)
+## Stage 10+ Backlog (Not Yet Implemented)
 
+- [ ] Re-enable `McpPolicyEngine`/`McpBackendClient` in `McpProxyHandler.process`, keyed on the real per-agent `clientId` (supersedes the old "Per-agent authorization" item — identities now exist to authorize against)
+- [ ] HTTP (or HTTP+SSE) transport for `hubspot_server.py` — prerequisite for any real forwarding; it's stdio-only today
+- [ ] Move `agent-a-secret-dev-only`/`agent-b-secret-dev-only` to environment injection before any non-local environment
 - [ ] DB-based request audit log (`request_logs` table, V3 Flyway migration) — currently log-only via `RequestAuditFilter`
 - [ ] Distributed tracing: Micrometer Tracing + Zipkin in Docker Compose
 - [ ] Rate limiting: Spring Cloud Gateway `RequestRateLimiter` (Redis-backed)

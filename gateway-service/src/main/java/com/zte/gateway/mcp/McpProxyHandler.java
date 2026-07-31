@@ -7,7 +7,6 @@ import com.zte.gateway.mcp.mask.DataMaskingFilter;
 import com.zte.gateway.mcp.model.JsonRpcRequest;
 import com.zte.gateway.mcp.model.JsonRpcResponse;
 import com.zte.gateway.mcp.policy.McpPolicyEngine;
-import com.zte.gateway.mcp.policy.PolicyDecision;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.core.ParameterizedTypeReference;
@@ -31,11 +30,18 @@ import java.util.UUID;
  * {@code sessionId}, registers it with {@link McpSessionManager}, and pushes an
  * {@code endpoint} SSE event containing {@code /message?sessionId=<id>} — the
  * client's cue for where to POST subsequent JSON-RPC calls (this is the standard
- * MCP HTTP+SSE handshake, not a ZTeasy-specific invention). Every
- * {@code POST /message?sessionId=<id>} is evaluated by {@link McpPolicyEngine} and
- * its result — deny or (masked) backend response — is injected back into that same
- * SSE stream; the POST itself only ever returns 202 Accepted, since the real
- * answer travels over SSE.
+ * MCP HTTP+SSE handshake, not a ZTeasy-specific invention).
+ *
+ * <p><b>Stage 9 (ADR-010) — dead-end stub:</b> {@code POST /message?sessionId=<id>}
+ * only validates the caller's JWT and extracts the client identity; it does
+ * <em>not</em> call {@link McpPolicyEngine} or {@link McpBackendClient}. A stub
+ * success response naming the authenticated client is injected into the SSE
+ * stream instead. The transport contract from Stage 8 is unchanged — the POST
+ * still only ever returns 202 Accepted, and the real answer still travels over
+ * SSE — only what gets computed has changed. {@code policyEngine},
+ * {@code backendClient}, and {@code dataMaskingFilter} stay wired here
+ * (unused for now) so re-enabling them is a one-method change in {@link #process}
+ * once per-agent authorization is ready to be exercised end-to-end.
  */
 @Component
 public class McpProxyHandler {
@@ -97,27 +103,16 @@ public class McpProxyHandler {
     }
 
     /**
-     * Evaluates policy for one JSON-RPC call and emits the outcome (deny or
-     * backend result) into the caller's SSE session. Never surfaces an error to
-     * the {@code POST /message} response itself — everything travels via SSE.
+     * Dead-end stub (Stage 9 / ADR-010): logs the authenticated client and emits
+     * a stub success response into the caller's SSE session. Deliberately does
+     * not call {@link #policyEngine} or {@link #backendClient} — see the class
+     * Javadoc for why, and what re-enabling them looks like.
      */
     private Mono<Void> process(String sessionId, String agentId, JsonRpcRequest rpc) {
         String toolName = rpc.toolName();
-        PolicyDecision decision = policyEngine.evaluate(agentId, toolName, rpc.toolArguments());
-
-        if (!decision.allowed()) {
-            log.warn("MCP DENY sessionId={} agentId={} tool={} reason={}",
-                    sessionId, agentId, toolName, decision.reason());
-            auditService.record(new McpAuditEvent(PROCESS_ID, agentId, toolName, "DENIED", Instant.now()));
-            return emit(sessionId, JsonRpcResponse.denied(rpc.id(), decision.reason()));
-        }
-
-        log.debug("MCP ALLOW sessionId={} agentId={} tool={}", sessionId, agentId, toolName);
-        return backendClient.forward(rpc)
-                .map(dataMaskingFilter::mask)
-                .doOnNext(resp -> auditService.record(
-                        new McpAuditEvent(PROCESS_ID, agentId, toolName, "ALLOWED", Instant.now())))
-                .flatMap(resp -> emit(sessionId, resp));
+        log.info("MCP STUB sessionId={} clientId={} tool={}", sessionId, agentId, toolName);
+        auditService.record(new McpAuditEvent(PROCESS_ID, agentId, toolName, "STUBBED", Instant.now()));
+        return emit(sessionId, JsonRpcResponse.stubbed(rpc.id(), agentId));
     }
 
     private Mono<Void> emit(String sessionId, JsonRpcResponse response) {
@@ -127,9 +122,19 @@ public class McpProxyHandler {
                 .then();
     }
 
+    /**
+     * The calling client's identity: prefers {@code azp} (the OAuth2 client_id —
+     * what a client-credentials-flow agent token carries, and the same claim
+     * {@code RequestAuditFilter} already uses elsewhere in this gateway), falling
+     * back to {@code sub} for tokens that don't carry {@code azp}.
+     */
     private Mono<String> currentAgentId(ServerRequest request) {
         return request.principal()
                 .cast(JwtAuthenticationToken.class)
-                .map(auth -> auth.getToken().getSubject());
+                .map(auth -> {
+                    var jwt = auth.getToken();
+                    String clientId = jwt.getClaimAsString("azp");
+                    return clientId != null ? clientId : jwt.getSubject();
+                });
     }
 }
