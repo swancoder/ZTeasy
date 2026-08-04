@@ -38,6 +38,9 @@ jjwt-jackson              = { module = "io.jsonwebtoken:jjwt-jackson", version.r
 # Netty TLS (version managed by Spring Boot BOM)
 netty-handler             = { module = "io.netty:netty-handler" }
 
+# YAML policy file parsing (version managed by Spring Boot BOM's Jackson BOM)
+jackson-dataformat-yaml   = { module = "com.fasterxml.jackson.dataformat:jackson-dataformat-yaml" }
+
 # Kotlin (version managed by kotlin plugin; stdlib version pinned by Spring Boot BOM)
 kotlin-stdlib             = { module = "org.jetbrains.kotlin:kotlin-stdlib" }
 jackson-kotlin            = { module = "com.fasterxml.jackson.module:jackson-module-kotlin" }

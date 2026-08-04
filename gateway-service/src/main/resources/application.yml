@@ -92,6 +92,12 @@ zte:
     secret: ${ZTE_OBO_SECRET:zte-obo-dev-secret-change-in-production}
     expiry-seconds: ${ZTE_OBO_EXPIRY_SECONDS:30}
 
+  # ── YAML policy definitions (Stage 11 / ADR-011) ──
+  policy:
+    file: ${ZTE_POLICY_FILE:classpath:zte-policies.yaml}
+    default-effect: ${ZTE_POLICY_DEFAULT_EFFECT:DENY}
+    user-client-id: ${ZTE_POLICY_USER_CLIENT_ID:zte-gateway}
+
 # ── Logging ──
 logging:
   level:

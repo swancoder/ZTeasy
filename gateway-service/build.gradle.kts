@@ -44,6 +44,9 @@ dependencies {
     // mTLS outbound — Netty SslContext (version from Spring Boot BOM)
     implementation(libs.netty.handler)
 
+    // YAML policy definition loader (Stage 11 / ADR-011)
+    implementation(libs.jackson.dataformat.yaml)
+
     // OBO token creation — JJWT (api on compile path; impl+jackson at runtime via auth-library)
     implementation(libs.jjwt.api)
 

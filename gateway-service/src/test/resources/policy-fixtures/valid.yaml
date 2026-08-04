@@ -1,0 +1,16 @@
+schemaVersion: 1
+users2service:
+  - id: u1
+    effect: ALLOW
+    source: ADMIN
+    target: service-a
+    pathPattern: /api/v1/service-a/**
+    methods: "*"
+    priority: 0
+service2service: []
+agentMcpToolCalls:
+  - id: m1
+    effect: DENY
+    source: "*"
+    target: "delete*"
+    priority: 100

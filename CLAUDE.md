@@ -139,17 +139,29 @@
 - [x] `hubspot-mcp/agent_simulator.py` — rewritten: real MCP HTTP+SSE client (`GatewaySession`) against the gateway, replacing the old stdio-direct simulation
 - ADR: ADR-010-agent-oauth2-client-credentials.md
 
+### Stage 10 — YAML Policy Engine (users2service / service2service / agent@mcp) `COMPLETE`
+- [x] `gateway-service/policy/def` — new package: `PolicyDocument`/`PolicyRule` (one shared rule shape across all three categories), `YamlPolicyFileLoader` (Jackson `YAMLMapper`, rejects unknown keys), `PolicyValidator` (collects all violations in one pass; duplicate ids/exact-duplicate rules are errors, ALLOW/DENY conflicts on the same tuple are warnings), `PolicyDefinitionStore` (loads+validates at startup — fails `ApplicationContext` refresh on invalid content; `AtomicReference` hot-swap, mirroring `ReloadableSslContextFactory` — ADR-004), `PolicyMatcher` (deny always overrides allow, `AntPathMatcher`-based)
+- [x] `zte-policies.yaml` (`gateway-service/src/main/resources`, path configurable via `zte.policy.file`) — the single YAML file defining `users2service`/`service2service`/`agentMcpToolCalls` rules; default ships with empty users2service/service2service (DB/default-deny fallback unchanged) and populated agentMcpToolCalls (destructive-tool deny rules + per-agent grants)
+- [x] `ZteAuthorizationFilter` (users2service) — YAML checked first (explicit ALLOW/DENY short-circuits), falls back unchanged to the existing DB-backed `PolicyService` (ADR-003) on no match; JWTs with no realm roles and a non-user `azp` now pass through to `ServiceToServiceAuthorizationFilter` instead of being blanket-denied
+- [x] `ServiceToServiceAuthorizationFilter` (new, `HIGHEST_PRECEDENCE+150`) — service2service enforcement for JWTs identified by `azp`; YAML-only, default-deny
+- [x] `YamlMcpPolicyEngine` (replaces `DummyMcpPolicyEngine`, deleted) — agent@mcp/tool-call enforcement; `McpProxyHandler.process()` restored to call the policy engine + `McpBackendClient` (supersedes Stage 9/ADR-010's dead-end stub — this **is** the former "Re-enable McpPolicyEngine/McpBackendClient" backlog item)
+- [x] `POST /api/v1/internal/policies/reload` (`PolicyReloadController`, reuses the permitAll internal chain) — no-downtime reload, atomic swap, fail-closed on invalid content (keeps previous document)
+- [x] `ZteAuditLogger.policyDecision(...)` — one shared structured audit method used identically by all three enforcement points (REST + MCP), so the log shape is unified by construction
+- [x] Unit tests: `PolicyValidatorTest`, `PolicyMatcherTest`, `YamlPolicyFileLoaderTest`, `PolicyDefinitionStoreTest`, `YamlMcpPolicyEngineTest`, `ServiceToServiceAuthorizationFilterTest`, `DocumentationExampleConformanceTest` (loads `docs/examples/zte-policies-example.yaml` against the real schema); `ZteAuthorizationFilterTest`/`McpProxySecurityWebFluxTest`/`McpProxyIT` updated for the new behavior
+- ADR: ADR-011-yaml-policy-engine.md; schema doc: `docs/policy-schema.md`; full 3-category example: `docs/examples/zte-policies-example.yaml`
+
 ---
 
-## Stage 10+ Backlog (Not Yet Implemented)
+## Stage 11+ Backlog (Not Yet Implemented)
 
-- [ ] Re-enable `McpPolicyEngine`/`McpBackendClient` in `McpProxyHandler.process`, keyed on the real per-agent `clientId` (supersedes the old "Per-agent authorization" item — identities now exist to authorize against)
+- [ ] Full users2service migration to YAML-only, retiring `access_policies`/`PolicyService` — deliberate future ADR, not attempted in Stage 10 (see ADR-011 Future Migration Path)
+- [ ] Per-category `zte.policy.*.default-effect` overrides (today one `default-effect` applies to service2service and agentMcpToolCalls alike)
+- [ ] Filesystem watch-based auto-reload, layered on `PolicyDefinitionStore.reload()` (today: explicit `POST /api/v1/internal/policies/reload`)
 - [ ] HTTP (or HTTP+SSE) transport for `hubspot_server.py` — prerequisite for any real forwarding; it's stdio-only today
 - [ ] Move `agent-a-secret-dev-only`/`agent-b-secret-dev-only` to environment injection before any non-local environment
 - [ ] DB-based request audit log (`request_logs` table, V3 Flyway migration) — currently log-only via `RequestAuditFilter`
 - [ ] Distributed tracing: Micrometer Tracing + Zipkin in Docker Compose
 - [ ] Rate limiting: Spring Cloud Gateway `RequestRateLimiter` (Redis-backed)
-- [ ] `/admin/policies/refresh` actuator endpoint: force `PolicyService` cache invalidation without restart
 - [ ] Docker Compose production profile: resource limits, health-check restart policies
-- [ ] ABAC extension: `condition` column on `access_policies` (SpEL evaluated against JWT claims)
+- [ ] ABAC extension: `condition` field on `PolicyRule` / `access_policies` (SpEL evaluated against JWT claims)
 - [ ] Full mTLS system test: service-a + service-b as real Testcontainers (covers TLS handshake rejection)

@@ -81,17 +81,21 @@ zte-lightweight/
 │   └── UserContextTokenService       HMAC-SHA256 OBO token create/validate
 │
 ├── gateway-service/       ZTE entry point — port 8080 (HTTP)
-│   ├── ZteAuthorizationFilter        DB policy enforcement (HIGHEST_PRECEDENCE+100)
+│   ├── ZteAuthorizationFilter        users2service: YAML-first, DB fallback (HIGHEST_PRECEDENCE+100)
+│   ├── ServiceToServiceAuthorizationFilter  service2service: YAML-only, default-deny (HIGHEST_PRECEDENCE+150)
 │   ├── UserContextPropagationFilter  OBO token injection (HIGHEST_PRECEDENCE+200)
 │   ├── MtlsHttpClientConfig         Netty HttpClient with client.p12
-│   ├── PolicyService                 R2DBC policy cache (Mono.cache, 5-min TTL)
+│   ├── PolicyService                 R2DBC policy cache (Mono.cache, 5-min TTL) — users2service DB fallback
+│   ├── policy/def/                   YAML policy engine (see ADR-011): PolicyDefinitionStore,
+│   │                                 PolicyMatcher, PolicyValidator, YamlPolicyFileLoader
 │   ├── GatewayRouteConfig            Routes: /api/v1/service-a/**, /api/v1/service-b/**
 │   ├── InternalPolicyController      GET /api/v1/internal/policies (agent data provider)
+│   ├── PolicyReloadController        POST /api/v1/internal/policies/reload (no-downtime reload)
 │   └── mcp/                          MCP proxy — GET /sse, POST /message (see ADR-009)
 │       ├── McpProxyHandler           Policy check, deny-via-SSE, backend forward
 │       ├── McpSessionManager         sessionId → SSE sink (cross-request injection)
 │       ├── McpBackendClient          WebClient forward to mcp-backend.uri
-│       ├── policy/DummyMcpPolicyEngine   In-memory deny-list (synchronous check)
+│       ├── policy/YamlMcpPolicyEngine    YAML-backed per-agent tool grants (see ADR-011)
 │       ├── audit/LoggingMcpAuditService  Non-blocking audit sink (TSDB-ready stub)
 │       └── mask/NoOpDataMaskingFilter    PII masking stub
 │
@@ -135,6 +139,7 @@ zte-lightweight/
 | [ADR-008](docs/adr/ADR-008-dotenv-configuration-management.md) | `.env`-Based Configuration Management for `zt-agents` | Accepted |
 | [ADR-009](docs/adr/ADR-009-mcp-proxy-interception-layer.md) | MCP Proxy & Interception Layer — WebFlux Router + Session Manager | Accepted |
 | [ADR-010](docs/adr/ADR-010-agent-oauth2-client-credentials.md) | Agent Auth via OAuth2 Client Credentials, and a Deliberate Dead-End Stub | Accepted |
+| [ADR-011](docs/adr/ADR-011-yaml-policy-engine.md) | YAML-Defined Access Policies (users2service / service2service / agent@mcp) | Accepted |
 
 ---
 
@@ -154,19 +159,25 @@ router rather than a Gateway route.
 2. Client sends a JSON-RPC call to `POST /message?sessionId=<id>`. `clientId` comes from the
    JWT `azp` claim (falling back to `sub`); the tool name and arguments come from
    `params.name` / `params.arguments`.
-3. **As of Stage 9 (ADR-010), the gateway is a deliberate dead-end**: it does not call
-   `DummyMcpPolicyEngine` or forward to any backend. It logs the authenticated `clientId` and
-   injects a stub JSON-RPC success response naming that client into the SSE stream. The POST
-   still always returns `202 Accepted` — the transport contract from Stage 8 is unchanged,
-   only what gets computed. See ADR-010 for what re-enabling policy + forwarding looks like.
+3. **As of Stage 10 (ADR-011), the gateway enforces real per-agent policy**: `YamlMcpPolicyEngine`
+   checks the `agentMcpToolCalls` rules in `zte-policies.yaml` (deny always wins, no match →
+   default-deny). A denial is injected as a JSON-RPC envelope with `result.isError=true`,
+   naming the matched rule — the backend is never called. An allow forwards the call to
+   `McpBackendClient`, runs the result through `DataMaskingFilter`, and injects it into the
+   SSE stream. The POST still always returns `202 Accepted` regardless — the transport
+   contract from Stage 8 is unchanged, only what gets computed. This supersedes Stage 9's
+   (ADR-010) deliberate dead-end stub — see ADR-011 for the full reasoning.
 4. Every call is recorded asynchronously via `LoggingMcpAuditService` (non-blocking sink,
-   logs today, TSDB-ready) with status `"STUBBED"`.
+   logs today, TSDB-ready) with status `"ALLOWED"`/`"DENIED"`, and synchronously via the
+   unified `ZteAuditLogger.policyDecision(...)` structured log line shared with the gateway's
+   REST policy filters.
 
 **Tested by:** `McpProxyIT` (`gateway-service/src/it`) — full `GET /sse` → `POST /message` →
 SSE-injection round trip against a real running gateway (Testcontainers + WireMock), using
-Agent A/Agent B's actual client-credentials tokens; asserts the backend is never called, plus
+Agent A/Agent B's actual client-credentials tokens; covers an allowed call forwarded to the
+backend, a tool with no grant, and a destructive-shaped tool caught by the deny-list, plus
 401-without-token and unknown-`sessionId` 400. Also `McpProxySecurityWebFluxTest` (`src/test`)
-— a fast `@WebFluxTest` slice covering the same auth boundary without Docker. Run with
+— a fast `@WebFluxTest` slice covering the same allow/deny paths without Docker. Run with
 `./gradlew test integrationTest`.
 
 ---
@@ -192,6 +203,29 @@ curl -s -N -H "Authorization: Bearer $TOKEN" http://localhost:8080/sse
 
 Or run the full round trip via `hubspot-mcp/run_agents.sh` (see that repo's README) — it
 does the token fetch, `GET /sse` handshake, and `POST /message` for both agents automatically.
+
+---
+
+## YAML Policy Engine (Stage 10)
+
+A single YAML file (`gateway-service/src/main/resources/zte-policies.yaml`, path
+configurable via `zte.policy.file`) defines allow/deny rules for three relationship
+categories, loaded and validated at startup and hot-swappable at runtime — see
+[ADR-011](docs/adr/ADR-011-yaml-policy-engine.md) and
+[`docs/policy-schema.md`](docs/policy-schema.md) for the full schema and precedence rules.
+
+| Category | Governs | Enforced by | Fallback on no match |
+|---|---|---|---|
+| `users2service` | User (realm role) → gateway REST service | `ZteAuthorizationFilter` | DB-backed `access_policies` (ADR-003) |
+| `service2service` | Calling service/agent (JWT `azp`) → gateway REST service | `ServiceToServiceAuthorizationFilter` | `zte.policy.default-effect` (default `DENY`) |
+| `agentMcpToolCalls` | MCP agent (JWT `azp`) → MCP tool name | `YamlMcpPolicyEngine` | `zte.policy.default-effect` (default `DENY`) |
+
+Deny always overrides allow, regardless of priority or declaration order. Reload the active
+policy set without a restart (in-flight requests finish against the pre-reload set):
+
+```bash
+curl -s -X POST http://localhost:8080/api/v1/internal/policies/reload | python3 -m json.tool
+```
 
 ---
 
@@ -290,3 +324,4 @@ curl -s -H "Authorization: Bearer $TOKEN" http://localhost:8080/api/v1/service-a
 | 7 | `zt-agents` AI copilot module (Kotlin): Policy Auditor Agent + gateway internal endpoint | `c85e77f` |
 | 8 | MCP proxy: GET /sse + POST /message, session manager, policy/audit/masking stubs | `cb5da35` |
 | 9 | Agent OAuth2 Client Credentials auth (agent-a/agent-b), dead-end stub response | `e79994e` |
+| 10 | YAML policy engine: users2service/service2service/agent@mcp allow-deny rules, no-downtime reload, unified audit logging, real MCP enforcement (supersedes Stage 9's stub) | _pending_ |

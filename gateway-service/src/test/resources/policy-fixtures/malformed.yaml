@@ -1,0 +1,6 @@
+schemaVersion: 1
+users2service:
+  - id: u1
+    effect: ALLOW
+   source: ADMIN
+    target: service-a

@@ -62,4 +62,37 @@ public final class ZteAuditLogger {
     public static void policyDeny(String service, String roles, String request) {
         log.warn(FMT, "POLICY_DENY", service, "roles=" + roles + " " + request);
     }
+
+    /**
+     * Unified YAML policy-engine decision — shared by every enforcement point
+     * (users2service and service2service in the API gateway, agent@mcp/tool-call
+     * in the MCP proxy) so all three emit byte-for-byte the same log shape,
+     * queryable/filterable by subject, target, or outcome without per-proxy
+     * format drift.
+     */
+    public static void policyDecision(String category, String subject, String target,
+                                       String matchedRuleId, String outcome) {
+        String detail = "category=" + category + " subject=" + subject + " target=" + target
+                + " rule=" + (matchedRuleId == null ? "none" : matchedRuleId) + " outcome=" + outcome;
+        if ("DENY".equals(outcome)) {
+            log.warn(FMT, "POLICY_DECISION", "zte", detail);
+        } else {
+            log.info(FMT, "POLICY_DECISION", "zte", detail);
+        }
+    }
+
+    /** A policy reload was triggered (file-based, via the admin endpoint). */
+    public static void policyReloadTriggered() {
+        log.info(FMT, "POLICY_RELOAD_TRIGGERED", "gateway", "");
+    }
+
+    /** Policy reload succeeded — new document swapped in atomically. */
+    public static void policyReloadSucceeded() {
+        log.info(FMT, "POLICY_RELOAD_SUCCESS", "gateway", "");
+    }
+
+    /** Policy reload failed validation — previous document remains active. */
+    public static void policyReloadFailed(String reason) {
+        log.warn(FMT, "POLICY_RELOAD_FAILURE", "gateway", reason);
+    }
 }

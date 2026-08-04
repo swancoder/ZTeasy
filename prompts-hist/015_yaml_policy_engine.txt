@@ -1,0 +1,77 @@
+Implement GitHub issue #1 ("Create an YAML scheme") — swancoder/ZTeasy.
+
+Original feature description (issue body):
+  Create the definition of allow/deny policies for MCP proxy and for API
+  gateway proxy both. We need to have a possibility to load YAML file with
+  definition of who can connect where. We will define there policies for
+  users2service, service2service and agent@mcp/tool calls.
+
+The issue's AI-generated technical specification broke this into 8 tasks with
+acceptance criteria and per-task class lists:
+  1. Define YAML policy schema for access control
+  2. Implement YAML policy file loader
+  3. Implement policy validation for loaded configuration
+  4. Enforce users2service allow/deny policies in API gateway proxy
+  5. Enforce service2service allow/deny policies in API gateway proxy
+  6. Enforce agent@mcp/tool-call allow/deny policies in MCP proxy
+  7. Support runtime reload of policy definitions without downtime
+  8. Expose policy decision audit logging across both proxies
+
+User selected "Full implementation, one PR" when asked how to scope the work
+(vs. foundation-only, or foundation+gateway-only) via AskUserQuestion.
+
+---
+
+Deviations from the literal AI-generated spec, resolved during
+THOUGHTS/CRITIQUE (see ADR-011 for the full reasoning):
+
+- The AI spec is internally inconsistent: Tasks 1-2 (schema + loader) build a
+  generic YAML document, but Tasks 4-6 (enforcement) each wire the decision to
+  a *new DB table* instead (access_policies.effect, service_access_policies,
+  mcp_tool_policies) — none of which actually read the loaded YAML at request
+  time. Resolved in favor of the original human-written issue text: one YAML
+  file is the runtime source of truth for all three categories.
+- users2service keeps the existing DB-backed PolicyService (ADR-003) as a
+  fallback when no YAML rule matches — zero behavior change for existing
+  flows/tests; YAML only short-circuits on an explicit ALLOW/DENY match. Full
+  YAML-only migration deferred to a future ADR (see ADR-011 Future Migration
+  Path) — not attempted here since it would break the existing, tested,
+  working DB flow for no requirement in the issue that demands it.
+- service2service and agent@mcp/tool-call have no prior DB table to be
+  compatible with — YAML is their sole source of truth, default-deny.
+- One shared PolicyRule record used across all three categories instead of
+  the spec's proposed per-category class hierarchy (AccessRule /
+  UserToServiceRule / ServiceToServiceRule / AgentMcpToolCallRule) — records
+  can't extend records, and the shape is ~90% identical; documented as a
+  deliberate simplification in ADR-011 and PolicyRule's Javadoc.
+- Runtime reload (Task 7) implemented as an explicit admin endpoint
+  (POST /api/v1/internal/policies/reload, reusing the existing permitAll
+  internal chain) rather than a filesystem watch service — meets "reload
+  without restart, in-flight requests complete on the pre-reload set" without
+  a background watch thread/debounce logic. Filesystem watch noted as a
+  future migration path.
+- Audit logging (Task 8) implemented as one new
+  ZteAuditLogger.policyDecision(...) method called identically from all three
+  enforcement points (plain synchronous SLF4J, matching every other audit
+  call site in this codebase) rather than the spec's proposed
+  Sinks.Many/BoundedAuditBuffer machinery — unified format achieved by
+  sharing the call site, not by independently agreeing on a schema.
+- Re-enabling MCP tool-call enforcement (Task 6) required undoing Stage 9's
+  (ADR-010) deliberate "dead-end stub" in McpProxyHandler.process() — this is
+  exactly the Stage 10+ backlog item "Re-enable McpPolicyEngine/
+  McpBackendClient... keyed on the real per-agent clientId," now implemented.
+  DummyMcpPolicyEngine (placeholder deny-list) is deleted, superseded by
+  YamlMcpPolicyEngine. Updated McpProxyIT and McpProxySecurityWebFluxTest,
+  which asserted "backend never called" under the old stub — they now assert
+  the new allow/deny-with-real-backend-forwarding behavior instead of being
+  left red.
+- Default shipped policy file (gateway-service/src/main/resources/
+  zte-policies.yaml) ships with empty users2service/service2service sections
+  (today's DB-driven behavior unchanged) and a populated agentMcpToolCalls
+  section (destructive-tool deny rules + explicit agent-a/agent-b grants for
+  the demo tools already used in McpProxyIT) — the one category with no prior
+  enforcement to preserve compatibility with.
+- Full three-category worked example (with DENY rules in every category, for
+  documentation) lives separately at docs/examples/zte-policies-example.yaml;
+  a unit test (DocumentationExampleConformanceTest) loads and validates it
+  against the real schema so the doc can't silently drift.

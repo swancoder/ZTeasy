@@ -1,0 +1,5 @@
+schemaVersion: 1
+users2service: []
+service2service: []
+agentMcpToolCalls: []
+unexpectedTopLevelKey: "typo, should be rejected"

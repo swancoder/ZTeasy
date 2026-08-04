@@ -2,12 +2,12 @@
 
 **Product:** Lightweight Zero Trust Environment (ZTE) MVP — a Zero Trust Data Gateway,
 now extended toward fronting AI agent (MCP) traffic, not just plain REST.
-**Status as of:** 2026-07-31 · Stage 9 of 9 implemented stages complete.
+**Status as of:** 2026-08-04 · Stage 10 of 10 implemented stages complete.
 
 This document is the single technical reference for the system as built. It
 consolidates what's spread across `README.md` (quick start, chain-of-trust
 summary), `CLAUDE.md` (terse per-stage changelog for AI-assisted sessions), and
-ten ADRs (individual decisions) into one place: what exists, how it fits
+eleven ADRs (individual decisions) into one place: what exists, how it fits
 together, what's configurable, what's tested, and what's left. It does not
 replace the ADRs — every decision below links to the ADR that argues it.
 
@@ -44,14 +44,19 @@ auditable — the opposite of a mesh's "hide it in the sidecar" approach. See
 | — | `.env`-based config for `zt-agents` | ✅ Complete | `d721915` | [008](adr/ADR-008-dotenv-configuration-management.md) |
 | 8 | MCP Proxy & Interception Layer | ✅ Complete | `cb5da35` | [009](adr/ADR-009-mcp-proxy-interception-layer.md) |
 | 9 | Agent OAuth2 Client Credentials Auth (dead-end stub) | ✅ Complete | `e79994e` | [010](adr/ADR-010-agent-oauth2-client-credentials.md) |
-| 10+ | Backlog (audit persistence, tracing, rate limiting, ABAC, MCP re-enable…) | ⬜ Planned | — | see §9.2 |
+| 10 | YAML Policy Engine (users2service / service2service / agent@mcp), no-downtime reload, unified audit, real MCP enforcement | ✅ Complete | _pending_ | [011](adr/ADR-011-yaml-policy-engine.md) |
+| 11+ | Backlog (audit persistence, tracing, rate limiting, ABAC, users2service→YAML-only…) | ⬜ Planned | — | see §9.2 |
 
-**Test status:** all unit tests green (`./gradlew test`, including the new
-`McpProxySecurityWebFluxTest` slice); E2E integration suite green
-(`./gradlew integrationTest`, 11/11 scenarios — 7 REST chain + 4 MCP proxy).
-`McpProxyIT` covers the full `GET /sse` → `POST /message` → SSE-injection
-round trip using Agent A/B's real client-credentials tokens (stub response,
-unknown-session 400, no-token 401) — see §8.4.
+**Test status:** all unit tests green (`./gradlew test`), including the new
+`policy.def` package (`PolicyValidatorTest`, `PolicyMatcherTest`,
+`YamlPolicyFileLoaderTest`, `PolicyDefinitionStoreTest`,
+`DocumentationExampleConformanceTest`), `YamlMcpPolicyEngineTest`, and
+`ServiceToServiceAuthorizationFilterTest` — 53 tests in `gateway-service`
+alone. `McpProxyIT` and the rest of the E2E integration suite were updated for
+Stage 10's real MCP enforcement (allow → forwarded to backend, deny → no
+backend call, both via the default `zte-policies.yaml`) but **could not be
+re-run in the environment this stage was implemented in** (no Docker daemon
+available) — verify with `./gradlew integrationTest` before merging.
 
 ---
 
@@ -65,18 +70,26 @@ unknown-session 400, no-token 401) — see §8.4.
                               │              port 8080 (HTTP)              │
   User ──[Keycloak JWT]──────►│  SecurityConfig (auth-library): JWT req'd  │
                               │                                             │
-                              │  REST path:                                │
-                              │   ① ZteAuthorizationFilter (DB policy)     │
+                              │  REST path (ADR-011):                      │
+                              │   ① ZteAuthorizationFilter                 │
+                              │      (users2service: YAML-first, DB fallback)│
+                              │   ① a ServiceToServiceAuthorizationFilter  │
+                              │      (service2service: YAML-only)          │
                               │   ② UserContextPropagationFilter (OBO)     │
                               │   ③ GatewayRouteConfig → service-a/b       │
                               │                                             │
-                              │  MCP path (ADR-009, ADR-010):               │
+                              │  policy/def (ADR-011): PolicyDefinitionStore│
+                              │   AtomicRef<PolicyDocument>, loaded from   │
+                              │   zte-policies.yaml, hot-swappable via     │
+                              │   POST /api/v1/internal/policies/reload    │
+                              │                                             │
+                              │  MCP path (ADR-009, ADR-010, ADR-011):     │
                               │   GET /sse ──► McpSessionManager           │
                               │   POST /message ──► McpProxyHandler        │
-                              │     → Stage 9 dead-end stub: logs clientId │
-                              │       (JWT azp), injects stub via SSE.     │
-                              │       DummyMcpPolicyEngine/McpBackendClient│
-                              │       wired but not called (ADR-010).      │
+                              │     → YamlMcpPolicyEngine.evaluate()       │
+                              │       (agentMcpToolCalls rules); deny via  │
+                              │       SSE, allow forwards to               │
+                              │       McpBackendClient (supersedes Stage 9)│
                               │                                             │
                               │  Agent data path (ADR-007):                │
                               │   GET /api/v1/internal/policies            │
@@ -135,12 +148,17 @@ Stage 4):
 | 4 | On whose behalf? | Signed OBO token (`X-ZTE-User-Context`, HMAC-SHA256, 30s TTL) | `UserContextPropagationFilter` → `UserContextTokenService` |
 
 The MCP proxy (§8) adds a fifth question for AI agents specifically: **is this
-caller who it claims to be?** — Agent A/B authenticate via OAuth2 Client
-Credentials (ADR-010), and `McpProxyHandler` extracts and logs the client
-identity (`azp`). As of Stage 9 this identity is not yet *authorized*
-against — **which tool may this agent invoke, right now** — is a real
-question `DummyMcpPolicyEngine` can answer, but it is currently wired and
-unused (dead-end stub, see §8.2); re-enabling it is backlog item §9.3.
+caller who it claims to be, and what may it do?** — Agent A/B authenticate via
+OAuth2 Client Credentials (ADR-010), `McpProxyHandler` extracts the client
+identity (`azp`), and as of Stage 10 (ADR-011) that identity **is** authorized:
+`YamlMcpPolicyEngine` matches it against the `agentMcpToolCalls` rules in
+`zte-policies.yaml` before any tool call reaches the backend — see §8.2/§8.3.
+
+Sixth question, gateway-internal: **may this service call that service?**
+(`service2service` in ADR-011) — a calling service/agent's `azp`, matched
+against YAML `service2service` rules by `ServiceToServiceAuthorizationFilter`,
+governs REST calls made with a service/agent credential rather than an
+interactive user's.
 
 For the full request-by-request trust narrative (User → Gateway → Service A →
 Service B) see `README.md` §"Chain of Trust" — reproduced there with a
@@ -173,13 +191,31 @@ Reusable security config imported by every service (`ZteSecurityAutoConfiguratio
 - **`GatewayRouteConfig`** — declarative routes: `/api/v1/service-a/**`,
   `/api/v1/service-b/**` → `https://localhost:8081` / `:8082`.
 - **`ZteAuthorizationFilter`** (`GlobalFilter`, order `HIGHEST_PRECEDENCE+100`)
-  — extracts `realm_access.roles`, calls `PolicyService.isAllowed(roles, path,
-  method)`; 403 + `GATEWAY_ALREADY_ROUTED_ATTR` on deny (blocks
-  `NettyRoutingFilter`).
+  — users2service enforcement: extracts `realm_access.roles`, consults the
+  YAML `users2service` rules first (explicit ALLOW/DENY short-circuits),
+  falling back to `PolicyService.isAllowed(roles, path, method)` (DB-backed,
+  unchanged since ADR-003) when no YAML rule matches; 403 +
+  `GATEWAY_ALREADY_ROUTED_ATTR` on deny (blocks `NettyRoutingFilter`). A JWT
+  with no realm roles and an `azp` other than the interactive user client
+  (`zte.policy.user-client-id`) is service2service traffic and passes through
+  untouched — see next bullet.
+- **`ServiceToServiceAuthorizationFilter`** (order `HIGHEST_PRECEDENCE+150`,
+  new in ADR-011) — service2service enforcement for the traffic
+  `ZteAuthorizationFilter` passes through: matches the caller's `azp` against
+  YAML `service2service` rules; no DB fallback, `NO_MATCH` resolves to
+  `zte.policy.default-effect` (default `DENY`).
+- **`policy/def` package** (ADR-011) — `PolicyDefinitionStore` (loads +
+  validates `zte-policies.yaml` at startup, fails `ApplicationContext` refresh
+  on invalid content; `AtomicReference<PolicyDocument>` hot-swap, mirroring
+  `ReloadableSslContextFactory`'s pattern), `PolicyMatcher` (deny always
+  overrides allow; `AntPathMatcher`-based), `PolicyValidator`,
+  `YamlPolicyFileLoader`. See §5.2a.
 - **`PolicyService`** — `Mono<List<AccessPolicy>>` cached via
   `Mono.cache(Duration.ofMinutes(5))`; fail-closed on DB error (empty list,
-  not cached, so the next subscriber retries). See
-  [ADR-003](adr/ADR-003-reactive-policy-engine.md).
+  not cached, so the next subscriber retries). Now the users2service
+  *fallback*, not the sole source — see
+  [ADR-003](adr/ADR-003-reactive-policy-engine.md) and
+  [ADR-011](adr/ADR-011-yaml-policy-engine.md).
 - **`UserContextPropagationFilter`** (order `HIGHEST_PRECEDENCE+200`) — strips
   client-supplied `X-ZTE-User-Context`/`X-User-Id`, issues the OBO token.
 - **`RequestAuditFilter`** (order `LOWEST_PRECEDENCE-10`) — logs `sub`/`azp`,
@@ -189,6 +225,25 @@ Reusable security config imported by every service (`ZteSecurityAutoConfiguratio
   Feeds `zt-agents`. See [ADR-007](adr/ADR-007-policy-auditor-agent.md) for
   why this is unauthenticated by design (network perimeter, not app-layer)
   and its production upgrade path.
+- **`PolicyReloadController`** (ADR-011) — `POST
+  /api/v1/internal/policies/reload`, same permitAll/network-perimeter posture
+  as `InternalPolicyController`; re-validates and atomically swaps the active
+  `PolicyDocument`, keeping the previous one on validation failure.
+
+### 5.2a YAML Policy Engine (ADR-011)
+
+One YAML file (`zte-policies.yaml`, path via `zte.policy.file`) is the runtime
+source of truth for `service2service` and `agentMcpToolCalls`, and an
+additive, deny/allow-first layer in front of the DB for `users2service`. Full
+schema, precedence rules, and validation semantics: `docs/policy-schema.md`.
+Full three-category worked example: `docs/examples/zte-policies-example.yaml`
+(kept honest by `DocumentationExampleConformanceTest`, which loads and
+validates it against the real schema).
+
+A single `PolicyRule` shape (`id`, `effect`, `source`, `target`,
+`pathPattern`, `methods`, `priority`) is reused across all three categories —
+`pathPattern`/`methods` are simply unused by `agentMcpToolCalls` rules. See
+ADR-011 for why this was chosen over three parallel rule subclasses.
 
 ### 5.3 `service-a` / `service-b`
 
@@ -242,7 +297,25 @@ and [ADR-008](adr/ADR-008-dotenv-configuration-management.md).
 
 Seed data: `ADMIN` → `/api/v1/service-a/**` and `/api/v1/service-b/**`
 (`GET`, `POST`). Evaluated by `PolicyService.isAllowed` — role AND path
-(Ant-matched) AND method must all match at least one enabled row.
+(Ant-matched) AND method must all match at least one enabled row. Now the
+users2service *fallback* when no YAML rule matches (ADR-011) — see below.
+
+`zte-policies.yaml` (file, not a DB table — ADR-011): one `PolicyDocument`
+with `schemaVersion` (int, must be `1`) and three rule lists —
+`users2service`, `service2service`, `agentMcpToolCalls`. Every rule shares one
+shape (`PolicyRule`):
+
+| Field | Type | Notes |
+|---|---|---|
+| `id` | string | unique across the whole document |
+| `effect` | `ALLOW` \| `DENY` | deny always overrides allow |
+| `source` | string (Ant pattern) | caller identity: role name, or service/agent client id |
+| `target` | string (Ant pattern) | service name, or MCP tool name |
+| `pathPattern` | string (Ant pattern), nullable | unused by `agentMcpToolCalls` |
+| `methods` | string, nullable | comma-separated verbs or `*`; unused by `agentMcpToolCalls` |
+| `priority` | int, default `0` | tie-break within the same effect only |
+
+Full schema/precedence/validation reference: `docs/policy-schema.md`.
 
 ---
 
@@ -253,6 +326,7 @@ Seed data: `ADMIN` → `/api/v1/service-a/**` and `/api/v1/service-b/**`
 | `/api/v1/service-a/**` | any | JWT + DB policy | gateway → service-a | Proxied REST call |
 | `/api/v1/service-b/**` | any | JWT + DB policy | gateway → service-b | Proxied REST call |
 | `/api/v1/internal/policies` | GET | none (network perimeter only) | gateway | Feeds `zt-agents` (ADR-007) |
+| `/api/v1/internal/policies/reload` | POST | none (network perimeter only) | gateway | No-downtime YAML policy reload (ADR-011) |
 | `/sse` | GET | JWT | gateway (MCP proxy) | Opens an MCP session; SSE stream |
 | `/message?sessionId=<id>` | POST | JWT | gateway (MCP proxy) | JSON-RPC `tools/call`; result via SSE, not the response body |
 | `/api/v1/service-a/hello` | GET | JWT + DB policy | service-a | Demo endpoint, calls service-b |
@@ -298,17 +372,24 @@ coexisting with Gateway routing on non-overlapping paths.
    does a non-blocking `Sinks.Many.tryEmitNext`, drained by one subscriber on
    `Schedulers.boundedElastic()`. Logs today; swapping `persist()` for an
    InfluxDB line-protocol write is the only change needed for a real TSDB.
+   Also logged synchronously via `ZteAuditLogger.policyDecision(...)`
+   (ADR-011), the same call used by the REST-path filters.
 6. `POST /message` always returns `202 Accepted` — the real answer only ever
    arrives over SSE.
 
 ### 8.3 Current policy logic
 
-`DummyMcpPolicyEngine` — a fixed in-memory deny-list, **not** per-agent:
-denies exact matches on `export_all_data`, `delete_all`, `drop_table`, plus
-any tool name containing `delete` or `drop` (case-insensitive). Demonstrates
-interception; not a real authorization model. `agentId` is threaded through
-the whole call path already, so wiring in a real per-agent grant is additive,
-not a rewrite.
+`YamlMcpPolicyEngine` (ADR-011, replacing the Stage 8 `DummyMcpPolicyEngine`
+placeholder) — real per-agent authorization: matches `(agentId, toolName)`
+against the `agentMcpToolCalls` rules in `zte-policies.yaml` via the shared
+`PolicyMatcher` (deny always overrides allow); no match resolves to
+`zte.policy.default-effect` (default `DENY`). `evaluate()` stays synchronous
+and zero-I/O per ADR-009 §8.2 — it reads `PolicyDefinitionStore`'s
+`AtomicReference` snapshot, never fetches inline. The default shipped rule set
+denies destructive-shaped tool names (`delete*`, `drop*`, `export_all_data`)
+for every agent, plus explicit grants for Agent A (`get_deals`) and Agent B
+(`update_deal_stage`) — see `zte-policies.yaml`'s header comment for why it's
+this conservative by default.
 
 ### 8.4 Testing
 
@@ -317,9 +398,12 @@ the real running gateway (Testcontainers Postgres + Keycloak, WireMock
 standing in for the MCP backend, same pattern as `HappyPathIT`): opens
 `GET /sse`, extracts the `sessionId` from the `endpoint` handshake event, fires
 `POST /message`, and asserts the result lands on the still-open SSE stream —
-covering the deny path (backend never called), the allow path (forwarded to
-WireMock, result relayed), and an unknown-`sessionId` 400. `McpSessionManagerTest`
-and `DummyMcpPolicyEngineTest` (unit) continue to cover those two components in
+covering an allowed call (forwarded to WireMock, result relayed), a tool with
+no grant, a destructive-shaped tool caught by the deny-list (both: backend
+never called), no-token 401, and an unknown-`sessionId` 400.
+`McpProxySecurityWebFluxTest` (`src/test`) covers the same allow/deny paths as
+a fast `@WebFluxTest` slice without Docker. `McpSessionManagerTest` and
+`YamlMcpPolicyEngineTest` (unit) continue to cover those two components in
 isolation.
 
 ### 8.5 Gaps (carried from ADR-009 + implementation-time critique)
@@ -340,21 +424,28 @@ isolation.
 
 ### 9.1 Completed (see §2 for commits/ADRs)
 
-Stages 1–8, plus the two undated additions (pre-commit doc automation,
+Stages 1–10, plus the two undated additions (pre-commit doc automation,
 `.env` config) — all ✅.
 
-### 9.2 Backlog — general (from `CLAUDE.md` Stage 9+)
+### 9.2 Backlog — general (from `CLAUDE.md` Stage 11+)
 
+- [ ] Full users2service migration to YAML-only, retiring `access_policies`/
+      `PolicyService` — deliberate future ADR, not attempted in Stage 10 (see
+      [ADR-011](adr/ADR-011-yaml-policy-engine.md) Future Migration Path).
+- [ ] Per-category `zte.policy.*.default-effect` overrides (today one
+      `default-effect` applies to service2service and agentMcpToolCalls
+      alike).
+- [ ] Filesystem watch-based auto-reload, layered on
+      `PolicyDefinitionStore.reload()` (today: explicit `POST
+      /api/v1/internal/policies/reload`).
 - [ ] DB-based request audit log (`request_logs` table, V3 Flyway migration)
       — currently log-only via `RequestAuditFilter`.
 - [ ] Distributed tracing: Micrometer Tracing + Zipkin in Docker Compose.
 - [ ] Rate limiting: Spring Cloud Gateway `RequestRateLimiter` (Redis-backed).
-- [ ] `/admin/policies/refresh` actuator endpoint: force `PolicyService`
-      cache invalidation without restart.
 - [ ] Docker Compose production profile: resource limits, health-check
       restart policies.
-- [ ] ABAC extension: `condition` column on `access_policies` (SpEL against
-      JWT claims).
+- [ ] ABAC extension: `condition` field on `PolicyRule`/`access_policies`
+      (SpEL against JWT claims).
 - [ ] Full mTLS system test: service-a + service-b as real Testcontainers
       (covers TLS handshake rejection — current gap per ADR-005 §"mTLS
       Testing Gap").
@@ -363,8 +454,8 @@ Stages 1–8, plus the two undated additions (pre-commit doc automation,
 
 - [x] Integration test: full `GET /sse` → `POST /message` → SSE-injection
       round trip — `McpProxyIT` (see §8.4).
-- [ ] Per-agent authorization in `McpPolicyEngine` (replace the static
-      deny-list; `agentId` is already threaded through, so this is additive).
+- [x] Per-agent authorization in `McpPolicyEngine` — `YamlMcpPolicyEngine`
+      (ADR-011, Stage 10), replacing the static deny-list.
 - [ ] Bounded buffer + overflow policy for `LoggingMcpAuditService`.
 - [ ] Authenticate `McpBackendClient` → backend (bearer token or mTLS,
       matching the service-a/b posture).
@@ -400,12 +491,14 @@ Stages 1–8, plus the two undated additions (pre-commit doc automation,
 | High (prod) | Keycloak client secret (`zte-gateway-secret`) hardcoded in `realm-export.json` | ADR-002 | Dev-only; must be env/secret-manager-injected before staging |
 | Medium | Shared HMAC secret for OBO tokens | ADR-004 | `ZTE_OBO_SECRET` env var; RS256 upgrade deferred (§9.4) |
 | Medium | Server-side TLS cert rotation requires a restart (no hot-reload API) | ADR-004 | 1-year dev certs; production needs cert-manager + rolling restart |
-| Medium | 5-minute policy cache window — a revoked-role JWT still works until refresh | ADR-003 | Accepted for MVP; `/admin/policies/refresh` is backlog (§9.2) |
+| Medium | 5-minute policy cache window — a revoked-role JWT still works until refresh (users2service DB fallback only) | ADR-003 | Accepted for MVP; a YAML DENY rule takes effect immediately via reload (ADR-011), bypassing the DB cache entirely |
+| Medium | Two sources of truth for users2service (YAML + DB) | ADR-011 | YAML only short-circuits on an *explicit* match; shipped default YAML has an empty `users2service` list, so today's DB-only behavior is unchanged until an operator adds YAML rules. Every decision audit-logged with its category. |
 | Medium | mTLS transport-layer enforcement untested in the integration suite (WireMock has no TLS) | ADR-005 | Full mTLS Testcontainers system test is backlog (§9.2) |
 | Medium | MCP session state in-memory, single-instance | ADR-009 / §8.5 | Documented; needs sticky routing or shared store before scaling out |
-| Low–Med | `DummyMcpPolicyEngine` denies by tool name only, not per-agent | ADR-009 / §8.5 | `agentId` already threaded through; backlog item §9.3 |
+| Low | `POST /api/v1/internal/policies/reload` has no auth beyond network-perimeter isolation, same posture as `InternalPolicyController` | ADR-011 | Acceptable for MVP (Docker-bridge only, not proxied externally); noted alongside ADR-007's existing production-upgrade path for the internal endpoints |
 | Low | `LoggingMcpAuditService` buffer is unbounded | §8.5 | Backlog item §9.3 |
 | Low | All DB policies held in one in-memory `Mono` — fine at MVP scale (<100 rows) | ADR-003 | Revisit if the policy table grows large |
+| Low | `PolicyMatcher` is a full linear scan per category per request | ADR-011 | Same `<100 rules` MVP scale ceiling as `access_policies`; negligible at that scale |
 
 ---
 
@@ -422,9 +515,11 @@ Stages 1–8, plus the two undated additions (pre-commit doc automation,
 | [007](adr/ADR-007-policy-auditor-agent.md) | Policy Auditor Agent |
 | [008](adr/ADR-008-dotenv-configuration-management.md) | `.env`-Based Configuration Management |
 | [009](adr/ADR-009-mcp-proxy-interception-layer.md) | MCP Proxy & Interception Layer |
+| [010](adr/ADR-010-agent-oauth2-client-credentials.md) | Agent Auth via OAuth2 Client Credentials, and a Deliberate Dead-End Stub |
+| [011](adr/ADR-011-yaml-policy-engine.md) | YAML-Defined Access Policies (users2service / service2service / agent@mcp) |
 
 ---
 
-*This document reflects repo state at commit `2950ac9`. Keep it in sync the
+*This document reflects repo state as of Stage 10 (YAML Policy Engine). Keep it in sync the
 same way as README/CLAUDE.md — per CLAUDE.md's mandatory workflow, update it
 alongside any task that completes a stage or changes the roadmap.*

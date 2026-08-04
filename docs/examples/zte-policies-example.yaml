@@ -1,0 +1,84 @@
+# Full annotated example of the ZTE YAML policy schema (ADR-011),
+# demonstrating all three categories with both ALLOW and DENY rules.
+#
+# This is documentation, not the file the gateway loads at runtime — the
+# running default is gateway-service/src/main/resources/zte-policies.yaml,
+# deliberately more conservative (see that file's header comment for why).
+#
+# Schema reference: docs/policy-schema.md
+
+schemaVersion: 1
+
+# ── users2service: human user (Keycloak realm role) → gateway REST service ──
+users2service:
+  - id: u2s-admin-full-access
+    effect: ALLOW
+    source: ADMIN              # realm role name
+    target: "*"                # any service behind the gateway
+    pathPattern: "/**"
+    methods: "*"
+    priority: 0
+
+  - id: u2s-user-read-service-a
+    effect: ALLOW
+    source: USER
+    target: service-a
+    pathPattern: "/api/v1/service-a/**"
+    methods: "GET"
+    priority: 0
+
+  - id: u2s-emergency-lockout-service-b
+    effect: DENY                # DENY always wins, even over the ADMIN rule above
+    source: "*"
+    target: service-b
+    pathPattern: "/api/v1/service-b/admin/**"
+    methods: "*"
+    priority: 100
+
+# ── service2service: calling service/agent identity (JWT azp) → gateway REST service ──
+service2service:
+  - id: s2s-agent-a-read-service-a
+    effect: ALLOW
+    source: agent-a
+    target: service-a
+    pathPattern: "/api/v1/service-a/**"
+    methods: "GET"
+    priority: 0
+
+  - id: s2s-deny-agent-b-service-a
+    effect: DENY
+    source: agent-b
+    target: service-a
+    pathPattern: "/**"
+    methods: "*"
+    priority: 10
+
+# ── agentMcpToolCalls: MCP agent identity (JWT azp) → MCP tool name ──
+# pathPattern/methods are not used by this category (left absent/null).
+agentMcpToolCalls:
+  - id: mcp-deny-delete-tools
+    effect: DENY
+    source: "*"
+    target: "delete*"
+    priority: 100
+
+  - id: mcp-deny-export-all-data
+    effect: DENY
+    source: "*"
+    target: export_all_data
+    priority: 100
+
+  - id: mcp-allow-agent-a-get-deals
+    effect: ALLOW
+    source: agent-a
+    target: get_deals
+    priority: 0
+
+  - id: mcp-allow-agent-b-update-deal-stage
+    effect: ALLOW
+    source: agent-b
+    target: update_deal_stage
+    priority: 0
+
+# Anything not matched by an explicit rule above resolves to
+# zte.policy.default-effect (application.yml — default DENY).

@@ -1,0 +1,50 @@
+# ZTE YAML policy definitions (Stage 11 / ADR-011).
+#
+# Schema: docs/policy-schema.md — full annotated example covering all three
+# categories: docs/examples/zte-policies-example.yaml
+#
+# This is the file the running gateway actually loads by default
+# (zte.policy.file, classpath:zte-policies.yaml). It is intentionally
+# conservative for users2service/service2service — both are empty, so those
+# two enforcement paths fall through to their existing behavior (the DB-backed
+# access_policies table, and default-deny for any recognized service
+# principal) exactly as before this feature shipped. agentMcpToolCalls is
+# populated because it is the one category with no prior enforcement to
+# preserve — see ADR-011 for why MCP tool-call policy is YAML-only.
+schemaVersion: 1
+
+users2service: []
+
+service2service: []
+
+agentMcpToolCalls:
+  # Destructive/bulk-export shaped tool names are denied for every agent,
+  # regardless of any ALLOW rule below — DENY always wins (see PolicyMatcher).
+  - id: mcp-deny-delete-tools
+    effect: DENY
+    source: "*"
+    target: "delete*"
+    priority: 100
+  - id: mcp-deny-drop-tools
+    effect: DENY
+    source: "*"
+    target: "drop*"
+    priority: 100
+  - id: mcp-deny-export-all-data
+    effect: DENY
+    source: "*"
+    target: "export_all_data"
+    priority: 100
+
+  # Explicit per-agent grants — everything else falls through to
+  # zte.policy.default-effect (DENY).
+  - id: mcp-allow-agent-a-get-deals
+    effect: ALLOW
+    source: agent-a
+    target: get_deals
+    priority: 10
+  - id: mcp-allow-agent-b-update-deal-stage
+    effect: ALLOW
+    source: agent-b
+    target: update_deal_stage
+    priority: 10
