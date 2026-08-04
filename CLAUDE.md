@@ -45,7 +45,7 @@
 - `./certs`: Dev certificate scripts (`generate-certs.sh`) and generated PKCS12 files (gitignored).
 - `./prompts-hist`: Log of all Gemini-generated instructions.
 - `./docs/adr`: Architectural Decision Records.
-- `./docs/SPEC.md`: Consolidated technical spec — architecture, component specs, data model, API reference, risk register, progress-flagged roadmap. Single reference tying together README, CLAUDE.md, and the ADRs.
+- `./docs/SPECS.md`: Consolidated technical spec — architecture, component specs, data model, API reference, risk register, progress-flagged roadmap. Single reference tying together README, CLAUDE.md, and the ADRs.
 
 ---
 

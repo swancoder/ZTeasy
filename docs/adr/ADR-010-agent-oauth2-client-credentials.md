@@ -106,7 +106,7 @@ to `process`, not a rewire, once that's ready to test end-to-end.
   uses — no new trust boundary introduced.
 - **Gateway ↔ Backend MCP server:** out of scope for this stage by design
   (dead-end). When forwarding is re-enabled, `McpBackendClient`'s existing gap
-  (no auth toward the backend, flagged in ADR-009/`docs/SPEC.md` §8.5) still
+  (no auth toward the backend, flagged in ADR-009/`docs/SPECS.md` §8.5) still
   needs addressing — this stage doesn't make that gap worse or better, it's
   simply not reached.
 
@@ -144,7 +144,7 @@ to `process`, not a rewire, once that's ready to test end-to-end.
 
 - Re-enable `policyEngine.evaluate(...)` + `backendClient.forward(...)` in
   `McpProxyHandler.process`, now keyed on the real `agentId` (client) rather
-  than a placeholder — this is the existing `docs/SPEC.md` §9.3 backlog item
+  than a placeholder — this is the existing `docs/SPECS.md` §9.3 backlog item
   ("Per-agent authorization in `McpPolicyEngine`"), now with real
   distinguishable identities to authorize against.
 - Add an HTTP (or HTTP+SSE) transport to `hubspot_server.py`, or another

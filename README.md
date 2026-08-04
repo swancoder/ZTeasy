@@ -5,7 +5,7 @@ Demonstrating AI-driven development: Gemini as Architect, Claude as Engineer.
 
 For the full technical specification (architecture, component specs, data
 model, API reference, risk register, and the progress-flagged roadmap), see
-[docs/SPEC.md](docs/SPEC.md). This README stays a quick-start summary.
+[docs/SPECS.md](docs/SPECS.md). This README stays a quick-start summary.
 
 ---
 
