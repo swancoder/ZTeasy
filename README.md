@@ -324,4 +324,4 @@ curl -s -H "Authorization: Bearer $TOKEN" http://localhost:8080/api/v1/service-a
 | 7 | `zt-agents` AI copilot module (Kotlin): Policy Auditor Agent + gateway internal endpoint | `c85e77f` |
 | 8 | MCP proxy: GET /sse + POST /message, session manager, policy/audit/masking stubs | `cb5da35` |
 | 9 | Agent OAuth2 Client Credentials auth (agent-a/agent-b), dead-end stub response | `e79994e` |
-| 10 | YAML policy engine: users2service/service2service/agent@mcp allow-deny rules, no-downtime reload, unified audit logging, real MCP enforcement (supersedes Stage 9's stub) | _pending_ |
+| 10 | YAML policy engine: users2service/service2service/agent@mcp allow-deny rules, no-downtime reload, unified audit logging, real MCP enforcement (supersedes Stage 9's stub) | `d76c709` |
