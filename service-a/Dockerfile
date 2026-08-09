@@ -15,6 +15,7 @@ COPY gateway-service/build.gradle.kts gateway-service/
 COPY service-a/build.gradle.kts service-a/
 
 # Copy source
+COPY auth-library/src auth-library/src
 COPY service-a/src service-a/src
 
 RUN chmod +x gradlew && ./gradlew :service-a:bootJar --no-daemon -x test
@@ -23,5 +24,5 @@ RUN chmod +x gradlew && ./gradlew :service-a:bootJar --no-daemon -x test
 FROM eclipse-temurin:21-jre-alpine
 WORKDIR /app
 COPY --from=build /app/service-a/build/libs/service-a.jar app.jar
-EXPOSE 8081
+EXPOSE 8081 9081
 ENTRYPOINT ["java", "-jar", "app.jar"]
