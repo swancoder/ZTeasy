@@ -5,7 +5,6 @@ WORKDIR /workspace
 # Copy Gradle wrapper and version catalog first for layer caching
 COPY gradle/            gradle/
 COPY gradlew            .
-COPY gradle.properties  . 2>/dev/null || true
 COPY build.gradle.kts   .
 COPY settings.gradle.kts .
 
