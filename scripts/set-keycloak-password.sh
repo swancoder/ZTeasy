@@ -10,6 +10,10 @@
 set -euo pipefail
 
 KEYCLOAK_URL="${KEYCLOAK_URL:-http://localhost:8180}"
+# kcadm.sh runs via `docker exec`, i.e. *inside* the container's own network
+# namespace — the host-side 8180 mapping doesn't exist there, only the
+# container's actual listener (KC_HTTP_PORT, 8080).
+KEYCLOAK_INTERNAL_URL="${KEYCLOAK_INTERNAL_URL:-http://localhost:8080}"
 ADMIN_USER="${KEYCLOAK_ADMIN:-admin}"
 ADMIN_PASS="${KEYCLOAK_ADMIN_PASSWORD:-admin}"
 REALM="zte-realm"
@@ -24,7 +28,7 @@ echo "[zte-init] Keycloak is ready."
 
 echo "[zte-init] Authenticating admin CLI ..."
 docker exec zte-keycloak /opt/keycloak/bin/kcadm.sh config credentials \
-  --server "${KEYCLOAK_URL}" \
+  --server "${KEYCLOAK_INTERNAL_URL}" \
   --realm master \
   --user "${ADMIN_USER}" \
   --password "${ADMIN_PASS}"
