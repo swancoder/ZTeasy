@@ -4,9 +4,9 @@ import java.util.List;
 
 /**
  * The parsed, versioned contents of a ZTE YAML policy file — the single runtime
- * source of truth for service2service and agent@mcp/tool-call access decisions,
- * and an additive, deny/allow-first layer in front of the DB-backed
- * {@code PolicyService} for users2service (see {@code ZteAuthorizationFilter}).
+ * source of truth for users2service, service2service, and agent@mcp/tool-call
+ * access decisions alike (see {@code ZteAuthorizationFilter}; ADR-012 retired
+ * the earlier DB-backed fallback for users2service).
  *
  * <p>{@code schemaVersion} must be {@code 1} today — {@link PolicyValidator}
  * rejects anything else, so a future incompatible schema change fails loudly at

@@ -16,7 +16,7 @@ every trust decision is made explicit in code — no service mesh, no "implicit 
 inside the network." Every request must prove:
 
 1. **Who is the user?** — Keycloak JWT (RS256, validated at the gateway)
-2. **Is the user allowed?** — DB-backed access policy (`access_policies` table)
+2. **Is the user allowed?** — YAML-defined access policy (`zte-policies.yaml`, ADR-011/ADR-012)
 3. **Who is the internal caller?** — mTLS client certificate (signed by ZTE CA)
 4. **On whose behalf?** — Signed OBO token (`X-ZTE-User-Context`, HMAC-SHA256, 30s TTL)
 
@@ -28,8 +28,9 @@ inside the network." Every request must prove:
 ┌─────────┐  Keycloak JWT (RS256)   ┌──────────────────────────────────────────┐
 │  User   │ ──────────────────────► │              ZTE Gateway                 │
 └─────────┘                         │  ① Spring Security validates JWT sig     │
-                                    │  ② ZteAuthorizationFilter: DB policy     │
-                                    │     role ∈ access_policies? else 403     │
+                                    │  ② ZteAuthorizationFilter: YAML policy   │
+                                    │     role matches zte-policies.yaml?      │
+                                    │     else 403 (ADR-012: YAML-only)        │
                                     │  ③ UserContextPropagationFilter:         │
                                     │     creates X-ZTE-User-Context (OBO JWT) │
                                     └──────────────┬───────────────────────────┘
@@ -62,7 +63,7 @@ inside the network." Every request must prove:
 | Hop | Mechanism | What it proves |
 |---|---|---|
 | User → Gateway | Keycloak JWT (RS256) | User identity + realm roles |
-| Gateway policy | `access_policies` table (R2DBC) | User is authorised for this path |
+| Gateway policy | `zte-policies.yaml` (`users2service` rules, ADR-011/ADR-012) | User is authorised for this path |
 | OBO token | HMAC-SHA256 JWT, 30s TTL | Gateway delegated on behalf of this user |
 | Gateway → Service A | mTLS (`client.p12` / ZTE CA) | Caller is an authorised ZTE service |
 | Service A → Service B | mTLS (`client.p12` / ZTE CA) | Caller is an authorised ZTE service |
@@ -81,16 +82,21 @@ zte-lightweight/
 │   └── UserContextTokenService       HMAC-SHA256 OBO token create/validate
 │
 ├── gateway-service/       ZTE entry point — port 8080 (HTTP)
-│   ├── ZteAuthorizationFilter        users2service: YAML-first, DB fallback (HIGHEST_PRECEDENCE+100)
+│   ├── ZteAuthorizationFilter        users2service: YAML-only, deny-by-default (HIGHEST_PRECEDENCE+100, ADR-012)
 │   ├── ServiceToServiceAuthorizationFilter  service2service: YAML-only, default-deny (HIGHEST_PRECEDENCE+150)
 │   ├── UserContextPropagationFilter  OBO token injection (HIGHEST_PRECEDENCE+200)
 │   ├── MtlsHttpClientConfig         Netty HttpClient with client.p12
-│   ├── PolicyService                 R2DBC policy cache (Mono.cache, 5-min TTL) — users2service DB fallback
-│   ├── policy/def/                   YAML policy engine (see ADR-011): PolicyDefinitionStore,
-│   │                                 PolicyMatcher, PolicyValidator, YamlPolicyFileLoader
+│   ├── policy/def/                   YAML policy engine (see ADR-011/ADR-012): PolicyDefinitionStore,
+│   │                                 PolicyMatcher, PolicyValidator, YamlPolicyFileLoader, RealmRoles
 │   ├── GatewayRouteConfig            Routes: /api/v1/service-a/**, /api/v1/service-b/**
-│   ├── InternalPolicyController      GET /api/v1/internal/policies (agent data provider)
+│   ├── InternalPolicyController      GET /api/v1/internal/policies (agent data provider, YAML-backed)
 │   ├── PolicyReloadController        POST /api/v1/internal/policies/reload (no-downtime reload)
+│   ├── admin/                        Admin Console API (see ADR-012)
+│   │   ├── AdminPolicyController     GET /api/v1/admin/policies, POST .../reload (ADMIN JWT required)
+│   │   ├── AdminAuthorizationFilter  Plain WebFilter enforcing users2service on /api/v1/admin/**
+│   │   │                             (ZteAuthorizationFilter's GlobalFilter type doesn't run for
+│   │   │                             non-Gateway-routed local controllers — see its Javadoc)
+│   │   └── AdminUiConfig             permitAll + static resource serving for /admin/**
 │   └── mcp/                          MCP proxy — GET /sse, POST /message (see ADR-009)
 │       ├── McpProxyHandler           Policy check, deny-via-SSE, backend forward
 │       ├── McpSessionManager         sessionId → SSE sink (cross-request injection)
@@ -110,6 +116,12 @@ zte-lightweight/
 │   ├── PolicyAuditorService          Fetches policies → prompts Claude → returns Markdown
 │   ├── AnthropicClient               WebClient wrapper for Anthropic Messages API
 │   └── GatewayClient                 Fetches /api/v1/internal/policies from gateway
+│
+├── zt-admin-ui/           React Admin Console (Vite/TS/MUI) — see ADR-012
+│   ├── src/App.tsx        Login gate (react-oidc-context) + dashboard shell
+│   ├── src/PolicyDashboard.tsx  Fetches/renders policies, "Reload Policies" button
+│   └── (plain npm project, not a Gradle subproject — built by gateway-service's
+│        build.gradle.kts via the node-gradle plugin, packaged into its jar)
 │
 ├── certs/
 │   └── generate-certs.sh  Generates ZTE-CA, client.p12, service-a.p12, service-b.p12
@@ -140,6 +152,7 @@ zte-lightweight/
 | [ADR-009](docs/adr/ADR-009-mcp-proxy-interception-layer.md) | MCP Proxy & Interception Layer — WebFlux Router + Session Manager | Accepted |
 | [ADR-010](docs/adr/ADR-010-agent-oauth2-client-credentials.md) | Agent Auth via OAuth2 Client Credentials, and a Deliberate Dead-End Stub | Accepted |
 | [ADR-011](docs/adr/ADR-011-yaml-policy-engine.md) | YAML-Defined Access Policies (users2service / service2service / agent@mcp) | Accepted |
+| [ADR-012](docs/adr/ADR-012-full-yaml-migration-and-admin-console.md) | Full YAML Policy Migration and React Admin Console | Accepted |
 
 ---
 
@@ -206,17 +219,19 @@ does the token fetch, `GET /sse` handshake, and `POST /message` for both agents 
 
 ---
 
-## YAML Policy Engine (Stage 10)
+## YAML Policy Engine (Stage 10, full migration Stage 11 / ADR-012)
 
 A single YAML file (`gateway-service/src/main/resources/zte-policies.yaml`, path
 configurable via `zte.policy.file`) defines allow/deny rules for three relationship
-categories, loaded and validated at startup and hot-swappable at runtime — see
-[ADR-011](docs/adr/ADR-011-yaml-policy-engine.md) and
+categories, loaded and validated at startup and hot-swappable at runtime, and is the
+**sole** source of truth for all three (no DB fallback anywhere, as of ADR-012 — see
+[ADR-011](docs/adr/ADR-011-yaml-policy-engine.md),
+[ADR-012](docs/adr/ADR-012-full-yaml-migration-and-admin-console.md), and
 [`docs/policy-schema.md`](docs/policy-schema.md) for the full schema and precedence rules.
 
-| Category | Governs | Enforced by | Fallback on no match |
+| Category | Governs | Enforced by | On no match |
 |---|---|---|---|
-| `users2service` | User (realm role) → gateway REST service | `ZteAuthorizationFilter` | DB-backed `access_policies` (ADR-003) |
+| `users2service` | User (realm role) → gateway REST service | `ZteAuthorizationFilter` (Gateway-routed paths); `AdminAuthorizationFilter` (`/api/v1/admin/**` — see ADR-012 for why a local `@RestController` needs its own filter) | Deny |
 | `service2service` | Calling service/agent (JWT `azp`) → gateway REST service | `ServiceToServiceAuthorizationFilter` | `zte.policy.default-effect` (default `DENY`) |
 | `agentMcpToolCalls` | MCP agent (JWT `azp`) → MCP tool name | `YamlMcpPolicyEngine` | `zte.policy.default-effect` (default `DENY`) |
 
@@ -261,7 +276,9 @@ Every rule, in every category, shares one shape:
        methods: "POST"
    ```
 
-2. Restart the gateway, **or** reload without downtime:
+2. Restart the gateway, **or** reload without downtime — either the unauthenticated
+   ops/tooling endpoint, or the ADMIN-JWT-gated one the Admin Console UI uses (see
+   [Admin Console](#admin-console-adr-012) below):
 
    ```bash
    curl -s -X POST http://localhost:8080/api/v1/internal/policies/reload | python3 -m json.tool
@@ -271,6 +288,36 @@ Every rule, in every category, shares one shape:
    previously active policy set stays in effect — the reload response reports the errors.
 3. Check the gateway log for the `[ZTE-AUDIT]` `POLICY_ALLOW`/`POLICY_DENY` line naming
    the matched rule `id` to confirm it's taking effect.
+
+---
+
+## Admin Console (ADR-012)
+
+A React/Vite/TypeScript SPA (`zt-admin-ui/`), built by `gateway-service`'s own Gradle
+build and served statically at `http://localhost:8080/admin/index.html` — no separate
+process to run. Shows the full active YAML policy set (all three categories) and a
+"Reload Policies" button.
+
+**Login flow:** the SPA itself is served unauthenticated (`/admin/**`, permitAll) — it
+redirects to Keycloak (`react-oidc-context`, client `zte-admin-ui`, PKCE) and only then
+calls the gateway's JSON API with a bearer token. The API (`/api/v1/admin/**`) requires
+a valid JWT **and** the `ADMIN` realm role (enforced by the `u2s-admin-console-api` YAML
+rule in `zte-policies.yaml`) — a `USER`-role login gets `403` from the API even though
+the page itself loads.
+
+```bash
+# 1. Build + start the gateway (npm install/build runs automatically as part of the Gradle build)
+./gradlew :gateway-service:bootRun
+
+# 2. Open the console
+open http://localhost:8080/admin/index.html   # or just visit it in a browser
+
+# 3. Log in as zte-admin / Admin@123!
+```
+
+**Building without Node/npm installed:** `./gradlew build -x :gateway-service:buildAdminUi`
+skips the React build (mirrors the existing `-x :zt-agents:compileKotlin` escape hatch for
+the no-API-key case) — the gateway still builds and runs, just without `/admin/**` content.
 
 ---
 
@@ -319,7 +366,9 @@ curl -s --max-time 150 -X POST http://localhost:8083/api/v1/agents/auditor/run |
 ## Quick Start
 
 ```bash
-# 1. Prerequisites: Java 21, Docker Desktop, openssl, keytool
+# 1. Prerequisites: Java 21, Docker Desktop, openssl, keytool, Node.js + npm
+#    (Node/npm build the Admin Console — see "Building without Node/npm installed" above
+#    if you want to skip it)
 
 # 2. Generate development certificates
 chmod +x certs/generate-certs.sh && ./certs/generate-certs.sh
@@ -370,3 +419,4 @@ curl -s -H "Authorization: Bearer $TOKEN" http://localhost:8080/api/v1/service-a
 | 8 | MCP proxy: GET /sse + POST /message, session manager, policy/audit/masking stubs | `cb5da35` |
 | 9 | Agent OAuth2 Client Credentials auth (agent-a/agent-b), dead-end stub response | `e79994e` |
 | 10 | YAML policy engine: users2service/service2service/agent@mcp allow-deny rules, no-downtime reload, unified audit logging, real MCP enforcement (supersedes Stage 9's stub) | `d76c709` |
+| 11 | Full YAML migration (retired `access_policies`/`PolicyService`) + React Admin Console (`zt-admin-ui`), new ADMIN-JWT-gated admin API, `AdminAuthorizationFilter` (WebFilter, not GlobalFilter — see ADR-012) | _pending_ |

@@ -1,6 +1,5 @@
 package com.zte.gateway.filter;
 
-import com.zte.gateway.policy.PolicyService;
 import com.zte.gateway.policy.def.PolicyDefaultsProperties;
 import com.zte.gateway.policy.def.PolicyDefinitionStore;
 import com.zte.gateway.policy.def.PolicyDocument;
@@ -38,14 +37,13 @@ import static org.mockito.Mockito.*;
  * via {@link ReactiveSecurityContextHolder#withAuthentication} so no Spring
  * application context is required. {@link PolicyDefinitionStore} is mocked to
  * return an empty {@link PolicyDocument} by default, so YAML evaluation always
- * falls through to {@code NO_MATCH} and the pre-ADR-011 DB-only behavior is
- * exercised unchanged unless a test explicitly loads YAML rules via
+ * falls through to {@code NO_MATCH} (deny — ADR-012, YAML is the sole
+ * users2service source) unless a test explicitly loads YAML rules via
  * {@link #withYamlRules}.
  */
 @ExtendWith(MockitoExtension.class)
 class ZteAuthorizationFilterTest {
 
-    @Mock PolicyService          policyService;
     @Mock PolicyDefinitionStore  policyDefinitionStore;
     @Mock GatewayFilterChain     chain;
 
@@ -58,7 +56,7 @@ class ZteAuthorizationFilterTest {
         defaults = new PolicyDefaultsProperties();
         defaults.setUserClientId("zte-gateway");
         lenient().when(policyDefinitionStore.current()).thenReturn(PolicyDocument.empty());
-        filter = new ZteAuthorizationFilter(policyService, policyDefinitionStore, matcher, defaults);
+        filter = new ZteAuthorizationFilter(policyDefinitionStore, matcher, defaults);
     }
 
     // ── helpers ──────────────────────────────────────────────────────────────
@@ -99,7 +97,7 @@ class ZteAuthorizationFilterTest {
 
     /**
      * When no security context is present (public / unauthenticated path) the filter
-     * must not call PolicyService and must forward to the next filter.
+     * forwards to the next filter without any policy evaluation.
      */
     @Test
     void noSecurityContext_forwardsToChain() {
@@ -110,7 +108,6 @@ class ZteAuthorizationFilterTest {
                 .verifyComplete();
 
         verify(chain).filter(ex);
-        verifyNoInteractions(policyService);
     }
 
     /**
@@ -132,39 +129,16 @@ class ZteAuthorizationFilterTest {
                 .verifyComplete();
 
         verify(chain).filter(ex);
-        verifyNoInteractions(policyService);
     }
 
     /**
-     * JWT bearer with a role that matches a policy → 200, chain called.
-     * No YAML rule matches (empty document) — falls back to PolicyService, unchanged.
+     * No YAML rule matches the request (empty policy document) → deny. As of
+     * ADR-012 there is no DB fallback — silence in the YAML means no access.
      */
     @Test
-    void jwtWithAllowedRole_callsChain() {
-        when(chain.filter(any())).thenReturn(Mono.empty());
-        when(policyService.isAllowed(any(), any(), any())).thenReturn(Mono.just(true));
-
-        MockServerWebExchange ex    = exchange();
-        JwtAuthenticationToken auth = jwtAuth(List.of("ADMIN"));
-
-        StepVerifier.create(
-                filter.filter(ex, chain)
-                      .contextWrite(ReactiveSecurityContextHolder.withAuthentication(auth)))
-                .verifyComplete();
-
-        verify(chain).filter(ex);
-        verify(policyService).isAllowed(List.of("ADMIN"), "/api/v1/service-a/hello", "GET");
-    }
-
-    /**
-     * JWT bearer whose role has no matching policy → 403, chain never called.
-     */
-    @Test
-    void jwtWithDeniedRole_returns403AndDoesNotCallChain() {
-        when(policyService.isAllowed(any(), any(), any())).thenReturn(Mono.just(false));
-
+    void noYamlRuleMatch_returns403AndDoesNotCallChain() {
         MockServerWebExchange  ex   = exchange();
-        JwtAuthenticationToken auth = jwtAuth(List.of("USER"));
+        JwtAuthenticationToken auth = jwtAuth(List.of("ADMIN"));
 
         StepVerifier.create(
                 filter.filter(ex, chain)
@@ -176,10 +150,10 @@ class ZteAuthorizationFilterTest {
     }
 
     /**
-     * An explicit YAML DENY rule short-circuits: PolicyService (DB) is never consulted.
+     * An explicit YAML DENY rule short-circuits the decision.
      */
     @Test
-    void yamlExplicitDeny_returns403_neverConsultsDbPolicyService() {
+    void yamlExplicitDeny_returns403() {
         withYamlRules(new PolicyRule("d1", RuleEffect.DENY, "ADMIN", "service-a", null, null, 0));
 
         MockServerWebExchange  ex   = exchange();
@@ -191,15 +165,14 @@ class ZteAuthorizationFilterTest {
                 .verifyComplete();
 
         verify(chain, never()).filter(any());
-        verifyNoInteractions(policyService);
         assertThat(ex.getResponse().getStatusCode()).isEqualTo(HttpStatus.FORBIDDEN);
     }
 
     /**
-     * An explicit YAML ALLOW rule short-circuits: PolicyService (DB) is never consulted.
+     * An explicit YAML ALLOW rule short-circuits the decision and forwards to the chain.
      */
     @Test
-    void yamlExplicitAllow_callsChain_neverConsultsDbPolicyService() {
+    void yamlExplicitAllow_callsChain() {
         when(chain.filter(any())).thenReturn(Mono.empty());
         withYamlRules(new PolicyRule("a1", RuleEffect.ALLOW, "ADMIN", "service-a", null, null, 0));
 
@@ -212,7 +185,6 @@ class ZteAuthorizationFilterTest {
                 .verifyComplete();
 
         verify(chain).filter(ex);
-        verifyNoInteractions(policyService);
     }
 
     /**
@@ -221,7 +193,7 @@ class ZteAuthorizationFilterTest {
      * passes it straight through for ServiceToServiceAuthorizationFilter to decide.
      */
     @Test
-    void servicePrincipalToken_noRealmRoles_passesThroughWithoutDbLookup() {
+    void servicePrincipalToken_noRealmRoles_passesThrough() {
         when(chain.filter(any())).thenReturn(Mono.empty());
 
         MockServerWebExchange  ex   = exchange();
@@ -233,6 +205,5 @@ class ZteAuthorizationFilterTest {
                 .verifyComplete();
 
         verify(chain).filter(ex);
-        verifyNoInteractions(policyService);
     }
 }

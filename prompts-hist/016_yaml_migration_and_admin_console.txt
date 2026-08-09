@@ -1,0 +1,86 @@
+Full YAML policy migration + React Admin Console — session prompt from
+"Senior Solution Architect / Frontend & Security Expert" role.
+
+Original prompt (paraphrased — full text requested CoT/Self-Criticism/ADR
+protocol per CLAUDE.md, and gave six numbered task groups):
+  1. Complete the migration of users2service policies from DB to YAML
+     (closing the technical debt from ADR-011).
+  2. Build a React/Vite Admin Console (TypeScript, Material UI) served
+     statically by the Gateway, authenticated via Keycloak
+     (react-oidc-context).
+
+Task groups as given:
+  1. DB Cleanup — Flyway migration dropping access_policies, delete
+     AccessPolicyRepository, remove R2DBC if unused, "refactor PolicyService
+     to strictly use the YAML loader, remove all fallback logic."
+  2. Admin API — GET /api/v1/admin/policies (ADMIN role), POST
+     /api/v1/admin/policies/reload (ADMIN role).
+  3. Keycloak — new public client zte-admin-ui, standard flow + PKCE.
+  4. React Admin Console — Vite+React+TS, MUI, react-oidc-context, base
+     path /admin/, policy table + reload button.
+  5. Gradle build integration — node-gradle plugin, npm install/build
+     wired into gateway-service's processResources, output packaged into
+     the jar and served at http://localhost:8080/admin/index.html.
+  6. Security & routing — /admin/** and its assets unauthenticated
+     (SPA handles its own login), /api/** stays a Resource Server.
+
+Used EnterPlanMode given the scope (DB migration, new API, new Keycloak
+client, new npm project, new Gradle build wiring, new security config) —
+ran 3 parallel Explore agents (policy/DB layer, Gradle/module conventions,
+Keycloak/security config) before drafting the plan, plus direct reads of
+the riskiest files (ZteAuthorizationFilter, RequestTargetResolver,
+zt-agents' GatewayClient/PolicyDto) to close gaps the agents' summaries
+left open.
+
+---
+
+Deviations from the literal prompt wording (see ADR-012 for full reasoning):
+
+- "Refactor PolicyService to strictly use the YAML loader" → deleted
+  PolicyService/AccessPolicy/AccessPolicyRepository outright instead.
+  ZteAuthorizationFilter already evaluates YAML directly via PolicyMatcher;
+  a YAML-backed PolicyService would just be a second implementation of the
+  same logic. ADR-011's own Future Migration Path already said "retiring
+  access_policies and PolicyService."
+- Refactored InternalPolicyController (GET /api/v1/internal/policies) to
+  read from PolicyDefinitionStore instead of leaving/deleting it — not in
+  the task list, but zt-agents' GatewayClient depends on this endpoint's
+  exact response shape (PolicyDto mirrors the DB row). Traced the caller
+  before deleting anything; updated PolicyDto to the PolicyRule shape.
+- zt-admin-ui is a plain npm directory, not a Gradle subproject (not added
+  to settings.gradle.kts). Root build.gradle.kts's subprojects{} block
+  unconditionally applies Java/Spring-BOM config to every included module —
+  wrong for a project with no Java sources. The node-gradle plugin is
+  applied directly inside gateway-service/build.gradle.kts instead,
+  pointed at ../zt-admin-ui via nodeProjectDir.
+- SPA redirect_uri points at the literal /admin/index.html (matching the
+  prompt's own stated serving URL), not a bare /admin/. An initial attempt
+  built a custom PathResourceResolver for the bare-directory case; it
+  didn't work (still 404'd) and wasn't even the asked-for URL once
+  re-read — removed.
+
+Real bug found and fixed during this session (not anticipated by the plan):
+  ZteAuthorizationFilter implements Spring Cloud Gateway's GlobalFilter,
+  which only runs for requests routed through a configured
+  GatewayRouteConfig route. /api/v1/admin/** is a local @RestController
+  with no route entry, so the filter never ran for it at all — a manual
+  curl with a USER-role JWT returned 200 from the new admin API before this
+  was caught. Fixed with a new, narrowly-scoped AdminAuthorizationFilter
+  (a genuine WebFilter, which — unlike GlobalFilter — wraps the whole
+  WebFlux dispatch regardless of routing), reusing the same
+  PolicyMatcher/PolicyDefinitionStore evaluation. Caught by hand-testing
+  with real Keycloak tokens against the running gateway, not by unit tests
+  alone — the first fix attempt (switchIfEmpty-based) then hit a second,
+  related bug (switchIfEmpty can't detect emptiness through a Mono<Void>
+  chain, since a successful Void completion and an empty one look
+  identical — double-invoked the 403 write, crashing on the second write
+  to an already-committed response). Both bugs, and the fix, are documented
+  in AdminAuthorizationFilter's Javadoc and ADR-012, plus pinned down by a
+  new AdminAuthorizationFilterTest so they can't silently regress.
+
+Key prompt pattern: for large multi-part specs handed over as a finished
+"architect's plan," verify the plan's own factual claims about existing code
+behavior (here: "ZteAuthorizationFilter runs as a global filter on every
+request") against the running system before trusting them — a claim can be
+accurate for every case actually exercised so far (permitAll internal
+endpoints) and still be wrong for a new case that actually depends on it.

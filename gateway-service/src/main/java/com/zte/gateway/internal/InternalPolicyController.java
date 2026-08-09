@@ -1,38 +1,43 @@
 package com.zte.gateway.internal;
 
-import com.zte.gateway.policy.AccessPolicy;
-import com.zte.gateway.policy.AccessPolicyRepository;
+import com.zte.gateway.policy.def.PolicyDefinitionStore;
+import com.zte.gateway.policy.def.PolicyRule;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
-import reactor.core.publisher.Flux;
+
+import java.util.List;
 
 /**
- * Internal REST endpoint that exposes all access policies for consumption
- * by ZTE internal agents (e.g., the Policy Auditor in {@code zt-agents}).
+ * Internal REST endpoint that exposes the active {@code users2service} YAML
+ * policy rules for consumption by ZTE internal agents (e.g., the Policy
+ * Auditor in {@code zt-agents}).
  *
  * <p>Security: restricted to {@code /api/v1/internal/**} which is served
  * without JWT validation by {@link InternalSecurityConfig}. Access is
  * enforced at the network layer (Docker bridge — not exposed via public routing).
  *
- * <p>This controller queries the DB directly (bypassing the 5-min policy cache
- * in {@code PolicyService}) so that audit agents always see the latest state.
+ * <p>As of ADR-012, {@code users2service} is YAML-only (no more DB-backed
+ * {@code access_policies}), so this reads {@link PolicyDefinitionStore}'s
+ * in-memory snapshot directly — zero I/O, always current (including after a
+ * {@code POST /api/v1/internal/policies/reload}).
  *
  * <p>Production upgrade: add Keycloak client_credentials grant for zt-agents,
- * create an INTERNAL role, add a DB policy row, and remove the permitAll override.
+ * create an INTERNAL role, add a YAML service2service rule, and remove the
+ * permitAll override.
  */
 @RestController
 @RequestMapping("/api/v1/internal")
 class InternalPolicyController {
 
-    private final AccessPolicyRepository repository;
+    private final PolicyDefinitionStore policyDefinitionStore;
 
-    InternalPolicyController(AccessPolicyRepository repository) {
-        this.repository = repository;
+    InternalPolicyController(PolicyDefinitionStore policyDefinitionStore) {
+        this.policyDefinitionStore = policyDefinitionStore;
     }
 
     @GetMapping("/policies")
-    public Flux<AccessPolicy> listAllPolicies() {
-        return repository.findAll();
+    public List<PolicyRule> listAllPolicies() {
+        return policyDefinitionStore.current().users2service();
     }
 }

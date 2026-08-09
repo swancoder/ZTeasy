@@ -1,19 +1,33 @@
-# ZTE YAML policy definitions (Stage 11 / ADR-011).
+# ZTE YAML policy definitions (Stage 10 / ADR-011, Stage 11 / ADR-012).
 #
 # Schema: docs/policy-schema.md — full annotated example covering all three
 # categories: docs/examples/zte-policies-example.yaml
 #
 # This is the file the running gateway actually loads by default
-# (zte.policy.file, classpath:zte-policies.yaml). It is intentionally
-# conservative for users2service/service2service — both are empty, so those
-# two enforcement paths fall through to their existing behavior (the DB-backed
-# access_policies table, and default-deny for any recognized service
-# principal) exactly as before this feature shipped. agentMcpToolCalls is
-# populated because it is the one category with no prior enforcement to
-# preserve — see ADR-011 for why MCP tool-call policy is YAML-only.
+# (zte.policy.file, classpath:zte-policies.yaml). As of ADR-012, YAML is the
+# sole source of truth for all three categories — there is no DB fallback for
+# users2service anymore (the access_policies table/PolicyService were
+# retired). No YAML match => deny for users2service/service2service, and
+# zte.policy.default-effect for agentMcpToolCalls, same as before.
 schemaVersion: 1
 
-users2service: []
+users2service:
+  # Faithful migration of the old access_policies seed row (V2 Flyway
+  # migration, now dropped by V3) — not a behavior change.
+  - id: u2s-admin-service-a
+    effect: ALLOW
+    source: ADMIN
+    target: service-a
+    pathPattern: /api/v1/service-a/**
+    methods: GET,POST
+
+  # Admin Console API (ADR-012) — ADMIN role only.
+  - id: u2s-admin-console-api
+    effect: ALLOW
+    source: ADMIN
+    target: admin
+    pathPattern: /api/v1/admin/**
+    methods: "*"
 
 service2service: []
 

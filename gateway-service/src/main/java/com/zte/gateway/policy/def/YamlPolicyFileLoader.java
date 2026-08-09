@@ -17,8 +17,8 @@ import java.io.InputStream;
  * <p>Purely synchronous — callers ({@link PolicyDefinitionStore}) are responsible
  * for keeping this off the Netty event loop (wrapped in
  * {@code Mono.fromCallable(...).subscribeOn(Schedulers.boundedElastic())}), matching
- * the blocking-I/O isolation pattern already used for {@code PolicyService}'s R2DBC
- * fallback and {@code LoggingMcpAuditService}'s drain loop.
+ * the blocking-I/O isolation pattern already used by {@code LoggingMcpAuditService}'s
+ * drain loop.
  *
  * <p>Distinguishes the same three failure classes {@code PolicyDefinitionStore}
  * needs to report distinctly: file not found/unreadable, malformed YAML syntax

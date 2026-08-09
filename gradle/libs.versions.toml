@@ -8,6 +8,7 @@ keycloak-testcontainers = "3.3.1"
 wiremock               = "3.0.4"
 kotlin                 = "2.0.21"
 spring-dotenv          = "4.0.0"
+node-gradle            = "7.1.0"
 
 [libraries]
 # Spring Boot starters
@@ -18,13 +19,11 @@ spring-actuator           = { module = "org.springframework.boot:spring-boot-sta
 spring-jdbc               = { module = "org.springframework.boot:spring-boot-starter-jdbc" }
 spring-web                = { module = "org.springframework.boot:spring-boot-starter-web" }
 spring-webflux            = { module = "org.springframework.boot:spring-boot-starter-webflux" }
-spring-r2dbc              = { module = "org.springframework.boot:spring-boot-starter-data-r2dbc" }
 
 # Database
 flyway-core               = { module = "org.flywaydb:flyway-core" }
 flyway-postgres            = { module = "org.flywaydb:flyway-database-postgresql" }
 postgresql-driver         = { module = "org.postgresql:postgresql" }
-r2dbc-postgresql          = { module = "org.postgresql:r2dbc-postgresql" }
 
 # Cryptography — BouncyCastle (X.509 cert utilities in auth-library)
 bouncycastle-provider     = { module = "org.bouncycastle:bcprov-jdk18on", version.ref = "bouncycastle" }
@@ -61,3 +60,4 @@ spring-boot               = { id = "org.springframework.boot", version.ref = "sp
 spring-dependency-mgmt    = { id = "io.spring.dependency-management", version.ref = "springDependency" }
 kotlin-jvm                = { id = "org.jetbrains.kotlin.jvm", version.ref = "kotlin" }
 kotlin-spring             = { id = "org.jetbrains.kotlin.plugin.spring", version.ref = "kotlin" }
+node-gradle               = { id = "com.github.node-gradle.node", version.ref = "node-gradle" }

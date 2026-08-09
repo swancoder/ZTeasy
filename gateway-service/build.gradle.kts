@@ -1,5 +1,34 @@
 plugins {
     alias(libs.plugins.spring.boot)
+    alias(libs.plugins.node.gradle)
+}
+
+// ── Admin Console (ADR-012) — zt-admin-ui/ is a plain npm project, not a
+// Gradle subproject (it has no Java sources; making it one would drag the
+// root build.gradle.kts's unconditional Java/Spring-BOM `subprojects{}`
+// config onto it for no benefit). The node-gradle plugin drives it directly
+// from here instead.
+node {
+    version.set("20.11.0")
+    download.set(false) // use whatever node/npm is already on PATH
+    nodeProjectDir.set(file("${rootDir}/zt-admin-ui"))
+}
+
+val buildAdminUi by tasks.registering(com.github.gradle.node.npm.task.NpmTask::class) {
+    description = "Builds the React Admin Console (zt-admin-ui) via npm run build"
+    dependsOn(tasks.named("npmInstall"))
+    args.set(listOf("run", "build"))
+    inputs.dir(file("${rootDir}/zt-admin-ui/src"))
+    inputs.file(file("${rootDir}/zt-admin-ui/package.json"))
+    inputs.file(file("${rootDir}/zt-admin-ui/package-lock.json"))
+    outputs.dir(file("${rootDir}/zt-admin-ui/dist"))
+}
+
+tasks.named<ProcessResources>("processResources") {
+    dependsOn(buildAdminUi)
+    from(file("${rootDir}/zt-admin-ui/dist")) {
+        into("static/admin")
+    }
 }
 
 // ── Integration-test source set ───────────────────────────────────────────────
@@ -31,15 +60,12 @@ dependencies {
     implementation(libs.spring.oauth2.resource)
     implementation(libs.spring.actuator)
 
-    // Database — JDBC DataSource (Flyway migrations only; not in request path)
+    // Database — JDBC DataSource (Flyway migrations only; ADR-012 retired the
+    // R2DBC-backed access_policies runtime query path — users2service is YAML-only now)
     implementation(libs.spring.jdbc)
     implementation(libs.flyway.core)
     implementation(libs.flyway.postgres)
     runtimeOnly(libs.postgresql.driver)
-
-    // Database — R2DBC (reactive runtime queries: policy engine)
-    implementation(libs.spring.r2dbc)
-    runtimeOnly(libs.r2dbc.postgresql)
 
     // mTLS outbound — Netty SslContext (version from Spring Boot BOM)
     implementation(libs.netty.handler)

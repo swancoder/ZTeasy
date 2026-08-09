@@ -1,11 +1,11 @@
 package com.zte.gateway.filter;
 
 import com.zte.auth.audit.ZteAuditLogger;
-import com.zte.gateway.policy.PolicyService;
 import com.zte.gateway.policy.def.PolicyDefaultsProperties;
 import com.zte.gateway.policy.def.PolicyDefinitionStore;
 import com.zte.gateway.policy.def.PolicyEvaluation;
 import com.zte.gateway.policy.def.PolicyMatcher;
+import com.zte.gateway.policy.def.RealmRoles;
 import com.zte.gateway.policy.def.RequestTargetResolver;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -27,7 +27,6 @@ import reactor.core.publisher.Mono;
 
 import java.nio.charset.StandardCharsets;
 import java.util.List;
-import java.util.Map;
 
 /**
  * Zero Trust authorization filter: enforces users2service access policies on every
@@ -41,10 +40,11 @@ import java.util.Map;
  *       identifies a service principal (not {@code zte.policy.user-client-id}), this is
  *       service2service traffic, not users2service — pass through and let
  *       {@link ServiceToServiceAuthorizationFilter} decide instead.</li>
- *   <li>Consult the YAML {@code users2service} rules (ADR-011) via {@link PolicyMatcher}:
+ *   <li>Consult the YAML {@code users2service} rules (ADR-011/ADR-012) via {@link PolicyMatcher}:
  *       an explicit DENY or ALLOW match short-circuits the decision (deny always wins).</li>
- *   <li>No YAML rule matches → fall back to the DB-backed {@link PolicyService} (ADR-003),
- *       unchanged from pre-ADR-011 behavior.</li>
+ *   <li>No YAML rule matches → deny. YAML is the sole source of truth for users2service
+ *       as of ADR-012 — the DB-backed fallback ({@code PolicyService}/{@code access_policies},
+ *       ADR-003) has been retired.</li>
  *   <li>Denied → write {@code 403 Forbidden} response body and complete without
  *       calling the chain, preventing routing to the downstream service.</li>
  * </ol>
@@ -61,16 +61,13 @@ public class ZteAuthorizationFilter implements GlobalFilter, Ordered {
             "{\"error\":\"Forbidden\",\"message\":\"No policy grants access to this resource\"}"
             .getBytes(StandardCharsets.UTF_8);
 
-    private final PolicyService policyService;
     private final PolicyDefinitionStore policyDefinitionStore;
     private final PolicyMatcher policyMatcher;
     private final PolicyDefaultsProperties policyDefaults;
 
-    public ZteAuthorizationFilter(PolicyService policyService,
-                                   PolicyDefinitionStore policyDefinitionStore,
+    public ZteAuthorizationFilter(PolicyDefinitionStore policyDefinitionStore,
                                    PolicyMatcher policyMatcher,
                                    PolicyDefaultsProperties policyDefaults) {
-        this.policyService = policyService;
         this.policyDefinitionStore = policyDefinitionStore;
         this.policyMatcher = policyMatcher;
         this.policyDefaults = policyDefaults;
@@ -94,7 +91,7 @@ public class ZteAuthorizationFilter implements GlobalFilter, Ordered {
                         return chain.filter(exchange);
                     }
 
-                    List<String> roles = extractRealmRoles(jwtAuth);
+                    List<String> roles = RealmRoles.extract(jwtAuth);
                     String path   = exchange.getRequest().getPath().value();
                     String method = exchange.getRequest().getMethod().name();
 
@@ -121,17 +118,11 @@ public class ZteAuthorizationFilter implements GlobalFilter, Ordered {
                             ZteAuditLogger.policyDecision("users2service", roles.toString(), targetService, ruleId, "ALLOW");
                             yield chain.filter(exchange);
                         }
-                        case NO_MATCH -> policyService.isAllowed(roles, path, method)
-                                .flatMap(allowed -> {
-                                    if (allowed) {
-                                        log.debug("ZT-ALLOW roles={} method={} path={}", roles, method, path);
-                                        ZteAuditLogger.policyAllow("gateway", roles.toString(), method + " " + path);
-                                        return chain.filter(exchange);
-                                    }
-                                    log.warn("ZT-DENY  roles={} method={} path={}", roles, method, path);
-                                    ZteAuditLogger.policyDeny("gateway", roles.toString(), method + " " + path);
-                                    return writeForbidden(exchange);
-                                });
+                        case NO_MATCH -> {
+                            log.warn("ZT-DENY (no yaml rule) roles={} method={} path={}", roles, method, path);
+                            ZteAuditLogger.policyDecision("users2service", roles.toString(), targetService, null, "DENY");
+                            yield writeForbidden(exchange);
+                        }
                     };
                 });
     }
@@ -140,22 +131,6 @@ public class ZteAuthorizationFilter implements GlobalFilter, Ordered {
     private boolean isServicePrincipal(JwtAuthenticationToken jwtAuth) {
         String azp = jwtAuth.getToken().getClaimAsString("azp");
         return azp != null && !azp.equals(policyDefaults.getUserClientId());
-    }
-
-    /**
-     * Extracts realm-level roles from the {@code realm_access.roles} JWT claim.
-     */
-    private List<String> extractRealmRoles(JwtAuthenticationToken jwtAuth) {
-        Map<String, Object> realmAccess = jwtAuth.getToken().getClaimAsMap("realm_access");
-        if (realmAccess == null) return List.of();
-        Object roles = realmAccess.get("roles");
-        if (roles instanceof List<?> list) {
-            return list.stream()
-                    .filter(String.class::isInstance)
-                    .map(String.class::cast)
-                    .toList();
-        }
-        return List.of();
     }
 
     /**

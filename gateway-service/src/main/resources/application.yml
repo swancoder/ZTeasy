@@ -13,9 +13,6 @@ spring:
       maximum-pool-size: 2   # minimal — only for migrations at startup
 
   # ── Flyway schema migrations ──
-  # Explicit JDBC URL required when spring-boot-starter-data-r2dbc is also on the
-  # classpath — Spring Boot 3.4 does not always auto-select the JDBC DataSource for
-  # Flyway in a dual JDBC+R2DBC configuration.
   flyway:
     enabled: true
     url: jdbc:postgresql://${DB_HOST:localhost}:${DB_PORT:5432}/${DB_NAME:zte_db}
@@ -24,16 +21,6 @@ spring:
     locations: classpath:db/migration
     baseline-on-migrate: true
     validate-on-migrate: true
-
-  # ── R2DBC (reactive runtime queries — policy engine) ──
-  r2dbc:
-    url: r2dbc:postgresql://${DB_HOST:localhost}:${DB_PORT:5432}/${DB_NAME:zte_db}
-    username: ${DB_USER:zte_user}
-    password: ${DB_PASSWORD:zte_pass}
-    pool:
-      initial-size: 2
-      max-size: 5
-      max-idle-time: 30m
 
   # ── Spring Cloud Gateway: disable default web (use WebFlux) ──
   main:

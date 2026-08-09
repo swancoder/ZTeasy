@@ -9,10 +9,10 @@ package com.zte.gateway.policy.def;
  * are simply unused (left {@code null}) by agentMcpToolCalls rules, whose "target"
  * is a tool name rather than a service.
  *
- * <p>{@code source} and {@code target} are Ant-style patterns (matched with
- * {@link org.springframework.util.AntPathMatcher}, the same matcher
- * {@code PolicyService} already uses) — {@code "*"} matches anything,
- * {@code "agent-*"} matches a prefix, or an exact string matches itself.
+ * <p>{@code source} and {@code target} are Ant-style patterns, matched via
+ * {@link org.springframework.util.AntPathMatcher} by {@link PolicyMatcher} —
+ * {@code "*"} matches anything, {@code "agent-*"} matches a prefix, or an exact
+ * string matches itself.
  *
  * @param id          unique within the whole {@link PolicyDocument} (validated by {@link PolicyValidator})
  * @param effect      ALLOW or DENY

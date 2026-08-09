@@ -2,7 +2,6 @@ package com.zte.gateway.internal;
 
 import com.zte.gateway.policy.def.PolicyDefinitionStore;
 import com.zte.gateway.policy.def.PolicyReloadResult;
-import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestMapping;
@@ -25,6 +24,11 @@ import java.util.Map;
  * {@code PolicyDefinitionStore.current()} complete against it unaffected. On
  * validation failure, the previous document remains active and the response
  * reports the validation errors — never a partial application.
+ *
+ * <p>ADR-012 adds an ADMIN-JWT-gated counterpart at
+ * {@code POST /api/v1/admin/policies/reload} ({@code AdminPolicyController})
+ * for the human operator via the Admin Console — this endpoint stays as-is for
+ * {@code zt-agents} and ops scripts, which don't carry a user JWT.
  */
 @RestController
 @RequestMapping("/api/v1/internal/policies")
@@ -38,16 +42,6 @@ class PolicyReloadController {
 
     @PostMapping("/reload")
     public Mono<ResponseEntity<Map<String, Object>>> reload() {
-        return policyDefinitionStore.reload().map(this::toResponse);
-    }
-
-    private ResponseEntity<Map<String, Object>> toResponse(PolicyReloadResult result) {
-        if (result.success()) {
-            return ResponseEntity.ok(Map.of("status", "success", "timestamp", result.timestamp().toString()));
-        }
-        return ResponseEntity.status(HttpStatus.BAD_REQUEST).body(Map.of(
-                "status", "failed",
-                "errors", result.errors(),
-                "timestamp", result.timestamp().toString()));
+        return policyDefinitionStore.reload().map(PolicyReloadResult::toResponseEntity);
     }
 }

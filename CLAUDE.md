@@ -14,8 +14,9 @@
 
 
 ## Build & Development Commands
-- **Build Project:** `./gradlew build` (requires `ANTHROPIC_API_KEY` env var for zt-agents, settable via `.env` — see ADR-008)
+- **Build Project:** `./gradlew build` (requires `ANTHROPIC_API_KEY` env var for zt-agents, settable via `.env` — see ADR-008; also requires Node.js/npm, which builds the Admin Console — see ADR-012)
 - **Build (skip zt-agents):** `./gradlew build -x :zt-agents:compileKotlin` (no API key needed)
+- **Build (skip Admin Console):** `./gradlew build -x :gateway-service:buildAdminUi` (no Node/npm needed)
 - **Run Unit Tests:** `./gradlew test`
 - **Run Integration Tests:** `./gradlew integrationTest` (requires Docker; starts Postgres + Keycloak via Testcontainers)
 - **Run All Tests:** `./gradlew test integrationTest`
@@ -42,6 +43,7 @@
 - `./service-a`: First protected downstream service (port 8081 HTTPS/mTLS, 9081 management).
 - `./service-b`: Second protected downstream service — validates OBO token (port 8082 HTTPS/mTLS, 9082 management).
 - `./zt-agents`: AI security copilot (Kotlin Spring Boot WebFlux, port 8083) — Policy Auditor Agent (Anthropic Claude).
+- `./zt-admin-ui`: React Admin Console (Vite/TypeScript/MUI) — plain npm project, built by `gateway-service`'s Gradle build and served at `/admin/` (not run standalone).
 - `./certs`: Dev certificate scripts (`generate-certs.sh`) and generated PKCS12 files (gitignored).
 - `./prompts-hist`: Log of all Gemini-generated instructions.
 - `./docs/adr`: Architectural Decision Records.
@@ -150,18 +152,31 @@
 - [x] Unit tests: `PolicyValidatorTest`, `PolicyMatcherTest`, `YamlPolicyFileLoaderTest`, `PolicyDefinitionStoreTest`, `YamlMcpPolicyEngineTest`, `ServiceToServiceAuthorizationFilterTest`, `DocumentationExampleConformanceTest` (loads `docs/examples/zte-policies-example.yaml` against the real schema); `ZteAuthorizationFilterTest`/`McpProxySecurityWebFluxTest`/`McpProxyIT` updated for the new behavior
 - ADR: ADR-011-yaml-policy-engine.md; schema doc: `docs/policy-schema.md`; full 3-category example: `docs/examples/zte-policies-example.yaml`
 
+### Stage 11 — Full YAML Migration + React Admin Console `COMPLETE`
+- [x] Deleted `PolicyService`, `AccessPolicy`, `AccessPolicyRepository`, and the R2DBC dependencies they were the only consumers of — `users2service` is now YAML-only, same as `service2service`/`agentMcpToolCalls`; `ZteAuthorizationFilter`'s `NO_MATCH` case denies directly instead of falling back to a DB query
+- [x] `V3__drop_access_policies.sql` (Flyway) — drops the now-unused table; `V1`'s `gateway_audit_log` untouched
+- [x] `InternalPolicyController` (`GET /api/v1/internal/policies`) refactored to read `PolicyDefinitionStore` instead of the deleted repository — not originally scoped, but required since `zt-agents`' `GatewayClient`/`PolicyDto` depend on this endpoint; `PolicyDto` updated to the `PolicyRule` shape
+- [x] `gateway-service/admin` (new package) — `AdminPolicyController` (`GET /api/v1/admin/policies` returns the full `PolicyDocument`; `POST /api/v1/admin/policies/reload`, ADMIN-JWT-gated, shares `PolicyReloadResult.toResponseEntity()` with `PolicyReloadController`), `AdminAuthorizationFilter` (plain `WebFilter`, **not** `GlobalFilter` — `ZteAuthorizationFilter`'s type only runs for `GatewayRouteConfig`-routed requests, found empirically when a USER-role JWT got `200` from the admin API before this filter existed), `AdminUiConfig` (`@Order(-90)` permitAll for `/admin/**` only + static resource serving)
+- [x] `RealmRoles` (new shared utility, `policy/def` package) — JWT `realm_access.roles` extraction, used by both `ZteAuthorizationFilter` and `AdminAuthorizationFilter`
+- [x] `zt-admin-ui/` — Vite + React + TypeScript + MUI + `react-oidc-context` SPA; plain npm project, **not** a Gradle subproject (root `build.gradle.kts`'s `subprojects{}` block would wrongly apply Java/Spring-BOM config to it); `base: '/admin/'`, OIDC `redirect_uri` points at the literal `/admin/index.html`
+- [x] `gateway-service/build.gradle.kts` — `com.github.node-gradle.node` plugin applied directly (not via `settings.gradle.kts`), `buildAdminUi` `NpmTask` feeds `processResources`, copying `zt-admin-ui/dist` into `static/admin/`; `-x :gateway-service:buildAdminUi` skips it (mirrors the `-x :zt-agents:compileKotlin` escape hatch)
+- [x] `keycloak/realm-export.json` — new public client `zte-admin-ui` (authorization code + PKCE, no service account)
+- [x] Unit tests: `AdminAuthorizationFilterTest` (pins down both bugs found during implementation — see ADR-012); `ZteAuthorizationFilterTest` updated for deny-on-`NO_MATCH`; `McpProxySecurityWebFluxTest` updated (`@WebFluxTest` slices auto-detect `WebFilter` beans by type across the whole app, so `AdminAuthorizationFilter` needed mock deps added there too)
+- ADR: ADR-012-full-yaml-migration-and-admin-console.md
+
 ---
 
-## Stage 11+ Backlog (Not Yet Implemented)
+## Stage 12+ Backlog (Not Yet Implemented)
 
-- [ ] Full users2service migration to YAML-only, retiring `access_policies`/`PolicyService` — deliberate future ADR, not attempted in Stage 10 (see ADR-011 Future Migration Path)
 - [ ] Per-category `zte.policy.*.default-effect` overrides (today one `default-effect` applies to service2service and agentMcpToolCalls alike)
 - [ ] Filesystem watch-based auto-reload, layered on `PolicyDefinitionStore.reload()` (today: explicit `POST /api/v1/internal/policies/reload`)
 - [ ] HTTP (or HTTP+SSE) transport for `hubspot_server.py` — prerequisite for any real forwarding; it's stdio-only today
 - [ ] Move `agent-a-secret-dev-only`/`agent-b-secret-dev-only` to environment injection before any non-local environment
-- [ ] DB-based request audit log (`request_logs` table, V3 Flyway migration) — currently log-only via `RequestAuditFilter`
+- [ ] DB-based request audit log (`request_logs` table, V4 Flyway migration — V3 is now `drop_access_policies`) — currently log-only via `RequestAuditFilter`
 - [ ] Distributed tracing: Micrometer Tracing + Zipkin in Docker Compose
 - [ ] Rate limiting: Spring Cloud Gateway `RequestRateLimiter` (Redis-backed)
 - [ ] Docker Compose production profile: resource limits, health-check restart policies
-- [ ] ABAC extension: `condition` field on `PolicyRule` / `access_policies` (SpEL evaluated against JWT claims)
+- [ ] ABAC extension: `condition` field on `PolicyRule` (SpEL evaluated against JWT claims)
 - [ ] Full mTLS system test: service-a + service-b as real Testcontainers (covers TLS handshake rejection)
+- [ ] Generic mechanism so a future gateway-local `@RestController` gets users2service enforcement automatically instead of needing its own `AdminAuthorizationFilter`-style `WebFilter` (see ADR-012)
+- [ ] Environment-configurable Keycloak/gateway URLs in `zt-admin-ui` (currently hardcoded in `main.tsx`)

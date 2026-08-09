@@ -1,13 +1,15 @@
-# ZTE YAML Policy Schema (ADR-011)
+# ZTE YAML Policy Schema (ADR-011, ADR-012)
 
 Defines allow/deny access rules for three relationship categories, enforced by
-both the API gateway proxy and the MCP proxy:
+both the API gateway proxy and the MCP proxy. As of ADR-012, YAML is the
+**sole** source of truth for all three categories — there is no DB fallback
+anywhere (the `access_policies` table and `PolicyService` were retired):
 
 | Category | Governs | Enforced by |
 |---|---|---|
-| `users2service` | Human user (Keycloak realm role) → gateway REST service | `ZteAuthorizationFilter` (falls back to the DB-backed `access_policies` table — ADR-003 — when no YAML rule matches) |
-| `service2service` | Calling service/agent identity (JWT `azp`) → gateway REST service | `ServiceToServiceAuthorizationFilter` (YAML-only; no DB fallback) |
-| `agentMcpToolCalls` | MCP agent identity (JWT `azp`) → MCP tool name | `YamlMcpPolicyEngine` (YAML-only; no DB fallback) |
+| `users2service` | Human user (Keycloak realm role) → gateway REST service | `ZteAuthorizationFilter` for Gateway-routed paths; `AdminAuthorizationFilter` for the local `/api/v1/admin/**` controller (see ADR-012 — `GlobalFilter`s don't run for non-routed requests). No match → deny. |
+| `service2service` | Calling service/agent identity (JWT `azp`) → gateway REST service | `ServiceToServiceAuthorizationFilter`. No match → `zte.policy.default-effect`. |
+| `agentMcpToolCalls` | MCP agent identity (JWT `azp`) → MCP tool name | `YamlMcpPolicyEngine`. No match → `zte.policy.default-effect`. |
 
 Full worked example covering all three: [`docs/examples/zte-policies-example.yaml`](examples/zte-policies-example.yaml).
 The file the running gateway actually loads by default: [`gateway-service/src/main/resources/zte-policies.yaml`](../gateway-service/src/main/resources/zte-policies.yaml).
@@ -38,9 +40,10 @@ Every rule, in every category, has the same shape:
 | `methods` | no | string | Comma-separated HTTP verbs, or `"*"`. Omit/`null` to match any method. **Unused by `agentMcpToolCalls`**. |
 | `priority` | no | integer | Tie-breaker *within the same effect* when multiple rules match (higher wins). Default `0`. Never breaks an ALLOW vs DENY tie — see Precedence below. |
 
-`source`/`target`/`pathPattern` are matched with Spring's `AntPathMatcher` (the
-same matcher `PolicyService` already uses for `access_policies`): `"*"` matches
-anything, `"agent-*"` matches a prefix, an exact string matches itself.
+`source`/`target`/`pathPattern` are matched with Spring's `AntPathMatcher`
+(via `PolicyMatcher`, the single shared evaluation engine for all three
+categories): `"*"` matches anything, `"agent-*"` matches a prefix, an exact
+string matches itself.
 
 ## Precedence
 
@@ -53,11 +56,9 @@ For a given request, every rule in the relevant category whose `source`,
    ALLOW candidates** — deny always wins.
 2. Otherwise, if any candidate has `effect: ALLOW`, the request is allowed —
    using the highest-`priority` ALLOW candidate.
-3. Otherwise (no candidate at all): falls through to a category-specific
-   default —
-   - `users2service`: the existing DB-backed `access_policies` table (ADR-003).
-   - `service2service` / `agentMcpToolCalls`: `zte.policy.default-effect`
-     (`application.yml`, default `DENY`).
+3. Otherwise (no candidate at all): deny. `users2service` denies directly
+   (as of ADR-012); `service2service`/`agentMcpToolCalls` resolve to
+   `zte.policy.default-effect` (`application.yml`, default `DENY`).
 
 ## Validation
 
@@ -84,14 +85,16 @@ the errors — never a partial application.
 ## Runtime reload
 
 ```
-POST /api/v1/internal/policies/reload
+POST /api/v1/internal/policies/reload   # unauthenticated, network-perimeter (zt-agents, ops scripts)
+POST /api/v1/admin/policies/reload      # ADMIN-JWT-gated (ADR-012, the Admin Console SPA)
 ```
 
-Re-reads and re-validates the configured file (`zte.policy.file`), atomically
-swapping the active document on success. In-flight requests that already read
-the previous document complete against it — no torn reads, no dropped
-connections. See ADR-011 for why this is an explicit endpoint rather than an
-automatic filesystem watch.
+Both re-read and re-validate the configured file (`zte.policy.file`),
+atomically swapping the active document on success, and render the same
+response shape. In-flight requests that already read the previous document
+complete against it — no torn reads, no dropped connections. See ADR-011 for
+why this is an explicit endpoint rather than an automatic filesystem watch,
+and ADR-012 for why there are two endpoints rather than one.
 
 ## Configuration (`application.yml`)
 
