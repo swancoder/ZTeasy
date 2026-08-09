@@ -52,11 +52,11 @@ auditable — the opposite of a mesh's "hide it in the sidecar" approach. See
 `YamlPolicyFileLoaderTest`, `PolicyDefinitionStoreTest`,
 `DocumentationExampleConformanceTest`), `YamlMcpPolicyEngineTest`, and
 `ServiceToServiceAuthorizationFilterTest` — 53 tests in `gateway-service`
-alone. `McpProxyIT` and the rest of the E2E integration suite were updated for
-Stage 10's real MCP enforcement (allow → forwarded to backend, deny → no
-backend call, both via the default `zte-policies.yaml`) but **could not be
-re-run in the environment this stage was implemented in** (no Docker daemon
-available) — verify with `./gradlew integrationTest` before merging.
+alone. `./gradlew integrationTest` (Testcontainers: Postgres + Keycloak) also
+re-run and green — 12/12 scenarios passing, including `McpProxyIT`'s Stage 10
+real-MCP-enforcement coverage (allow → forwarded to backend, deny → no
+backend call, both via the default `zte-policies.yaml`), `HappyPathIT`, and
+`ZeroTrustBreachIT`.
 
 ---
 
