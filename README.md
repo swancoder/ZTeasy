@@ -220,12 +220,57 @@ categories, loaded and validated at startup and hot-swappable at runtime — see
 | `service2service` | Calling service/agent (JWT `azp`) → gateway REST service | `ServiceToServiceAuthorizationFilter` | `zte.policy.default-effect` (default `DENY`) |
 | `agentMcpToolCalls` | MCP agent (JWT `azp`) → MCP tool name | `YamlMcpPolicyEngine` | `zte.policy.default-effect` (default `DENY`) |
 
-Deny always overrides allow, regardless of priority or declaration order. Reload the active
-policy set without a restart (in-flight requests finish against the pre-reload set):
+Deny always overrides allow, regardless of priority or declaration order. Full schema
+reference (all fields, precedence, validation rules): [`docs/policy-schema.md`](docs/policy-schema.md).
+Full worked example: [`docs/examples/zte-policies-example.yaml`](docs/examples/zte-policies-example.yaml).
 
-```bash
-curl -s -X POST http://localhost:8080/api/v1/internal/policies/reload | python3 -m json.tool
+### Format
+
+```yaml
+schemaVersion: 1        # required, must be exactly 1
+users2service: [ ... ]  # list of rules, may be empty/omitted
+service2service: [ ... ]
+agentMcpToolCalls: [ ... ]
 ```
+
+Every rule, in every category, shares one shape:
+
+| Field | Required | Meaning |
+|---|---|---|
+| `id` | yes | Unique across the whole document — referenced in audit logs and validation errors |
+| `effect` | yes | `ALLOW` or `DENY` |
+| `source` | yes | Caller identity (Ant pattern): realm role name, or service/agent OAuth2 client id |
+| `target` | yes | What's accessed (Ant pattern): service name, or MCP tool name |
+| `pathPattern` | no | Request path scope (Ant pattern); unused by `agentMcpToolCalls` |
+| `methods` | no | Comma-separated HTTP verbs, or `*`; unused by `agentMcpToolCalls` |
+| `priority` | no | Tie-break within the same effect only (default `0`) — never breaks a DENY vs ALLOW tie |
+
+### How to add a rule
+
+1. Edit `gateway-service/src/main/resources/zte-policies.yaml` (or whatever file
+   `zte.policy.file` points at) and add a rule to the relevant category, e.g. to let
+   `USER`s `POST` to service-a:
+
+   ```yaml
+   users2service:
+     - id: u2s-user-write-service-a
+       effect: ALLOW
+       source: USER
+       target: service-a
+       pathPattern: "/api/v1/service-a/**"
+       methods: "POST"
+   ```
+
+2. Restart the gateway, **or** reload without downtime:
+
+   ```bash
+   curl -s -X POST http://localhost:8080/api/v1/internal/policies/reload | python3 -m json.tool
+   ```
+
+   An invalid file (bad schema, duplicate `id`, etc.) fails validation and the
+   previously active policy set stays in effect — the reload response reports the errors.
+3. Check the gateway log for the `[ZTE-AUDIT]` `POLICY_ALLOW`/`POLICY_DENY` line naming
+   the matched rule `id` to confirm it's taking effect.
 
 ---
 
