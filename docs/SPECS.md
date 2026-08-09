@@ -45,7 +45,7 @@ auditable — the opposite of a mesh's "hide it in the sidecar" approach. See
 | 8 | MCP Proxy & Interception Layer | ✅ Complete | `cb5da35` | [009](adr/ADR-009-mcp-proxy-interception-layer.md) |
 | 9 | Agent OAuth2 Client Credentials Auth (dead-end stub) | ✅ Complete | `e79994e` | [010](adr/ADR-010-agent-oauth2-client-credentials.md) |
 | 10 | YAML Policy Engine (users2service / service2service / agent@mcp), no-downtime reload, unified audit, real MCP enforcement | ✅ Complete | `d76c709` | [011](adr/ADR-011-yaml-policy-engine.md) |
-| 11 | Full YAML migration (retired `access_policies`/`PolicyService`) + React Admin Console (`zt-admin-ui`), ADMIN-JWT-gated admin API, `AdminAuthorizationFilter` | ✅ Complete | _pending_ | [012](adr/ADR-012-full-yaml-migration-and-admin-console.md) |
+| 11 | Full YAML migration (retired `access_policies`/`PolicyService`) + React Admin Console (`zt-admin-ui`), ADMIN-JWT-gated admin API, `AdminAuthorizationFilter` | ✅ Complete | `00edf91` | [012](adr/ADR-012-full-yaml-migration-and-admin-console.md) |
 | 12+ | Backlog (audit persistence, tracing, rate limiting, ABAC…) | ⬜ Planned | — | see §9.2 |
 
 **Test status:** all unit tests green (`./gradlew test`), including the
@@ -590,8 +590,7 @@ migration to YAML-only" item that used to be listed below.
 
 ---
 
-*This document reflects repo state as of Stage 11 (Full YAML Migration + Admin Console,
-ADR-012; commit hash pending — filled in by a follow-up commit per this project's
-established pattern). Keep it in sync the same way as README/CLAUDE.md — per CLAUDE.md's
+*This document reflects repo state at commit `00edf91` (Stage 11, Full YAML Migration +
+Admin Console). Keep it in sync the same way as README/CLAUDE.md — per CLAUDE.md's
 mandatory workflow, update it alongside any task that completes a stage or changes the
 roadmap.*
