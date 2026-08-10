@@ -46,7 +46,7 @@ auditable — the opposite of a mesh's "hide it in the sidecar" approach. See
 | 9 | Agent OAuth2 Client Credentials Auth (dead-end stub) | ✅ Complete | `e79994e` | [010](adr/ADR-010-agent-oauth2-client-credentials.md) |
 | 10 | YAML Policy Engine (users2service / service2service / agent@mcp), no-downtime reload, unified audit, real MCP enforcement | ✅ Complete | `d76c709` | [011](adr/ADR-011-yaml-policy-engine.md) |
 | 11 | Full YAML migration (retired `access_policies`/`PolicyService`) + React Admin Console (`zt-admin-ui`), ADMIN-JWT-gated admin API, `AdminAuthorizationFilter` | ✅ Complete | `00edf91` | [012](adr/ADR-012-full-yaml-migration-and-admin-console.md) |
-| 12 | R2DBC-backed `request_logs` audit trail, `X-Request-Id` distributed tracing, `GET /api/v1/admin/audit-logs`, Admin Console "Audit Trail" tab; `RequestAuditFilter` rewritten as a `WebFilter` | ✅ Complete | _pending_ | [013](adr/ADR-013-postgres-audit-logging.md) |
+| 12 | R2DBC-backed `request_logs` audit trail, `X-Request-Id` distributed tracing, `GET /api/v1/admin/audit-logs`, Admin Console "Audit Trail" tab; `RequestAuditFilter` rewritten as a `WebFilter` | ✅ Complete | `e5e1c65` | [013](adr/ADR-013-postgres-audit-logging.md) |
 | 13+ | Backlog (rate limiting, ABAC, MCP-audit unification…) | ⬜ Planned | — | see §9.2 |
 
 **Test status:** all unit tests green (`./gradlew test`), including the
@@ -679,8 +679,7 @@ listed below too.
 
 ---
 
-*This document reflects repo state as of Stage 12 (R2DBC Audit Logging + Distributed
-Tracing, ADR-013; commit hash pending — filled in by a follow-up commit per this
-project's established pattern). Keep it in sync the same way as README/CLAUDE.md — per
-CLAUDE.md's mandatory workflow, update it alongside any task that completes a stage or
-changes the roadmap.*
+*This document reflects repo state at commit `e5e1c65` (Stage 12, R2DBC Audit Logging +
+Distributed Tracing). Keep it in sync the same way as README/CLAUDE.md — per CLAUDE.md's
+mandatory workflow, update it alongside any task that completes a stage or changes the
+roadmap.*

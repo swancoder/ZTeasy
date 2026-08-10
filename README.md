@@ -465,4 +465,4 @@ curl -s -H "Authorization: Bearer $TOKEN" http://localhost:8080/api/v1/service-a
 | 9 | Agent OAuth2 Client Credentials auth (agent-a/agent-b), dead-end stub response | `e79994e` |
 | 10 | YAML policy engine: users2service/service2service/agent@mcp allow-deny rules, no-downtime reload, unified audit logging, real MCP enforcement (supersedes Stage 9's stub) | `d76c709` |
 | 11 | Full YAML migration (retired `access_policies`/`PolicyService`) + React Admin Console (`zt-admin-ui`), new ADMIN-JWT-gated admin API, `AdminAuthorizationFilter` (WebFilter, not GlobalFilter — see ADR-012) | `00edf91` |
-| 12 | R2DBC-backed `request_logs` audit trail, `X-Request-Id` distributed tracing, `GET /api/v1/admin/audit-logs`, Admin Console "Audit Trail" tab; `RequestAuditFilter` rewritten as a WebFilter (ADR-013) | _pending_ |
+| 12 | R2DBC-backed `request_logs` audit trail, `X-Request-Id` distributed tracing, `GET /api/v1/admin/audit-logs`, Admin Console "Audit Trail" tab; `RequestAuditFilter` rewritten as a WebFilter (ADR-013) | `e5e1c65` |
