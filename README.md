@@ -91,12 +91,21 @@ zte-lightweight/
 │   ├── GatewayRouteConfig            Routes: /api/v1/service-a/**, /api/v1/service-b/**
 │   ├── InternalPolicyController      GET /api/v1/internal/policies (agent data provider, YAML-backed)
 │   ├── PolicyReloadController        POST /api/v1/internal/policies/reload (no-downtime reload)
-│   ├── admin/                        Admin Console API (see ADR-012)
+│   ├── admin/                        Admin Console API (see ADR-012, ADR-013)
 │   │   ├── AdminPolicyController     GET /api/v1/admin/policies, POST .../reload (ADMIN JWT required)
+│   │   ├── AdminAuditLogController   GET /api/v1/admin/audit-logs (latest 100, ADMIN JWT required)
 │   │   ├── AdminAuthorizationFilter  Plain WebFilter enforcing users2service on /api/v1/admin/**
 │   │   │                             (ZteAuthorizationFilter's GlobalFilter type doesn't run for
 │   │   │                             non-Gateway-routed local controllers — see its Javadoc)
 │   │   └── AdminUiConfig             permitAll + static resource serving for /admin/**
+│   ├── audit/                        Async request audit trail (see ADR-013)
+│   │   ├── RequestLog                R2DBC record (request_logs table)
+│   │   ├── RequestLogRepository      ReactiveCrudRepository, findTop100ByOrderByTimestampDesc
+│   │   └── RequestLogAuditService    Non-blocking Sinks.Many sink → boundedElastic writer,
+│   │                                 SLF4J fallback on DB failure (mirrors LoggingMcpAuditService)
+│   ├── RequestAuditFilter            Plain WebFilter (not GlobalFilter, ADR-013): X-Request-Id
+│   │                                 resolve/forward, X-User-Id trust boundary, async audit write
+│   │                                 via doFinally (LOWEST_PRECEDENCE-100)
 │   └── mcp/                          MCP proxy — GET /sse, POST /message (see ADR-009)
 │       ├── McpProxyHandler           Policy check, deny-via-SSE, backend forward
 │       ├── McpSessionManager         sessionId → SSE sink (cross-request injection)
@@ -153,6 +162,7 @@ zte-lightweight/
 | [ADR-010](docs/adr/ADR-010-agent-oauth2-client-credentials.md) | Agent Auth via OAuth2 Client Credentials, and a Deliberate Dead-End Stub | Accepted |
 | [ADR-011](docs/adr/ADR-011-yaml-policy-engine.md) | YAML-Defined Access Policies (users2service / service2service / agent@mcp) | Accepted |
 | [ADR-012](docs/adr/ADR-012-full-yaml-migration-and-admin-console.md) | Full YAML Policy Migration and React Admin Console | Accepted |
+| [ADR-013](docs/adr/ADR-013-postgres-audit-logging.md) | R2DBC-Backed Request Audit Logging with Distributed Tracing | Accepted |
 
 ---
 
@@ -319,6 +329,41 @@ open http://localhost:8080/admin/index.html   # or just visit it in a browser
 skips the React build (mirrors the existing `-x :zt-agents:compileKotlin` escape hatch for
 the no-API-key case) — the gateway still builds and runs, just without `/admin/**` content.
 
+**Tabs:** "Policies" (above) and "Audit Trail" (below) — both fetch independently on load.
+
+---
+
+## Audit Trail & Distributed Tracing (ADR-013)
+
+Every gateway request — allowed or denied by policy — is written asynchronously to a
+`request_logs` table in the same Postgres instance already used for Flyway migrations
+(via R2DBC), in addition to the existing synchronous `[ZTE-AUDIT]` SLF4J line. The write
+never blocks the response: `RequestAuditFilter` fires the DB write from a `doFinally`
+callback into a non-blocking sink (mirrors `LoggingMcpAuditService`'s pattern); a DB
+outage degrades to an SLF4J warning instead of losing the event or slowing requests down.
+
+**Distributed tracing:** every request gets an `X-Request-Id` — the caller's own value if
+present, otherwise a new UUID minted by the gateway — which is then guaranteed to be
+forwarded to service-a/service-b, so a single request can be correlated across the whole
+chain. Known gap: a request with **no** `Authorization` header at all (true `401`) is
+rejected by Spring Security before reaching this filter, so it isn't written to
+`request_logs` — every denial scenario tested in this codebase uses a present-but-wrong-role
+JWT (`403`), not a missing token, so this doesn't affect the common case. See
+[ADR-013](docs/adr/ADR-013-postgres-audit-logging.md) for the full reasoning.
+
+```bash
+# Read the latest 100 rows via the admin API (ADMIN JWT required)
+curl -s -H "Authorization: Bearer $TOKEN" http://localhost:8080/api/v1/admin/audit-logs | python3 -m json.tool
+
+# ...or query Postgres directly
+docker exec zte-postgres psql -U zte_user -d zte_db \
+  -c "SELECT trace_id, client_ip, path, status_code FROM request_logs ORDER BY timestamp DESC LIMIT 10;"
+```
+
+Also visible in the Admin Console's "Audit Trail" tab (Timestamp, Trace ID, Client IP,
+Agent/User ID, Path, Status) — `agent_id`/`tool_name` are always blank for REST traffic
+today, reserved for a future MCP-audit unification (see ADR-013 Future Migration Path).
+
 ---
 
 ## AI Security Copilot — `zt-agents`
@@ -420,3 +465,4 @@ curl -s -H "Authorization: Bearer $TOKEN" http://localhost:8080/api/v1/service-a
 | 9 | Agent OAuth2 Client Credentials auth (agent-a/agent-b), dead-end stub response | `e79994e` |
 | 10 | YAML policy engine: users2service/service2service/agent@mcp allow-deny rules, no-downtime reload, unified audit logging, real MCP enforcement (supersedes Stage 9's stub) | `d76c709` |
 | 11 | Full YAML migration (retired `access_policies`/`PolicyService`) + React Admin Console (`zt-admin-ui`), new ADMIN-JWT-gated admin API, `AdminAuthorizationFilter` (WebFilter, not GlobalFilter — see ADR-012) | `00edf91` |
+| 12 | R2DBC-backed `request_logs` audit trail, `X-Request-Id` distributed tracing, `GET /api/v1/admin/audit-logs`, Admin Console "Audit Trail" tab; `RequestAuditFilter` rewritten as a WebFilter (ADR-013) | _pending_ |

@@ -1,3 +1,4 @@
+import { useState } from 'react'
 import { useAuth } from 'react-oidc-context'
 import Box from '@mui/material/Box'
 import Button from '@mui/material/Button'
@@ -5,10 +6,16 @@ import CircularProgress from '@mui/material/CircularProgress'
 import Typography from '@mui/material/Typography'
 import AppBar from '@mui/material/AppBar'
 import Toolbar from '@mui/material/Toolbar'
+import Tabs from '@mui/material/Tabs'
+import Tab from '@mui/material/Tab'
 import PolicyDashboard from './PolicyDashboard'
+import AuditTrail from './AuditTrail'
+
+type View = 'policies' | 'audit'
 
 export default function App() {
   const auth = useAuth()
+  const [view, setView] = useState<View>('policies')
 
   if (auth.isLoading) {
     return (
@@ -50,6 +57,8 @@ export default function App() {
     )
   }
 
+  const accessToken = auth.user?.access_token ?? ''
+
   return (
     <Box>
       <AppBar position="static">
@@ -62,8 +71,21 @@ export default function App() {
             Sign out
           </Button>
         </Toolbar>
+        <Tabs
+          value={view}
+          onChange={(_, next: View) => setView(next)}
+          textColor="inherit"
+          indicatorColor="secondary"
+        >
+          <Tab value="policies" label="Policies" />
+          <Tab value="audit" label="Audit Trail" />
+        </Tabs>
       </AppBar>
-      <PolicyDashboard accessToken={auth.user?.access_token ?? ''} />
+      {view === 'policies' ? (
+        <PolicyDashboard accessToken={accessToken} />
+      ) : (
+        <AuditTrail accessToken={accessToken} />
+      )}
     </Box>
   )
 }

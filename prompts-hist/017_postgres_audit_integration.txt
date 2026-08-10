@@ -1,0 +1,80 @@
+R2DBC-backed audit logging + distributed tracing + Admin UI Audit Trail —
+session prompt from "Senior Solution Architect / Reactive Data Engineer" role.
+
+Original prompt (paraphrased — full text requested CoT/Self-Criticism/ADR
+protocol per CLAUDE.md, and gave five numbered task groups):
+  Upgrade audit logging from synchronous SLF4J to an async, database-backed
+  solution using the existing PostgreSQL instance, visualized in the React
+  Admin Console. Introduce distributed tracing headers (X-Request-Id).
+
+Task groups as given:
+  1. Database Schema — Flyway V4 (adjust version per Stage 11), table
+     request_logs with id/timestamp/trace_id/client_ip/user_agent/process_id/
+     agent_id/tool_name/path/status_code/message, timestamp indexed desc.
+  2. Gateway write path — restore R2DBC (removed in Stage 11), RequestLog
+     record + RequestLogRepository, update ZteAuditLogger + RequestAuditFilter
+     to extract X-Forwarded-For/User-Agent/X-Request-Id (generate+forward if
+     missing), write async, keep SLF4J as fallback.
+  3. Admin read API — GET /api/v1/admin/audit-logs, latest 100 desc, ADMIN
+     role required.
+  4. React Admin Console — new "Audit Trail" tab/DataGrid: Timestamp, Trace
+     ID, Client IP, Agent/User ID, Path, Status.
+  5. Docs — README note on Postgres audit integration + X-Request-Id.
+
+---
+
+Two findings that reshaped the literal task list (see ADR-013 for full
+reasoning):
+
+- RequestAuditFilter had the exact same Mono<Void>+switchIfEmpty
+  double-subscription bug found and fixed in AdminAuthorizationFilter last
+  session (ADR-012) — verified live in production before touching anything:
+  one curl call, checked docker logs zte-service-a, confirmed the backend
+  was hit exactly once (not twice) only because Spring Cloud Gateway's
+  NettyRoutingFilter happens to guard against re-routing an already-routed
+  exchange. Folded the fix (doFinally instead of switchIfEmpty) into the
+  planned rewrite rather than treating it as a separate patch.
+- RequestAuditFilter was a GlobalFilter, so — per ADR-012's own discovery —
+  it never ran for /api/v1/admin/**, /api/v1/internal/**, or any request
+  denied before reaching it. But the task's own verification demands rows
+  for BOTH denied and allowed requests. Converted it to a plain WebFilter
+  (same fix class as AdminAuthorizationFilter), ordered to run after Spring
+  Security's authentication but before AdminAuthorizationFilter, wrapping
+  chain.filter() in doFinally so the final status code is observed
+  regardless of which inner filter set it. Named, undefended gap: true 401
+  (no token at all) still isn't captured, since Security's own filter
+  rejects before reaching this one — documented in ADR-013 rather than
+  silently accepted, and doesn't conflict with the task's verification since
+  every existing "denied" test in this codebase uses a present-but-wrong-role
+  JWT, not a missing token.
+
+Other deviations from literal task wording:
+
+- Consolidated the long-dead V1 gateway_audit_log table into the same V4
+  migration (dropped it) rather than leaving it orphaned alongside the new
+  request_logs table — confirmed zero code references anywhere, same
+  "don't accumulate dead schema artifacts" call made for access_policies in
+  ADR-012.
+- id is DB-generated (UUID DEFAULT gen_random_uuid(), built into Postgres
+  core since v13) rather than app-assigned — Spring Data's standard "null id
+  -> new entity" heuristic applies without a custom Persistable, mirroring
+  the old AccessPolicy record's BIGSERIAL convention.
+- agent_id/tool_name are always null from this integration point (REST
+  gateway only, per the task's explicit Task 2 scope — not
+  LoggingMcpAuditService/MCP) — the given schema has no subject/user-id
+  column at all. Consequence: the UI's "Agent/User ID" column shows blank
+  for all of today's REST traffic. Named as a real tension between Task 1's
+  literal schema and Task 4's literal UI column ask, resolved in favor of
+  the schema and flagged explicitly rather than silently picking one.
+- UI uses the existing plain MUI Table pattern (PolicyDashboard's RuleTable)
+  instead of @mui/x-data-grid — avoids a new dependency with unproven
+  compatibility on the MUI v9 + React 19 combo that already hit one typing
+  quirk last session, and matches the task's own "keep the project strictly
+  Lightweight" framing.
+
+Key prompt pattern: when a task hands you a component you're about to
+significantly modify, read its current implementation in full before
+planning changes to it — the switchIfEmpty bug and the GlobalFilter scoping
+gap were both found by reading RequestAuditFilter.java's existing code
+during planning, not by following the task's instructions literally without
+checking what they'd actually produce.

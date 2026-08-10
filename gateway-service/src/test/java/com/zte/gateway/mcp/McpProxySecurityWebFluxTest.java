@@ -78,15 +78,18 @@ class McpProxySecurityWebFluxTest {
     @MockBean
     private McpBackendClient backendClient;
 
-    // AdminAuthorizationFilter (ADR-012) is a plain WebFilter, so @WebFluxTest's
-    // type-based auto-detection pulls it into this slice too even though this test
-    // never exercises /api/v1/admin/**. Its constructor deps just need to exist —
-    // the filter's own path check means these are never actually invoked here.
+    // AdminAuthorizationFilter (ADR-012) and RequestAuditFilter (ADR-013) are both
+    // plain WebFilters, so @WebFluxTest's type-based auto-detection pulls them into
+    // this slice too even though this test never exercises /api/v1/admin/**. Their
+    // constructor deps just need to exist as mocks.
     @MockBean
     private com.zte.gateway.policy.def.PolicyDefinitionStore policyDefinitionStore;
 
     @MockBean
     private com.zte.gateway.policy.def.PolicyMatcher policyMatcher;
+
+    @MockBean
+    private com.zte.gateway.audit.RequestLogAuditService requestLogAuditService;
 
     @Test
     void sse_withoutToken_returns401() {

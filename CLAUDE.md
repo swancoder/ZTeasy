@@ -164,19 +164,34 @@
 - [x] Unit tests: `AdminAuthorizationFilterTest` (pins down both bugs found during implementation — see ADR-012); `ZteAuthorizationFilterTest` updated for deny-on-`NO_MATCH`; `McpProxySecurityWebFluxTest` updated (`@WebFluxTest` slices auto-detect `WebFilter` beans by type across the whole app, so `AdminAuthorizationFilter` needed mock deps added there too)
 - ADR: ADR-012-full-yaml-migration-and-admin-console.md
 
+### Stage 12 — R2DBC Audit Logging + Distributed Tracing `COMPLETE`
+- [x] Found and fixed, before writing any new code: `RequestAuditFilter` had the same `Mono<Void>`+`switchIfEmpty` double-subscription bug as `AdminAuthorizationFilter` (ADR-012) — verified live (one curl call, `docker logs zte-service-a` showed the backend was hit exactly once, not twice, only because `NettyRoutingFilter` guards against re-routing an already-routed exchange)
+- [x] `RequestAuditFilter` rewritten `GlobalFilter` → `WebFilter` (same fix class as `AdminAuthorizationFilter`) — needed so it sees `/api/v1/admin/**`/`/api/v1/internal/**` traffic *and* requests denied before reaching it; wraps `chain.filter()` in `.doFinally(...)` (not `switchIfEmpty`) so the final status code is observed regardless of outcome. Ordered `LOWEST_PRECEDENCE-100` (after Security, before `AdminAuthorizationFilter`). `X-User-Id` stripping is now unconditional (was JWT-branch-only before) — a strengthening. Named gap: true `401` (no token) still isn't captured, since Security's own filter rejects first — every existing "denied" test in this repo uses a present-but-wrong-role JWT, not a missing token, so this doesn't conflict with anything
+- [x] `V4__create_request_logs_table.sql` (Flyway) — creates `request_logs` (`id UUID DEFAULT gen_random_uuid()`, `timestamp`/`trace_id` indexed) and **drops `gateway_audit_log`** (`V1`, Stage 1 — confirmed zero code references ever, consolidated rather than left orphaned, same call as `access_policies` in ADR-012)
+- [x] R2DBC restored (`spring-r2dbc`/`r2dbc-postgresql`, `spring.r2dbc.*` in `application.yml`) — removed in ADR-012 for a different reason, back for this one. `BaseZteIntegrationTest`'s R2DBC `@DynamicPropertySource` wiring was never deleted, just dormant — needed no changes
+- [x] `gateway-service/audit` (new package) — `RequestLog` (R2DBC record, `id=null` on construction → DB-generated INSERT, no `Persistable` needed), `RequestLogRepository` (`findTop100ByOrderByTimestampDesc`), `RequestLogAuditService` (directly mirrors `LoggingMcpAuditService`'s `Sinks.Many`+`boundedElastic` architecture; DB failure → SLF4J fallback, not lost/propagated)
+- [x] `ZteAuditLogger.requestLog(...)` — sync SLF4J counterpart to the async DB write, same "log both" precedent as ADR-011
+- [x] `AdminAuditLogController` (`GET /api/v1/admin/audit-logs`, `admin` package) — no new security wiring needed, `AdminAuthorizationFilter`'s path check already covers all of `/api/v1/admin/**`
+- [x] `zt-admin-ui` — new `AuditTrail.tsx` tab (plain MUI `Table`, not `@mui/x-data-grid` — avoids an unproven dependency on the MUI v9/React 19 combo that already hit one typing quirk last stage), `Tabs` added to `App.tsx` switching Policies/Audit Trail
+- [x] Unit tests: `RequestAuditFilterTest`, `RequestLogAuditServiceTest`; `McpProxySecurityWebFluxTest` needed a new `@MockBean RequestLogAuditService` (same reason as last stage's `PolicyDefinitionStore`/`PolicyMatcher` — `@WebFluxTest` auto-detects `WebFilter` beans by type)
+- [x] New IT `RequestAuditIT` — proves the task's literal verification (allowed + denied requests both produce a `request_logs` row with matching `trace_id`/non-null `client_ip`), polled via Mockito-style Awaitility since the write is async; new `org.awaitility:awaitility` test dependency
+- ADR: ADR-013-postgres-audit-logging.md
+
 ---
 
-## Stage 12+ Backlog (Not Yet Implemented)
+## Stage 13+ Backlog (Not Yet Implemented)
 
 - [ ] Per-category `zte.policy.*.default-effect` overrides (today one `default-effect` applies to service2service and agentMcpToolCalls alike)
 - [ ] Filesystem watch-based auto-reload, layered on `PolicyDefinitionStore.reload()` (today: explicit `POST /api/v1/internal/policies/reload`)
 - [ ] HTTP (or HTTP+SSE) transport for `hubspot_server.py` — prerequisite for any real forwarding; it's stdio-only today
 - [ ] Move `agent-a-secret-dev-only`/`agent-b-secret-dev-only` to environment injection before any non-local environment
-- [ ] DB-based request audit log (`request_logs` table, V4 Flyway migration — V3 is now `drop_access_policies`) — currently log-only via `RequestAuditFilter`
-- [ ] Distributed tracing: Micrometer Tracing + Zipkin in Docker Compose
+- [ ] Distributed tracing: Micrometer Tracing + Zipkin in Docker Compose — `X-Request-Id` (Stage 12) is a prerequisite primitive, not a replacement
 - [ ] Rate limiting: Spring Cloud Gateway `RequestRateLimiter` (Redis-backed)
 - [ ] Docker Compose production profile: resource limits, health-check restart policies
 - [ ] ABAC extension: `condition` field on `PolicyRule` (SpEL evaluated against JWT claims)
 - [ ] Full mTLS system test: service-a + service-b as real Testcontainers (covers TLS handshake rejection)
 - [ ] Generic mechanism so a future gateway-local `@RestController` gets users2service enforcement automatically instead of needing its own `AdminAuthorizationFilter`-style `WebFilter` (see ADR-012)
 - [ ] Environment-configurable Keycloak/gateway URLs in `zt-admin-ui` (currently hardcoded in `main.tsx`)
+- [ ] True-`401` coverage in `request_logs` (see ADR-013 Self-Critique)
+- [ ] MCP-audit unification: `LoggingMcpAuditService` writing into `request_logs` too, populating `agent_id`/`tool_name` (see ADR-013)
+- [ ] Bounded buffer + overflow policy for `RequestLogAuditService` (same known gap `LoggingMcpAuditService` already has)

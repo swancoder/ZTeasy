@@ -2,12 +2,12 @@
 
 **Product:** Lightweight Zero Trust Environment (ZTE) MVP — a Zero Trust Data Gateway,
 now extended toward fronting AI agent (MCP) traffic, not just plain REST.
-**Status as of:** 2026-08-09 · Stage 11 of 11 implemented stages complete.
+**Status as of:** 2026-08-10 · Stage 12 of 12 implemented stages complete.
 
 This document is the single technical reference for the system as built. It
 consolidates what's spread across `README.md` (quick start, chain-of-trust
 summary), `CLAUDE.md` (terse per-stage changelog for AI-assisted sessions), and
-twelve ADRs (individual decisions) into one place: what exists, how it fits
+thirteen ADRs (individual decisions) into one place: what exists, how it fits
 together, what's configurable, what's tested, and what's left. It does not
 replace the ADRs — every decision below links to the ADR that argues it.
 
@@ -46,21 +46,24 @@ auditable — the opposite of a mesh's "hide it in the sidecar" approach. See
 | 9 | Agent OAuth2 Client Credentials Auth (dead-end stub) | ✅ Complete | `e79994e` | [010](adr/ADR-010-agent-oauth2-client-credentials.md) |
 | 10 | YAML Policy Engine (users2service / service2service / agent@mcp), no-downtime reload, unified audit, real MCP enforcement | ✅ Complete | `d76c709` | [011](adr/ADR-011-yaml-policy-engine.md) |
 | 11 | Full YAML migration (retired `access_policies`/`PolicyService`) + React Admin Console (`zt-admin-ui`), ADMIN-JWT-gated admin API, `AdminAuthorizationFilter` | ✅ Complete | `00edf91` | [012](adr/ADR-012-full-yaml-migration-and-admin-console.md) |
-| 12+ | Backlog (audit persistence, tracing, rate limiting, ABAC…) | ⬜ Planned | — | see §9.2 |
+| 12 | R2DBC-backed `request_logs` audit trail, `X-Request-Id` distributed tracing, `GET /api/v1/admin/audit-logs`, Admin Console "Audit Trail" tab; `RequestAuditFilter` rewritten as a `WebFilter` | ✅ Complete | _pending_ | [013](adr/ADR-013-postgres-audit-logging.md) |
+| 13+ | Backlog (rate limiting, ABAC, MCP-audit unification…) | ⬜ Planned | — | see §9.2 |
 
 **Test status:** all unit tests green (`./gradlew test`), including the
 `policy.def` package (`PolicyValidatorTest`, `PolicyMatcherTest`,
 `YamlPolicyFileLoaderTest`, `PolicyDefinitionStoreTest`,
 `DocumentationExampleConformanceTest`), `YamlMcpPolicyEngineTest`,
-`ServiceToServiceAuthorizationFilterTest`, and the new
-`AdminAuthorizationFilterTest` (added this stage — see §10 for the bug it
-pins down). `./gradlew integrationTest` (Testcontainers: Postgres + Keycloak)
-green — `McpProxyIT`'s real-MCP-enforcement coverage (allow → forwarded to
-backend, deny → no backend call), `HappyPathIT`, and `ZeroTrustBreachIT`.
-Stage 11 also verified by hand against a real running stack (Docker Compose +
-local `bootRun`): full `/admin/` login → policy dashboard → reload round
-trip, plus ADMIN-vs-USER enforcement on `/api/v1/admin/**` via curl with real
-Keycloak tokens.
+`ServiceToServiceAuthorizationFilterTest`, `AdminAuthorizationFilterTest`, and
+the new `RequestAuditFilterTest`/`RequestLogAuditServiceTest` (Stage 12 —
+`RequestAuditFilter`'s `GlobalFilter`→`WebFilter` rewrite and its
+`switchIfEmpty`→`doFinally` fix; see §5.2/§10). `./gradlew integrationTest`
+(Testcontainers: Postgres + Keycloak) green — `McpProxyIT`'s
+real-MCP-enforcement coverage, `HappyPathIT`, `ZeroTrustBreachIT`, and the new
+`RequestAuditIT` (proves both allowed and denied requests produce a
+`request_logs` row with matching `trace_id`/non-null `client_ip`, polled via
+Awaitility since the write is async). Stage 12 also verified by hand against
+a real running stack: curl allow/deny requests, `docker exec zte-postgres
+psql` to confirm rows land, Admin Console "Audit Trail" tab renders them.
 
 ---
 
@@ -95,13 +98,22 @@ Keycloak tokens.
                               │       SSE, allow forwards to               │
                               │       McpBackendClient (supersedes Stage 9)│
                               │                                             │
-                              │  Admin path (ADR-012):                     │
+                              │  Admin path (ADR-012, ADR-013):            │
                               │   GET/POST /api/v1/admin/**                │
                               │     → AdminAuthorizationFilter (WebFilter, │
                               │       not GlobalFilter — see ADR-012) →    │
-                              │       AdminPolicyController                │
+                              │       AdminPolicyController /              │
+                              │       AdminAuditLogController              │
                               │   GET /admin/** (static) ──► zt-admin-ui   │
                               │     bundle, packaged into this jar         │
+                              │                                             │
+                              │  Audit path (ADR-013, every request):      │
+                              │   RequestAuditFilter (WebFilter, not       │
+                              │     GlobalFilter — sees denied + admin/    │
+                              │     internal traffic too) → X-Request-Id   │
+                              │     resolve/forward → doFinally →          │
+                              │     RequestLogAuditService (async sink)    │
+                              │     → request_logs (R2DBC)                 │
                               │                                             │
                               │  Agent data path (ADR-007):                │
                               │   GET /api/v1/internal/policies            │
@@ -128,17 +140,19 @@ Keycloak tokens.
   e.g. this repo's hubspot-mcp sibling project. Not part of this repo.
 ```
 
-Infrastructure: PostgreSQL 16 (`5432`, used by Flyway/JDBC only as of ADR-012
-— `access_policies` was the last table on the runtime query path and is now
-dropped; `gateway_audit_log` remains), Keycloak 24.0.4 (`8180`, realm
-`zte-realm`, native `--import-realm`). See `docker-compose.yml`.
+Infrastructure: PostgreSQL 16 (`5432` — JDBC/Flyway for migrations, and R2DBC
+again as of ADR-013 for the `request_logs` async write path; `access_policies`
+(ADR-003/removed ADR-012) and `gateway_audit_log` (V1, removed ADR-013) are
+both gone, `request_logs` is the only table on the runtime query/write path
+today), Keycloak 24.0.4 (`8180`, realm `zte-realm`, native `--import-realm`).
+See `docker-compose.yml`.
 
 ### 3.2 Module map
 
 | Module | Language | Responsibility | Port(s) |
 |---|---|---|---|
 | `auth-library` | Java 21 | Shared security: `SecurityConfig`, `ZteAuditLogger`, `ReloadableSslContextFactory`, `UserContextTokenService` | — (library) |
-| `gateway-service` | Java 21 | ZT entry point: JWT validation, YAML policy enforcement, OBO issuance, mTLS client, MCP proxy, internal agent data endpoint, Admin Console API + static hosting | 8080 |
+| `gateway-service` | Java 21 | ZT entry point: JWT validation, YAML policy enforcement, OBO issuance, mTLS client, MCP proxy, internal agent data endpoint, Admin Console API + static hosting, async R2DBC request audit trail | 8080 |
 | `service-a` | Java 21 (WebFlux) | First protected downstream; calls service-b | 8081 (mTLS), 9081 (mgmt) |
 | `service-b` | Java 21 (WebFlux) | Deepest downstream; validates OBO token | 8082 (mTLS), 9082 (mgmt) |
 | `zt-agents` | Kotlin (WebFlux) | AI security copilot — Policy Auditor Agent | 8083 |
@@ -260,8 +274,15 @@ Reusable security config imported by every service (`ZteSecurityAutoConfiguratio
   serving `classpath:/static/admin/` at that path.
 - **`UserContextPropagationFilter`** (order `HIGHEST_PRECEDENCE+200`) — strips
   client-supplied `X-ZTE-User-Context`/`X-User-Id`, issues the OBO token.
-- **`RequestAuditFilter`** (order `LOWEST_PRECEDENCE-10`) — logs `sub`/`azp`,
-  injects trusted `X-User-Id`.
+- **`RequestAuditFilter`** (plain `WebFilter`, not `GlobalFilter`, as of
+  ADR-013 — order `LOWEST_PRECEDENCE-100`) — resolves/forwards `X-Request-Id`
+  (caller's value or a new UUID), strips/injects trusted `X-User-Id`
+  (unconditionally now, not just on the JWT branch — a strengthening, see
+  ADR-013 Self-Critique), logs `sub`/`azp`, and — from a `doFinally` callback
+  so it fires regardless of outcome — fires the async `request_logs` write
+  via `RequestLogAuditService`. Converted from `GlobalFilter` specifically so
+  it sees denied requests and `/api/v1/admin/**`/`/api/v1/internal/**`
+  traffic too (see §5.2b and ADR-013).
 - **`InternalPolicyController`** — `GET /api/v1/internal/policies`, permitAll
   via `InternalSecurityConfig` (`@Order(-100)`), Docker-network-only exposure.
   Returns `PolicyDefinitionStore.current().users2service()` (YAML-backed as
@@ -275,6 +296,12 @@ Reusable security config imported by every service (`ZteSecurityAutoConfiguratio
   `PolicyDocument`, keeping the previous one on validation failure. ADR-012
   adds an ADMIN-JWT-gated counterpart at `AdminPolicyController` for the
   human operator; both share the same reload/response logic.
+- **`AdminAuditLogController`** (`admin` package, ADR-013) — `GET
+  /api/v1/admin/audit-logs`, same ADMIN-JWT posture as `AdminPolicyController`
+  (no new security wiring — `AdminAuthorizationFilter`'s path check already
+  covers all of `/api/v1/admin/**`). Returns
+  `RequestLogRepository.findTop100ByOrderByTimestampDesc()` — capped at the
+  SQL `LIMIT` level.
 
 ### 5.2a YAML Policy Engine (ADR-011, ADR-012)
 
@@ -290,6 +317,29 @@ A single `PolicyRule` shape (`id`, `effect`, `source`, `target`,
 `pathPattern`, `methods`, `priority`) is reused across all three categories —
 `pathPattern`/`methods` are simply unused by `agentMcpToolCalls` rules. See
 ADR-011 for why this was chosen over three parallel rule subclasses.
+
+### 5.2b Request Audit Trail (ADR-013)
+
+`gateway-service/.../audit` package — the async, R2DBC-backed write path
+`RequestAuditFilter` (§5.2) feeds:
+
+- **`RequestLog`** — R2DBC record (`@Table("request_logs")`); `id` left
+  `null` on construction, DB-generated (`gen_random_uuid()`, built into
+  Postgres core since v13). Mirrors the pre-ADR-012 `AccessPolicy` record's
+  DB-generated-PK convention.
+- **`RequestLogRepository`** — `ReactiveCrudRepository<RequestLog, UUID>`,
+  one derived query, `findTop100ByOrderByTimestampDesc()`.
+- **`RequestLogAuditService`** — directly mirrors
+  `LoggingMcpAuditService`'s architecture (`Sinks.Many` + one
+  `Schedulers.boundedElastic()` subscriber draining into `repository.save(...)`);
+  a DB write failure is caught and degrades to an SLF4J warning line instead
+  of propagating or being lost — the literal "keep SLF4J as fallback"
+  requirement.
+
+`agentId`/`toolName` on `RequestLog` are always `null` from this path — the
+given schema has no subject/user-id column, and this integration point is
+REST-gateway-only (not `LoggingMcpAuditService`/MCP); reserved for a future
+unification (§9.4).
 
 ### 5.3 `service-a` / `service-b`
 
@@ -334,10 +384,12 @@ categories as tables, "Reload Policies" button posts to `POST
 
 ### 5.5 Infrastructure
 
-- **PostgreSQL 16-alpine** — JDBC/Flyway only as of ADR-012 (`gateway_audit_log`
-  table from `V1`; `access_policies` from `V2` was dropped by `V3` once its
-  only reader, `PolicyService`, was deleted). No runtime R2DBC query path
-  remains.
+- **PostgreSQL 16-alpine** — JDBC/Flyway for migrations, plus R2DBC again as
+  of ADR-013 (reintroduced after ADR-012 removed it — a different runtime
+  purpose, the async `request_logs` write path, not the old policy-lookup
+  one). `access_policies` (`V2`, dropped by `V3`/ADR-012) and
+  `gateway_audit_log` (`V1`, dropped by `V4`/ADR-013) are both gone;
+  `request_logs` (`V4`) is the only table on the runtime path today.
 - **Keycloak 24.0.4** — realm `zte-realm` auto-imported from
   `keycloak/realm-export.json`; clients `zte-gateway` (confidential, UI +
   service-to-service), `agent-a`/`agent-b` (confidential, client credentials
@@ -378,6 +430,28 @@ shape (`PolicyRule`):
 
 Full schema/precedence/validation reference: `docs/policy-schema.md`.
 
+`request_logs` (PostgreSQL, Flyway `V4__create_request_logs_table.sql`,
+ADR-013) — the async request audit trail. Replaces `gateway_audit_log` (`V1`,
+dropped in the same migration — never read or written by any code since
+Stage 1):
+
+| Column | Type | Notes |
+|---|---|---|
+| `id` | `UUID` | PK, `DEFAULT gen_random_uuid()` |
+| `timestamp` | `TIMESTAMPTZ` | `DEFAULT NOW()`, indexed descending for the "latest 100" query |
+| `trace_id` | `VARCHAR(64)` | The request's `X-Request-Id` (caller-supplied or gateway-generated); indexed |
+| `client_ip` | `VARCHAR(64)`, nullable | `X-Forwarded-For` first hop, else the raw connection address |
+| `user_agent` | `TEXT`, nullable | |
+| `process_id` | `VARCHAR(32)`, nullable | OS PID of the gateway JVM instance that handled the request — distinct from `trace_id`, which travels across services |
+| `agent_id` | `VARCHAR(128)`, nullable | Always `null` from the REST path today — reserved for a future MCP-audit unification (§9.4) |
+| `tool_name` | `VARCHAR(128)`, nullable | Same as `agent_id` |
+| `path` | `TEXT` | |
+| `status_code` | `INTEGER`, nullable | |
+| `message` | `TEXT`, nullable | Currently unused by the REST write path |
+
+Written by `RequestLogAuditService` (§5.2b), read via `GET
+/api/v1/admin/audit-logs` (§7) — `findTop100ByOrderByTimestampDesc()`.
+
 ---
 
 ## 7. API Reference
@@ -390,6 +464,7 @@ Full schema/precedence/validation reference: `docs/policy-schema.md`.
 | `/api/v1/internal/policies/reload` | POST | none (network perimeter only) | gateway | No-downtime YAML policy reload (ADR-011) |
 | `/api/v1/admin/policies` | GET | JWT + `ADMIN` YAML rule | gateway | Full policy document for the Admin Console (ADR-012) |
 | `/api/v1/admin/policies/reload` | POST | JWT + `ADMIN` YAML rule | gateway | No-downtime reload, ADMIN-gated counterpart (ADR-012) |
+| `/api/v1/admin/audit-logs` | GET | JWT + `ADMIN` YAML rule | gateway | Latest 100 `request_logs` rows for the Admin Console (ADR-013) |
 | `/admin/**` | GET | none (SPA handles its own login) | gateway | Admin Console static bundle (ADR-012) |
 | `/sse` | GET | JWT | gateway (MCP proxy) | Opens an MCP session; SSE stream |
 | `/message?sessionId=<id>` | POST | JWT | gateway (MCP proxy) | JSON-RPC `tools/call`; result via SSE, not the response body |
@@ -488,11 +563,13 @@ isolation.
 
 ### 9.1 Completed (see §2 for commits/ADRs)
 
-Stages 1–11, plus the two undated additions (pre-commit doc automation,
+Stages 1–12, plus the two undated additions (pre-commit doc automation,
 `.env` config) — all ✅. Stage 11 (ADR-012) closed the "Full users2service
-migration to YAML-only" item that used to be listed below.
+migration to YAML-only" item that used to be listed below; Stage 12
+(ADR-013) closed the "DB-based request audit log" item that used to be
+listed below too.
 
-### 9.2 Backlog — general (from `CLAUDE.md` Stage 12+)
+### 9.2 Backlog — general (from `CLAUDE.md` Stage 13+)
 
 - [ ] Per-category `zte.policy.*.default-effect` overrides (today one
       `default-effect` applies to service2service and agentMcpToolCalls
@@ -500,10 +577,9 @@ migration to YAML-only" item that used to be listed below.
 - [ ] Filesystem watch-based auto-reload, layered on
       `PolicyDefinitionStore.reload()` (today: explicit `POST
       /api/v1/internal/policies/reload`).
-- [ ] DB-based request audit log (`request_logs` table, V4 Flyway migration —
-      V3 is now `drop_access_policies`, ADR-012) — currently log-only via
-      `RequestAuditFilter`.
-- [ ] Distributed tracing: Micrometer Tracing + Zipkin in Docker Compose.
+- [ ] Distributed tracing: Micrometer Tracing + Zipkin in Docker Compose —
+      `X-Request-Id` (ADR-013) is a prerequisite primitive for this, not a
+      replacement for it.
 - [ ] Rate limiting: Spring Cloud Gateway `RequestRateLimiter` (Redis-backed).
 - [ ] Docker Compose production profile: resource limits, health-check
       restart policies.
@@ -519,6 +595,14 @@ migration to YAML-only" item that used to be listed below.
 - [ ] Environment-configurable Keycloak/gateway URLs in `zt-admin-ui`
       (currently hardcoded in `main.tsx`, consistent with the rest of this
       MVP's `localhost` defaults — see ADR-012).
+- [ ] True-`401` (no token at all) coverage in `request_logs` — currently
+      invisible since Spring Security's own filter rejects before
+      `RequestAuditFilter` runs (see ADR-013 Self-Critique).
+- [ ] MCP-audit unification: have `LoggingMcpAuditService` write into
+      `request_logs` too, populating the currently-always-null
+      `agent_id`/`tool_name` columns (see ADR-013 Future Migration Path).
+- [ ] Bounded buffer + overflow policy for `RequestLogAuditService` — same
+      known gap `LoggingMcpAuditService` already has (§9.3).
 
 ### 9.3 Backlog — MCP proxy hardening (from §8.5)
 
@@ -559,13 +643,17 @@ migration to YAML-only" item that used to be listed below.
 |---|---|---|---|
 | High | Gateway could become a "God Service" if business logic creeps in | ADR-001 | Convention only — no enforcement mechanism yet |
 | High (prod) | Keycloak client secret (`zte-gateway-secret`) hardcoded in `realm-export.json` | ADR-002 | Dev-only; must be env/secret-manager-injected before staging |
-| High | `GlobalFilter`s (Spring Cloud Gateway's type, e.g. `ZteAuthorizationFilter`) silently don't run for any future gateway-local `@RestController` with no `GatewayRouteConfig` route — found empirically when a USER-role JWT got `200` from the new admin API before `AdminAuthorizationFilter` existed | ADR-012 | Documented prominently in `AdminAuthorizationFilter`'s Javadoc and ADR-012; no generic guard against a *future* instance of this mistake — real gap, backlog item §9.2 |
+| High | `GlobalFilter`s (Spring Cloud Gateway's type) silently don't run for any gateway-local `@RestController` (no `GatewayRouteConfig` route) or for requests denied before reaching them — found empirically twice now: `AdminAuthorizationFilter` (ADR-012, a USER-role JWT got `200` from the admin API) and `RequestAuditFilter` (ADR-013, denied/admin/internal requests weren't being logged) | ADR-012, ADR-013 | Both fixed by converting to plain `WebFilter`s; documented in both classes' Javadoc and both ADRs. Still no *generic* guard against a third instance of this mistake — real gap, backlog item §9.2 |
+| Medium | `switchIfEmpty` on a `Mono<Void>`-typed reactive chain can't distinguish "upstream had a value" from "upstream was empty" (a `Mono<Void>` never emits either way) — double-invokes the fallback. Found and fixed twice: `AdminAuthorizationFilter` (ADR-012) and (pre-existing, found empirically before this stage's rewrite) `RequestAuditFilter` (ADR-013) | ADR-012, ADR-013 | Both use `doFinally`/`defaultIfEmpty`+`instanceof` instead now. No static-analysis rule exists to catch a third occurrence automatically. |
 | Medium | Shared HMAC secret for OBO tokens | ADR-004 | `ZTE_OBO_SECRET` env var; RS256 upgrade deferred (§9.4) |
 | Medium | Server-side TLS cert rotation requires a restart (no hot-reload API) | ADR-004 | 1-year dev certs; production needs cert-manager + rolling restart |
 | Medium | mTLS transport-layer enforcement untested in the integration suite (WireMock has no TLS) | ADR-005 | Full mTLS Testcontainers system test is backlog (§9.2) |
 | Medium | MCP session state in-memory, single-instance | ADR-009 / §8.5 | Documented; needs sticky routing or shared store before scaling out |
+| Medium | True-`401` (no token) requests aren't captured in `request_logs` — Spring Security's own filter rejects before `RequestAuditFilter` runs | ADR-013 | Named, not silently accepted; doesn't affect any existing test (all use present-but-wrong-role JWTs); backlog item §9.2 |
+| Low | `client_ip` trusts `X-Forwarded-For` at face value, no validation the immediate hop is a trusted proxy | ADR-013 | Acceptable for this MVP's single-hop Docker-network deployment; a real LB-fronted deployment would need edge-level header stripping/validation |
 | Low | `POST /api/v1/internal/policies/reload` has no auth beyond network-perimeter isolation, same posture as `InternalPolicyController` | ADR-011 | Acceptable for MVP (Docker-bridge only, not proxied externally); ADR-012 adds an ADMIN-JWT-gated counterpart for the human operator without removing this one |
-| Low | `LoggingMcpAuditService` buffer is unbounded | §8.5 | Backlog item §9.3 |
+| Low | `LoggingMcpAuditService` and `RequestLogAuditService` buffers are both unbounded | §8.5, ADR-013 | Backlog item §9.2/§9.3 |
+| Low | `agent_id`/`tool_name` in `request_logs` are always `null` from the REST path — the given schema has no subject/user-id column | ADR-013 | Admin Console's "Agent/User ID" column shows blank for today's REST traffic; reserved for a future MCP-audit unification (§9.2) |
 | ~~Medium~~ Resolved | ~~5-minute policy cache window / two sources of truth for users2service~~ | ADR-003 / ADR-011 | Resolved by ADR-012 — `PolicyService`'s DB cache is deleted entirely; YAML is the sole source, no staleness window |
 | Low | `PolicyMatcher` is a full linear scan per category per request | ADR-011 | Same `<100 rules` MVP scale ceiling as `access_policies`; negligible at that scale |
 
@@ -587,10 +675,12 @@ migration to YAML-only" item that used to be listed below.
 | [010](adr/ADR-010-agent-oauth2-client-credentials.md) | Agent Auth via OAuth2 Client Credentials, and a Deliberate Dead-End Stub |
 | [011](adr/ADR-011-yaml-policy-engine.md) | YAML-Defined Access Policies (users2service / service2service / agent@mcp) |
 | [012](adr/ADR-012-full-yaml-migration-and-admin-console.md) | Full YAML Policy Migration and React Admin Console |
+| [013](adr/ADR-013-postgres-audit-logging.md) | R2DBC-Backed Request Audit Logging with Distributed Tracing |
 
 ---
 
-*This document reflects repo state at commit `00edf91` (Stage 11, Full YAML Migration +
-Admin Console). Keep it in sync the same way as README/CLAUDE.md — per CLAUDE.md's
-mandatory workflow, update it alongside any task that completes a stage or changes the
-roadmap.*
+*This document reflects repo state as of Stage 12 (R2DBC Audit Logging + Distributed
+Tracing, ADR-013; commit hash pending — filled in by a follow-up commit per this
+project's established pattern). Keep it in sync the same way as README/CLAUDE.md — per
+CLAUDE.md's mandatory workflow, update it alongside any task that completes a stage or
+changes the roadmap.*

@@ -60,12 +60,17 @@ dependencies {
     implementation(libs.spring.oauth2.resource)
     implementation(libs.spring.actuator)
 
-    // Database — JDBC DataSource (Flyway migrations only; ADR-012 retired the
-    // R2DBC-backed access_policies runtime query path — users2service is YAML-only now)
+    // Database — JDBC DataSource (Flyway migrations only)
     implementation(libs.spring.jdbc)
     implementation(libs.flyway.core)
     implementation(libs.flyway.postgres)
     runtimeOnly(libs.postgresql.driver)
+
+    // Database — R2DBC (reactive runtime writes: request_logs audit trail, ADR-013.
+    // ADR-012 removed this when its only prior use, PolicyService, was deleted —
+    // restored here for a different purpose.)
+    implementation(libs.spring.r2dbc)
+    runtimeOnly(libs.r2dbc.postgresql)
 
     // mTLS outbound — Netty SslContext (version from Spring Boot BOM)
     implementation(libs.netty.handler)
@@ -87,6 +92,7 @@ dependencies {
     itImplementation(libs.keycloak.testcontainers)
     itImplementation(libs.rest.assured)
     itImplementation(libs.wiremock.standalone)
+    itImplementation(libs.awaitility)
 }
 
 tasks.named<org.springframework.boot.gradle.tasks.bundling.BootJar>("bootJar") {

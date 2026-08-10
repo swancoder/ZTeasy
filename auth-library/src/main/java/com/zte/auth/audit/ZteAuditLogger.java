@@ -81,6 +81,16 @@ public final class ZteAuditLogger {
         }
     }
 
+    /**
+     * Synchronous SLF4J counterpart to the async, R2DBC-backed
+     * {@code request_logs} write (ADR-013) — same "log both sync and async"
+     * pattern already used for MCP audit events.
+     */
+    public static void requestLog(String traceId, String path, Integer statusCode) {
+        log.info(FMT, "REQUEST_LOG", "gateway",
+                "traceId=" + traceId + " path=" + path + " status=" + statusCode);
+    }
+
     /** A policy reload was triggered (file-based, via the admin endpoint). */
     public static void policyReloadTriggered() {
         log.info(FMT, "POLICY_RELOAD_TRIGGERED", "gateway", "");
