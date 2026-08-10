@@ -107,11 +107,13 @@ psql` to confirm rows land, Admin Console "Audit Trail" tab renders them.
                               │   GET /admin/** (static) ──► zt-admin-ui   │
                               │     bundle, packaged into this jar         │
                               │                                             │
-                              │  Audit path (ADR-013, every request):      │
+                              │  Audit path (ADR-013):                     │
                               │   RequestAuditFilter (WebFilter, not       │
                               │     GlobalFilter — sees denied + admin/    │
                               │     internal traffic too) → X-Request-Id   │
-                              │     resolve/forward → doFinally →          │
+                              │     resolve/forward on every request →     │
+                              │     doFinally → skip if excluded (see      │
+                              │     AuditExclusionProperties) → else       │
                               │     RequestLogAuditService (async sink)    │
                               │     → request_logs (R2DBC)                 │
                               │                                             │
@@ -279,10 +281,14 @@ Reusable security config imported by every service (`ZteSecurityAutoConfiguratio
   (caller's value or a new UUID), strips/injects trusted `X-User-Id`
   (unconditionally now, not just on the JWT branch — a strengthening, see
   ADR-013 Self-Critique), logs `sub`/`azp`, and — from a `doFinally` callback
-  so it fires regardless of outcome — fires the async `request_logs` write
-  via `RequestLogAuditService`. Converted from `GlobalFilter` specifically so
-  it sees denied requests and `/api/v1/admin/**`/`/api/v1/internal/**`
-  traffic too (see §5.2b and ADR-013).
+  so it fires regardless of outcome, **for paths not matching
+  `zte.audit.excluded-path-prefixes`** (`AuditExclusionProperties`, ADR-013
+  amendment — §5.2b) — fires the async `request_logs` write via
+  `RequestLogAuditService`. Converted from `GlobalFilter` specifically so it
+  sees denied requests and `/api/v1/admin/**`/`/api/v1/internal/**` traffic
+  too (see §5.2b and ADR-013); the exclusion list then deliberately scopes
+  that visibility back down to zero-trust-relevant traffic only, sparing the
+  Admin Console's own housekeeping calls and health checks.
 - **`InternalPolicyController`** — `GET /api/v1/internal/policies`, permitAll
   via `InternalSecurityConfig` (`@Order(-100)`), Docker-network-only exposure.
   Returns `PolicyDefinitionStore.current().users2service()` (YAML-backed as
@@ -340,6 +346,18 @@ ADR-011 for why this was chosen over three parallel rule subclasses.
 given schema has no subject/user-id column, and this integration point is
 REST-gateway-only (not `LoggingMcpAuditService`/MCP); reserved for a future
 unification (§9.4).
+
+**`AuditExclusionProperties`** (`filter` package, `@ConfigurationProperties(prefix
+= "zte.audit")`, same shape as `PolicyDefaultsProperties`) — `zte.audit.excluded-path-prefixes`
+in `application.yml`, deliberately not `zte-policies.yaml` (a flat exclusion
+list doesn't need that document's schema/validation/hot-reload machinery)
+and not hardcoded (operator-editable without a rebuild). Default excludes
+`/admin/`, `/api/v1/admin/`, `/api/v1/internal/`, `/actuator/` — an
+ADR-013 amendment made the same day, after the original "audit every
+request" version was observed live: 30 of the first 34 `request_logs` rows
+were the Admin Console's own traffic, not zero-trust enforcement points.
+Gates only `RequestAuditFilter`'s audit *output*; trace ID/`X-User-Id`
+handling stay universal.
 
 ### 5.3 `service-a` / `service-b`
 

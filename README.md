@@ -335,12 +335,21 @@ the no-API-key case) — the gateway still builds and runs, just without `/admin
 
 ## Audit Trail & Distributed Tracing (ADR-013)
 
-Every gateway request — allowed or denied by policy — is written asynchronously to a
-`request_logs` table in the same Postgres instance already used for Flyway migrations
-(via R2DBC), in addition to the existing synchronous `[ZTE-AUDIT]` SLF4J line. The write
-never blocks the response: `RequestAuditFilter` fires the DB write from a `doFinally`
-callback into a non-blocking sink (mirrors `LoggingMcpAuditService`'s pattern); a DB
-outage degrades to an SLF4J warning instead of losing the event or slowing requests down.
+Every zero-trust-relevant gateway request — a proxied REST call or MCP tool call, allowed
+or denied by policy — is written asynchronously to a `request_logs` table in the same
+Postgres instance already used for Flyway migrations (via R2DBC), in addition to the
+existing synchronous `[ZTE-AUDIT]` SLF4J line. The write never blocks the response:
+`RequestAuditFilter` fires the DB write from a `doFinally` callback into a non-blocking
+sink (mirrors `LoggingMcpAuditService`'s pattern); a DB outage degrades to an SLF4J
+warning instead of losing the event or slowing requests down.
+
+**Excluded from the audit trail** (configurable, `zte.audit.excluded-path-prefixes` in
+`application.yml` — deliberately separate from `zte-policies.yaml`, not hardcoded):
+the Admin Console's own traffic (`/admin/**` static assets, `/api/v1/admin/**` API —
+otherwise viewing the audit trail would generate more audit trail), `/api/v1/internal/**`,
+and `/actuator/**` health checks. `X-Request-Id`/`X-User-Id` handling below still applies
+to *every* request regardless of this list — only the `request_logs` row and the sync
+`requestLog` SLF4J line are scoped down.
 
 **Distributed tracing:** every request gets an `X-Request-Id` — the caller's own value if
 present, otherwise a new UUID minted by the gateway — which is then guaranteed to be

@@ -175,6 +175,7 @@
 - [x] `zt-admin-ui` — new `AuditTrail.tsx` tab (plain MUI `Table`, not `@mui/x-data-grid` — avoids an unproven dependency on the MUI v9/React 19 combo that already hit one typing quirk last stage), `Tabs` added to `App.tsx` switching Policies/Audit Trail
 - [x] Unit tests: `RequestAuditFilterTest`, `RequestLogAuditServiceTest`; `McpProxySecurityWebFluxTest` needed a new `@MockBean RequestLogAuditService` (same reason as last stage's `PolicyDefinitionStore`/`PolicyMatcher` — `@WebFluxTest` auto-detects `WebFilter` beans by type)
 - [x] New IT `RequestAuditIT` — proves the task's literal verification (allowed + denied requests both produce a `request_logs` row with matching `trace_id`/non-null `client_ip`), polled via Mockito-style Awaitility since the write is async; new `org.awaitility:awaitility` test dependency
+- [x] **Same-day amendment**: found live that 30 of the first 34 `request_logs` rows were the Admin Console observing its own existence, not zero-trust enforcement — added `AuditExclusionProperties` (`zte.audit.excluded-path-prefixes` in `application.yml`, mirroring `PolicyDefaultsProperties`'s shape, deliberately separate from `zte-policies.yaml` and not hardcoded), default-excluding `/admin/`, `/api/v1/admin/`, `/api/v1/internal/`, `/actuator/`. Gates only `RequestAuditFilter`'s audit output (DB write + sync `requestLog` line) — `X-Request-Id`/`X-User-Id` handling stays universal
 - ADR: ADR-013-postgres-audit-logging.md
 
 ---

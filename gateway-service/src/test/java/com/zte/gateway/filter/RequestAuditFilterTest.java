@@ -19,6 +19,7 @@ import reactor.core.publisher.Mono;
 import reactor.test.StepVerifier;
 
 import java.time.Instant;
+import java.util.List;
 import java.util.Map;
 import java.util.UUID;
 
@@ -32,11 +33,16 @@ import static org.mockito.Mockito.*;
  * <p>Covers the ADR-013 rewrite: {@code X-Request-Id} passthrough/generation,
  * trusted {@code X-User-Id} injection (unconditionally stripped now, unlike
  * the pre-ADR-013 version which only stripped it on the JWT branch — see the
- * class Javadoc), and that exactly one {@link RequestLogAuditService#record}
- * call happens per request via {@code doFinally}, regardless of outcome.
+ * class Javadoc), that exactly one {@link RequestLogAuditService#record}
+ * call happens per in-scope request via {@code doFinally}, and the ADR-013
+ * amendment scoping audit output to {@link AuditExclusionProperties}.
  */
 @ExtendWith(MockitoExtension.class)
 class RequestAuditFilterTest {
+
+    /** Same default list application.yml ships (see application.yml's zte.audit block). */
+    private static final List<String> DEFAULT_EXCLUSIONS =
+            List.of("/admin/", "/api/v1/admin/", "/api/v1/internal/", "/actuator/");
 
     @Mock RequestLogAuditService auditService;
     @Mock WebFilterChain          chain;
@@ -45,7 +51,9 @@ class RequestAuditFilterTest {
 
     @BeforeEach
     void setUp() {
-        filter = new RequestAuditFilter(auditService);
+        AuditExclusionProperties exclusions = new AuditExclusionProperties();
+        exclusions.setExcludedPathPrefixes(DEFAULT_EXCLUSIONS);
+        filter = new RequestAuditFilter(auditService, exclusions);
     }
 
     private JwtAuthenticationToken jwtAuth(String subject) {
@@ -60,7 +68,11 @@ class RequestAuditFilterTest {
     }
 
     private MockServerWebExchange exchangeWithHeaders(Map<String, String> headers) {
-        MockServerHttpRequest.BaseBuilder<?> builder = MockServerHttpRequest.get("/api/v1/service-a/hello");
+        return exchangeWithPathAndHeaders("/api/v1/service-a/hello", headers);
+    }
+
+    private MockServerWebExchange exchangeWithPathAndHeaders(String path, Map<String, String> headers) {
+        MockServerHttpRequest.BaseBuilder<?> builder = MockServerHttpRequest.get(path);
         headers.forEach(builder::header);
         return MockServerWebExchange.from(builder.build());
     }
@@ -156,5 +168,91 @@ class RequestAuditFilterTest {
                 .verifyComplete();
 
         verify(auditService, times(1)).record(any());
+    }
+
+    @Test
+    void proxiedServiceCall_isAudited() {
+        // Regression guard: the excluded-prefix scoping must not accidentally
+        // swallow the actual zero-trust enforcement points.
+        when(chain.filter(any())).thenReturn(Mono.empty());
+        MockServerWebExchange ex = exchangeWithPathAndHeaders("/api/v1/service-a/hello", Map.of());
+
+        StepVerifier.create(
+                filter.filter(ex, chain)
+                      .contextWrite(ReactiveSecurityContextHolder.withSecurityContext(Mono.just(new SecurityContextImpl()))))
+                .verifyComplete();
+
+        verify(auditService).record(any());
+    }
+
+    @Test
+    void adminConsoleStaticAsset_isNotAudited() {
+        when(chain.filter(any())).thenReturn(Mono.empty());
+        MockServerWebExchange ex = exchangeWithPathAndHeaders("/admin/index.html", Map.of());
+
+        StepVerifier.create(
+                filter.filter(ex, chain)
+                      .contextWrite(ReactiveSecurityContextHolder.withSecurityContext(Mono.just(new SecurityContextImpl()))))
+                .verifyComplete();
+
+        verifyNoInteractions(auditService);
+    }
+
+    @Test
+    void adminConsoleApi_isNotAudited() {
+        // Would otherwise be a self-referential noise loop: viewing the audit
+        // trail generates more audit trail.
+        when(chain.filter(any())).thenReturn(Mono.empty());
+        MockServerWebExchange ex = exchangeWithPathAndHeaders("/api/v1/admin/audit-logs", Map.of());
+
+        StepVerifier.create(
+                filter.filter(ex, chain)
+                      .contextWrite(ReactiveSecurityContextHolder.withSecurityContext(Mono.just(new SecurityContextImpl()))))
+                .verifyComplete();
+
+        verifyNoInteractions(auditService);
+    }
+
+    @Test
+    void internalEndpoint_isNotAudited() {
+        when(chain.filter(any())).thenReturn(Mono.empty());
+        MockServerWebExchange ex = exchangeWithPathAndHeaders("/api/v1/internal/policies", Map.of());
+
+        StepVerifier.create(
+                filter.filter(ex, chain)
+                      .contextWrite(ReactiveSecurityContextHolder.withSecurityContext(Mono.just(new SecurityContextImpl()))))
+                .verifyComplete();
+
+        verifyNoInteractions(auditService);
+    }
+
+    @Test
+    void healthCheck_isNotAudited() {
+        when(chain.filter(any())).thenReturn(Mono.empty());
+        MockServerWebExchange ex = exchangeWithPathAndHeaders("/actuator/health", Map.of());
+
+        StepVerifier.create(
+                filter.filter(ex, chain)
+                      .contextWrite(ReactiveSecurityContextHolder.withSecurityContext(Mono.just(new SecurityContextImpl()))))
+                .verifyComplete();
+
+        verifyNoInteractions(auditService);
+    }
+
+    @Test
+    void excludedPath_stillGetsTraceIdAndXUserIdHandling() {
+        // The exclusion only gates audit *output* — tracing/header handling stays universal.
+        when(chain.filter(any())).thenReturn(Mono.empty());
+        MockServerWebExchange ex = exchangeWithPathAndHeaders("/actuator/health", Map.of());
+
+        StepVerifier.create(
+                filter.filter(ex, chain)
+                      .contextWrite(ReactiveSecurityContextHolder.withSecurityContext(Mono.just(new SecurityContextImpl()))))
+                .verifyComplete();
+
+        ArgumentCaptor<org.springframework.web.server.ServerWebExchange> captor =
+                ArgumentCaptor.forClass(org.springframework.web.server.ServerWebExchange.class);
+        verify(chain).filter(captor.capture());
+        assertThat(captor.getValue().getRequest().getHeaders().getFirst("X-Request-Id")).isNotBlank();
     }
 }

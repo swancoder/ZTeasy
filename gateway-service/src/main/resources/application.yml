@@ -98,6 +98,20 @@ zte:
     default-effect: ${ZTE_POLICY_DEFAULT_EFFECT:DENY}
     user-client-id: ${ZTE_POLICY_USER_CLIENT_ID:zte-gateway}
 
+  # ── Request audit trail exclusions (Stage 12 / ADR-013 amendment) ──
+  # Path prefixes that never generate a request_logs row or ZteAuditLogger.requestLog(...)
+  # line — deliberately separate from zte-policies.yaml (a structured, hot-reloadable rule
+  # document); this is just a flat exclusion list, editable without a rebuild.
+  audit:
+    excluded-path-prefixes:
+      - /admin/            # static SPA assets — no policy decision happens here
+      - /api/v1/admin/     # Admin Console's own API — would otherwise create a
+                            # self-referential noise loop (viewing the audit trail
+                            # generates more audit trail)
+      - /api/v1/internal/  # zt-agents/ops internal endpoints — network-perimeter
+                            # tooling traffic, not proxied-service traffic
+      - /actuator/         # health checks — same class of noise
+
 # ── Logging ──
 logging:
   level:

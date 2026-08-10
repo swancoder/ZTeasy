@@ -50,8 +50,9 @@ path depends on. It:
    any policy filter) and reads the now-final `exchange.getResponse().getStatusCode()`.
    `doFinally` — not `switchIfEmpty` — is what makes this correct; see
    "Finding: the switchIfEmpty pitfall, again" below.
-5. Fires `RequestLogAuditService.record(...)` from that `doFinally` callback
-   — a single non-blocking `Sinks.Many.tryEmitNext`, **directly mirroring
+5. **Only for paths not matching `zte.audit.excluded-path-prefixes`** — fires
+   `RequestLogAuditService.record(...)` from that `doFinally` callback — a
+   single non-blocking `Sinks.Many.tryEmitNext`, **directly mirroring
    `LoggingMcpAuditService`'s architecture** (`gateway-service/.../mcp/audit/LoggingMcpAuditService.java`):
    one dedicated subscriber on `Schedulers.boundedElastic()` drains the sink
    and does the actual `repository.save(...)`. A DB write failure is caught
@@ -60,6 +61,27 @@ path depends on. It:
    literally. Also logs a synchronous `ZteAuditLogger.requestLog(...)` line
    alongside the async write, keeping ADR-011's "log both sync-SLF4J and
    async-structured" precedent intact for this new call site too.
+
+   **Amendment (same day, before the first commit's data was even a full
+   session old):** the first version of this filter wrote a row for *every*
+   request, no exclusions. Running against the live system for a few hours
+   showed the actual composition: of 34 rows, 30 were the Admin Console
+   observing its own existence (`/api/v1/admin/policies`,
+   `/api/v1/admin/audit-logs`, `/admin/**` static assets) or
+   `/actuator/health` probes — only 4 were real zero-trust enforcement
+   points. `AuditExclusionProperties` (`@ConfigurationProperties(prefix =
+   "zte.audit")`, mirroring `PolicyDefaultsProperties`'s exact shape) adds an
+   **exclude-list** of path prefixes, configured in `application.yml` —
+   deliberately *not* `zte-policies.yaml` (that document is a structured,
+   hot-reloadable rule set with its own schema/validation, ADR-011; this is
+   a flat list that doesn't need any of that) and *not* hardcoded in Java
+   (operator-editable without a rebuild, same externalization
+   `zte.policy.*`/`zte.mtls.*` already get). Shipped default excludes
+   `/admin/`, `/api/v1/admin/`, `/api/v1/internal/`, `/actuator/`. Gates only
+   the audit *output* (the DB write and the sync `requestLog` line) — trace
+   ID resolution/forwarding and `X-User-Id` stripping stay universal on every
+   request regardless of exclusion, since those are tracing/security
+   concerns, not audit-scope ones.
 
 ### Read path
 
@@ -194,12 +216,15 @@ The task's Task 4 literally says "DataGrid."
 
 ## Consequences
 
-- **Positive:** Every gateway request (allowed or denied by policy) now has
-  a queryable, persistent audit row correlated by `trace_id` — closes the
-  "no queryable history" gap this ADR opened with.
-- **Positive:** `X-Request-Id` is now a first-class, gateway-guaranteed
-  distributed-tracing primitive — any downstream service can rely on it
-  being present, whether or not the original caller sent one.
+- **Positive:** Every zero-trust-relevant gateway request (a proxied REST
+  call or MCP tool call, allowed or denied by policy) now has a queryable,
+  persistent audit row correlated by `trace_id` — closes the "no queryable
+  history" gap this ADR opened with, without also drowning it in the Admin
+  Console's own housekeeping traffic (see the write-path Amendment above).
+- **Positive:** `X-Request-Id` is a first-class, gateway-guaranteed
+  distributed-tracing primitive on *every* request (not just audited ones)
+  — any downstream service can rely on it being present, whether or not the
+  original caller sent one.
 - **Positive:** The `GlobalFilter`-vs-`WebFilter` lesson from ADR-012 is now
   applied a second time, in a different filter, for a different reason
   (visibility into denied requests, not just non-routed local controllers)

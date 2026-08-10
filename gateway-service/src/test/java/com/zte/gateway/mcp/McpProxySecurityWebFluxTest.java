@@ -8,6 +8,7 @@ import com.zte.gateway.mcp.mask.DataMaskingFilter;
 import com.zte.gateway.mcp.model.JsonRpcResponse;
 import com.zte.gateway.mcp.policy.McpPolicyEngine;
 import com.zte.gateway.mcp.policy.PolicyDecision;
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -90,6 +91,17 @@ class McpProxySecurityWebFluxTest {
 
     @MockBean
     private com.zte.gateway.audit.RequestLogAuditService requestLogAuditService;
+
+    @MockBean
+    private com.zte.gateway.filter.AuditExclusionProperties auditExclusionProperties;
+
+    @BeforeEach
+    void stubAuditExclusions() {
+        // RequestAuditFilter's doFinally unconditionally consults this list — a bare
+        // mock returns null, which would NPE. /sse and /message aren't excluded by
+        // default, so an empty list here matches real behavior for this test's paths.
+        when(auditExclusionProperties.getExcludedPathPrefixes()).thenReturn(java.util.List.of());
+    }
 
     @Test
     void sse_withoutToken_returns401() {

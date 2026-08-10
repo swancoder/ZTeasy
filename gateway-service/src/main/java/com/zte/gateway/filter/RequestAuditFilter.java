@@ -21,8 +21,12 @@ import java.net.InetSocketAddress;
 import java.util.UUID;
 
 /**
- * Logs every request (allowed or denied) and injects trusted identity/tracing
- * headers for downstream services (ADR-013).
+ * Injects trusted identity/tracing headers for downstream services, and logs
+ * every <em>zero-trust-relevant</em> request (allowed or denied) — proxied
+ * REST calls and MCP tool calls, not the Admin Console's own traffic or
+ * health probes (ADR-013, amended: the original version audited literally
+ * every request, including the Admin Console observing its own existence —
+ * see {@link AuditExclusionProperties}).
  *
  * <p>Zero Trust principle: downstream services should NEVER trust client-supplied
  * identity headers. Only headers set by this gateway are authoritative.
@@ -60,9 +64,11 @@ public class RequestAuditFilter implements WebFilter, Ordered {
     private static final String PROCESS_ID = String.valueOf(ProcessHandle.current().pid());
 
     private final RequestLogAuditService auditService;
+    private final AuditExclusionProperties exclusions;
 
-    public RequestAuditFilter(RequestLogAuditService auditService) {
+    public RequestAuditFilter(RequestLogAuditService auditService, AuditExclusionProperties exclusions) {
         this.auditService = auditService;
+        this.exclusions = exclusions;
     }
 
     @Override
@@ -103,6 +109,9 @@ public class RequestAuditFilter implements WebFilter, Ordered {
                     return chain.filter(mutated);
                 })
                 .doFinally(signal -> {
+                    if (!isAuditScoped(path)) {
+                        return;
+                    }
                     Integer statusCode = exchange.getResponse().getStatusCode() != null
                             ? exchange.getResponse().getStatusCode().value()
                             : null;
@@ -110,6 +119,16 @@ public class RequestAuditFilter implements WebFilter, Ordered {
                     auditService.record(RequestLog.of(
                             traceId, clientIp, userAgent, PROCESS_ID, path, statusCode, null));
                 });
+    }
+
+    /**
+     * {@code false} for paths under {@code zte.audit.excluded-path-prefixes}
+     * (Admin Console self-traffic, internal endpoints, health checks) — an
+     * exclude-list rather than enumerating proxied routes individually, so a
+     * future route added to {@code GatewayRouteConfig} is audited automatically.
+     */
+    private boolean isAuditScoped(String path) {
+        return exclusions.getExcludedPathPrefixes().stream().noneMatch(path::startsWith);
     }
 
     /** Uses the caller-supplied {@code X-Request-Id} if present, otherwise mints a new one. */
