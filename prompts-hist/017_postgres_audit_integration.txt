@@ -78,3 +78,23 @@ planning changes to it — the switchIfEmpty bug and the GlobalFilter scoping
 gap were both found by reading RequestAuditFilter.java's existing code
 during planning, not by following the task's instructions literally without
 checking what they'd actually produce.
+
+---
+
+Same-day follow-up prompt: "I can see that call like
+'/api/v1/admin/audit-logs' or '/admin/assets/index-....js' are also listed
+in logs which is wrong to my opinion, we should log only call that are
+related to rules, proxied services and etc."
+
+Confirmed with live data before changing anything: 30 of the first 34
+request_logs rows were the Admin Console's own traffic (its API calls to
+view policies/audit-logs, its own static bundle) or /actuator/health
+checks — only 4 were real zero-trust enforcement points. Follow-up
+instruction: "put excluded URIs list into external config file but separate
+from policies definition" — added AuditExclusionProperties
+(zte.audit.excluded-path-prefixes in application.yml, mirroring
+PolicyDefaultsProperties's exact shape/pattern), deliberately not folded
+into zte-policies.yaml (a structured, hot-reloadable rule document this
+flat exclusion list doesn't need) and not hardcoded in Java. Verified live
+again after the fix: the in-scope path's row count increased on a real
+call while every excluded path's count stayed identical despite being hit.
