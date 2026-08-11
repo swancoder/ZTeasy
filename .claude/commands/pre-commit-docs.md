@@ -29,10 +29,18 @@ For each location below, read the current content and compare against the staged
 - Are new environment variables or setup steps documented?
 
 **./CLAUDE.md**
+- CLAUDE.md is a short orientation index, not a changelog — it must stay readable in
+  one pass. Never copy ADR content, prompt-history content, or `docs/SPECS.md` content
+  into it; link to that file instead.
+- If the diff completes a new stage: add exactly **one row** to the "Stage Index" table
+  (Stage number, one-line title, ADR link). Do not add prose, bullet lists, or a
+  per-file breakdown — that belongs in the stage's ADR. If a row for this stage already
+  exists (e.g. a same-day follow-up commit), don't add a second one.
 - Does it accurately describe the project structure for Claude Code?
-- Are new modules and their responsibilities listed?
+- Are new modules and their responsibilities listed (in "Key Directories," one line each)?
 - Are build commands, test commands, and run commands still correct?
 - Are coding conventions and patterns up to date?
+- Do not add a "Backlog" list here — backlog items belong in `docs/SPECS.md` §9 only.
 
 **./docs/adr/**
 - Does the staged change introduce an architectural decision that needs a new ADR?
@@ -74,4 +82,12 @@ Ready to commit.
 - Do not invent features that aren't in the diff — describe what is actually there.
 - If you're unsure whether a change warrants a new ADR, err on the side of creating one. ADRs are cheap; undocumented decisions are expensive.
 - Keep README and CLAUDE.md factual and concise — no marketing language.
+- **One fact, one home.** Each piece of information (a design decision's reasoning, a
+  stage's implementation detail, a prompt's literal text) belongs in exactly one file.
+  ADRs own "why," `docs/SPECS.md` owns "what exists now," `prompts-hist/` owns "what was
+  asked," `CLAUDE.md` owns "where to look." Before adding a sentence to any doc, check
+  whether it already lives in one of the other three — if so, link, don't repeat it.
+- If a documentation file is growing every commit (a Stage/changelog section gaining a
+  new paragraph each time), that's a sign content is leaking into the wrong file — stop
+  and move that detail to the ADR or `docs/SPECS.md` instead of appending another entry.
 - If a staged change is purely cosmetic (formatting, typo fix, comment cleanup), skip prompts-hist.
