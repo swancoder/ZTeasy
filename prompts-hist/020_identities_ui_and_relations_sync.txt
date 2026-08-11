@@ -2,15 +2,18 @@ Identities management UI refactor (Actors vs. Access Containers) + relational
 caching (idp_identity_relations) + system-client filtering — session prompt
 from "Senior Solution Architect / Full-Stack Java & React Developer" role.
 
-Filename note: saved to the exact literal path the prompt specified
-(./prompts-hist/identities_ui_and_relations_sync.txt), not this repo's usual
-NNN_name.txt sequential numbering (018_idp_identity_sync.txt,
-019_machine_identities_sync.txt, etc.) — a deliberate, explicit deviation
-from convention, made because the task named the exact filename, not an
-oversight. Same reasoning applied to the ADR filename (see
-docs/adr/identities-ui-actors-containers-and-relations-caching.md's own
-filename note) — this is Stage 15 in CLAUDE.md's stage numbering regardless
-of what either file is called.
+Filename note: the task prompt specified the exact literal path
+./prompts-hist/identities_ui_and_relations_sync.txt, deliberately deviating
+from this repo's usual NNN_name.txt sequential numbering
+(018_idp_identity_sync.txt, 019_machine_identities_sync.txt, etc.) — saved
+that way at the time, per the explicit instruction. Renamed to
+020_identities_ui_and_relations_sync.txt in a later session to restore the
+sequential convention (the literal-filename instruction only applied to
+that one task, not as a standing exception) — same content, same "Stage 15"
+identity in CLAUDE.md's stage numbering either way. The ADR's own filename
+(docs/adr/identities-ui-actors-containers-and-relations-caching.md) is left
+unnumbered, since that deviation was requested independently and still
+stands.
 
 Original prompt (paraphrased — full text requested CoT/Self-Criticism/ADR
 protocol per CLAUDE.md, with an explicit "don't hardcode an ADR number,

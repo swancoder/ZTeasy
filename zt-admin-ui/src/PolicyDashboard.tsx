@@ -47,9 +47,9 @@ interface Category {
 }
 
 const CATEGORIES: Category[] = [
-  { key: 'users2service', title: 'users2service', description: 'Human user (realm role) → gateway REST service', defaultSourceType: 'ROLE' },
-  { key: 'service2service', title: 'service2service', description: 'Calling service/agent (JWT azp) → gateway REST service', defaultSourceType: 'CLIENT' },
-  { key: 'agentMcpToolCalls', title: 'agentMcpToolCalls', description: 'MCP agent (JWT azp) → MCP tool name', defaultSourceType: 'CLIENT' },
+  { key: 'users2service', title: 'User → Service', description: 'Human user (realm role) → gateway REST service', defaultSourceType: 'ROLE' },
+  { key: 'service2service', title: 'Service → Service', description: 'Calling service/agent (JWT azp) → gateway REST service', defaultSourceType: 'CLIENT' },
+  { key: 'agentMcpToolCalls', title: 'Agent → MCP Tool', description: 'MCP agent (JWT azp) → MCP tool name', defaultSourceType: 'CLIENT' },
 ]
 
 function RuleTable({ rules, identitySet, defaultSourceType }: { rules: PolicyRule[]; identitySet?: Set<string>; defaultSourceType: IdentityTypeName }) {
