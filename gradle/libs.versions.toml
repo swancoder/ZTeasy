@@ -10,6 +10,7 @@ awaitility             = "4.2.2"
 kotlin                 = "2.0.21"
 spring-dotenv          = "4.0.0"
 node-gradle            = "7.1.0"
+springdoc-openapi      = "2.7.0"
 
 [libraries]
 # Spring Boot starters
@@ -47,6 +48,9 @@ jackson-dataformat-yaml   = { module = "com.fasterxml.jackson.dataformat:jackson
 kotlin-stdlib             = { module = "org.jetbrains.kotlin:kotlin-stdlib" }
 jackson-kotlin            = { module = "com.fasterxml.jackson.module:jackson-module-kotlin" }
 spring-dotenv             = { module = "me.paulschwarz:spring-dotenv", version.ref = "spring-dotenv" }
+
+# OpenAPI schema (service-a/service-b, ADR-016 amendment) — WebFlux variant with Swagger UI
+springdoc-openapi-webflux-ui = { module = "org.springdoc:springdoc-openapi-starter-webflux-ui", version.ref = "springdoc-openapi" }
 
 # Test
 spring-test               = { module = "org.springframework.boot:spring-boot-starter-test" }

@@ -32,6 +32,30 @@ import java.util.Map;
  * thrown exception back to the caller: a service that can't be reached yet
  * is a normal, expected onboarding outcome (the task's own "degraded state
  * where manual routing is required" framing), not an application error.
+ *
+ * <p><strong>mTLS:</strong> {@code webClientBuilder} below is this
+ * application's single Spring-Boot-autoconfigured default {@code
+ * WebClient.Builder} — <em>not</em> a plain, unauthenticated client. When
+ * {@code zte.mtls.enabled=true} (the production/dev default),
+ * {@code MtlsHttpClientConfig} registers the gateway's one {@code
+ * ReactorClientHttpConnector} bean, and Spring Boot's own {@code
+ * ClientHttpConnectorAutoConfiguration} automatically applies any such
+ * singleton connector bean to every autoconfigured {@code WebClient.Builder}
+ * in the application context via a {@code WebClientCustomizer} — this class
+ * never had to ask for it explicitly, and doesn't need to. Verified two
+ * ways, not just inferred from framework docs: (1) bytecode inspection of
+ * {@code ClientHttpConnectorAutoConfiguration.webClientHttpConnectorCustomizer(...)}
+ * confirms the customizer calls {@code builder.clientConnector(...)}; (2)
+ * live, against the real running gateway — {@code curl} with no client
+ * certificate against {@code service-a}'s {@code client-auth: need} listener
+ * fails at the TLS handshake (no HTTP response at all), while this worker's
+ * probe against the identical URL received a real HTTP-level response,
+ * which is only possible if a valid client certificate was already
+ * presented. When {@code zte.mtls.enabled=false} (the {@code it} test
+ * profile — no certs needed in CI), no connector bean exists, the
+ * customizer never activates, and this same builder transparently falls
+ * back to a plain connector — exactly matching every other outbound
+ * component in this module (no special-casing needed here).
  */
 @Component
 public class AutoDiscoveryWorker {

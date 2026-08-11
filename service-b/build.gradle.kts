@@ -10,6 +10,10 @@ dependencies {
     implementation(libs.spring.webflux)
     implementation(libs.spring.actuator)
 
+    // OpenAPI schema at /v3/api-docs (+ Swagger UI) — ADR-016 amendment: lets
+    // the gateway's AutoDiscoveryWorker confirm this service on registration
+    implementation(libs.springdoc.openapi.webflux.ui)
+
     // OBO token validation
     implementation(libs.jjwt.api)
 

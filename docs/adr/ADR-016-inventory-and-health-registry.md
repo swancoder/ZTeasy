@@ -165,6 +165,86 @@ naming since it's not obvious from the method-naming convention alone.
 
 ---
 
+## Amendment (same day): correcting the mTLS premise, and OpenAPI on service-a/b
+
+A follow-up task, filed after live-testing this feature, was framed as
+fixing "a security vulnerability: `AutoDiscoveryWorker` and
+`HealthPollingService` use a plain `WebClient`, bypassing our mTLS
+perimeter." **That premise is incorrect** — investigated and disproven
+before writing any code, not assumed either way:
+
+- `MtlsHttpClientConfig` (unchanged since ADR-004) registers the
+  application's **one** `ReactorClientHttpConnector` bean. Spring Boot's own
+  `ClientHttpConnectorAutoConfiguration` — bytecode-inspected directly,
+  not just recalled from documentation — provides a `WebClientCustomizer`
+  bean, conditional on exactly this kind of singleton connector bean
+  existing, whose body is `builder -> builder.clientConnector(connector)`.
+  `WebClientAutoConfiguration`'s own default `WebClient.Builder` bean applies
+  every such customizer. The net effect: **every** `WebClient.Builder`
+  autowired anywhere in `gateway-service` — including `AutoDiscoveryWorker`'s
+  and `HealthPollingService`'s, injected exactly the same way
+  `KeycloakIdpAdapter`/`McpBackendClient` already were — already carries the
+  gateway's mTLS client certificate, with zero code in either class asking
+  for it explicitly.
+- Confirmed live, not just by reading bytecode: `curl` with no client
+  certificate against `service-a`'s `client-auth: need` listener
+  (`https://localhost:8081`) fails at the TLS handshake — no HTTP response
+  at all (`Request CERT` sent, connection then fails). `AutoDiscoveryWorker`'s
+  probe against the exact same URL, from the real running gateway, received
+  a genuine HTTP-level `404` — only possible if a valid client certificate
+  had already been presented during that TLS handshake. The `WARNING`
+  status this session originally observed for `service-a` was never a
+  security gap; it was `service-a` genuinely having no `/v3/api-docs`
+  endpoint to discover.
+- This also resolves the task's stated Self-Criticism concern by
+  construction: because the *existing* default `WebClient.Builder` already
+  carries mTLS, no new hardcoded host/port was introduced anywhere.
+
+**What actually changed:** nothing in the `WebClient` wiring — introducing a
+second, explicit `ReactorClientHttpConnector` injection would have been
+pure duplication of already-correct behavior, and a real regression risk
+(the connector bean only exists when `zte.mtls.enabled=true`; the `it` test
+profile deliberately sets it `false` so CI needs no certs — a naive hard
+dependency would have broken every integration test's `ApplicationContext`
+startup). Instead: `AutoDiscoveryWorker`/`HealthPollingService`'s Javadoc
+now states this mTLS-inheritance fact explicitly, with the verification
+method, so a future reader (or task author) doesn't have to re-derive it —
+directly serving the real underlying goal of the task that raised this,
+without introducing risk for a problem that didn't exist.
+
+**What did need a real fix:** `service-a`/`service-b` had no `/v3/api-docs`
+endpoint at all — a genuine gap, not a false alarm. Added
+`springdoc-openapi-starter-webflux-ui` to both modules (`gradle/libs.versions.toml`
++ each `build.gradle.kts`). No `SecurityConfig` change was needed: both
+services already run their own `ServiceSecurityConfig`
+(`anyExchange().permitAll()` — mTLS is already their entire trust
+perimeter, the shared `auth-library.SecurityConfig`'s JWT requirement
+doesn't apply to either), so springdoc's auto-registered `/v3/api-docs`
+route is reachable the moment the dependency is added, with zero
+authorization wiring — `AutoDiscoveryWorker`'s probe (which, being an
+internal, pre-user-context gateway process, has no JWT to present anyway)
+now succeeds and correctly flips a freshly re-onboarded `service-a`/`service-b`
+to `ACTIVE`.
+
+**`InventoryRegistryIT` deliberately not changed for this.** The task's own
+instruction assumed this IT tests directly against real `service-a`/`service-b`
+processes — it doesn't; per `BaseZteIntegrationTest`, `service-a.uri`/
+`service-b.uri` point at an in-process WireMock stand-in, decoupled from
+this repo's actual `service-a`/`service-b` modules by design (so the IT
+suite needs no real service-a/b process, cert setup, or Docker service to
+run). The existing `onboardRestService_discoverySucceeds_becomesActive`
+(stubs `/v3/api-docs` → 200) and `onboardRestService_discoveryFails_becomesWarning`
+(no stub → 404) tests already cover both outcomes correctly and remain
+valid — a registered service that genuinely lacks OpenAPI docs must still
+land on `WARNING`, regardless of whether this repo's own two example
+services now happen to have them. This feature's specific claim — that
+`service-a` now really exposes `/v3/api-docs` — was verified live instead
+(see the Git commit's own verification notes), matching the task's own
+literal Verification section, which itself asks for a live `bootRun`+`curl`
+check, not a new automated test.
+
+---
+
 ## Alternatives Considered
 
 ### On-demand schema re-fetch per Admin Console page load, instead of caching `status` (rejected)
@@ -233,3 +313,10 @@ naming since it's not obvious from the method-naming convention alone.
   service and any `GatewayRouteConfig` route it's meant to represent, so
   the passive-telemetry naming constraint (see Self-Critique) isn't a
   silent trap.
+- **A dedicated `src/test` source set for `service-a`/`service-b`**, e.g.
+  asserting `/v3/api-docs` returns 200 — neither module has ever had one
+  (all existing coverage is external, via `gateway-service`'s own
+  `HappyPathIT`/`ZeroTrustBreachIT` against WireMock stand-ins); adding one
+  now for a single assertion would be a disproportionate new-infrastructure
+  investment, so this amendment's OpenAPI claim was verified live instead
+  (see the Amendment section above).

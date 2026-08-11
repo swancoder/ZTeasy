@@ -616,6 +616,32 @@ Console, auto-discovered, and health-monitored:
 reasoning as `idp_identities.type`; `name` `UNIQUE`), `health_metrics`
 (`service_id` `UNIQUE REFERENCES inventory_services(id) ON DELETE CASCADE`).
 
+**ADR-016 amendment, same day** — a follow-up task, framed as "`AutoDiscoveryWorker`/
+`HealthPollingService` use a plain `WebClient`, bypassing mTLS," was
+investigated and found factually incorrect before any code changed: both
+classes inject the application's one autoconfigured default `WebClient.Builder`,
+which already carries the gateway's mTLS client certificate whenever
+`zte.mtls.enabled=true` — Spring Boot's own `ClientHttpConnectorAutoConfiguration`
+applies `MtlsHttpClientConfig`'s single `ReactorClientHttpConnector` bean to
+every such builder automatically, confirmed by bytecode inspection and by a
+live `curl`-with-no-client-cert failing the TLS handshake against the exact
+same URL these workers successfully probe. No `WebClient` wiring changed;
+both classes' Javadoc now states the inheritance and how it was verified.
+The amendment's real fix: `service-a`/`service-b` had no `/v3/api-docs`
+endpoint at all (`springdoc-openapi-starter-webflux-ui:2.7.0`, added to both
+modules — no `SecurityConfig` change needed, `ServiceSecurityConfig`
+already `permitAll()`s everything on both services, mTLS being their whole
+trust perimeter). Verified live: a freshly re-registered `service-a` at
+`https://localhost:8081` now reaches `ACTIVE` via `AutoDiscoveryWorker`'s
+`/v3/api-docs` probe, not `WARNING`. Also newly observed live, out of this
+amendment's scope: `HealthPollingService.pingOne` immediately flips that
+same entry to `DOWN` on its next poll cycle, because it pings `{base_url}/actuator/health`
+on the mTLS port (8081) — but `service-a`/`service-b` only expose
+`/actuator/health` on their separate plain management port (9081, see
+§5.3), so this ping always 404s for both services regardless of the
+OpenAPI fix. Pre-existing since Stage 16, not a regression from this
+amendment — tracked in §9 roadmap rather than fixed here.
+
 ### 5.3 `service-a` / `service-b`
 
 - **`service-a/HelloController`** — `GET /api/v1/service-a/hello`; calls
@@ -968,6 +994,14 @@ own, all are new capabilities.
       any `GatewayRouteConfig` route it's meant to represent, so passive
       `last_successful_call` telemetry's exact-name-match requirement isn't
       a silent trap (ADR-016 Self-Critique).
+- [ ] `HealthPollingService.pingOne` pings `{base_url}/actuator/health` on
+      the target's main mTLS port, but `service-a`/`service-b` (and any
+      future `REST` target following the same pattern) only expose
+      `/actuator/health` on a separate plain management port — every such
+      entry always 404s and sits at `DOWN` regardless of real health;
+      needs either a per-entry management-port field or a documented
+      convention that management endpoints must also be reachable on the
+      main port (found live during the ADR-016 mTLS/OpenAPI amendment).
 - [ ] Reduce `fetchRelations()`'s per-user/per-client HTTP call count if
       sync duration becomes a problem at larger realm scale — no known
       Keycloak Admin API batch endpoint for this today (Stage 15 ADR

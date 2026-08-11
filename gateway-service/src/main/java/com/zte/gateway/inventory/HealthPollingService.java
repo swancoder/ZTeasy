@@ -30,6 +30,11 @@ import java.util.Optional;
  * Javadoc for why), even though its {@code health_metrics} row is still
  * updated so an operator can see raw connectivity alongside the stuck
  * discovery failure.
+ *
+ * <p><strong>mTLS:</strong> {@code webClientBuilder} already carries the
+ * gateway's mTLS client certificate when {@code zte.mtls.enabled=true} — see
+ * {@link AutoDiscoveryWorker}'s Javadoc for the full explanation and how
+ * it was verified; the same reasoning applies identically here.
  */
 @Service
 public class HealthPollingService {
