@@ -3,6 +3,7 @@ package com.zte.gateway.policy.def;
 import com.zte.auth.audit.ZteAuditLogger;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.stereotype.Component;
 import reactor.core.publisher.Mono;
 import reactor.core.scheduler.Schedulers;
@@ -38,15 +39,18 @@ public class PolicyDefinitionStore {
     private final YamlPolicyFileLoader loader;
     private final PolicyValidator validator;
     private final PolicyDefaultsProperties properties;
+    private final ApplicationEventPublisher eventPublisher;
     private final AtomicReference<PolicyDocument> current = new AtomicReference<>();
     private final Object reloadLock = new Object();
 
     public PolicyDefinitionStore(YamlPolicyFileLoader loader,
                                   PolicyValidator validator,
-                                  PolicyDefaultsProperties properties) {
+                                  PolicyDefaultsProperties properties,
+                                  ApplicationEventPublisher eventPublisher) {
         this.loader = loader;
         this.validator = validator;
         this.properties = properties;
+        this.eventPublisher = eventPublisher;
         current.set(loadAndValidateOrThrow());
         log.info("Policy definitions loaded: {} users2service, {} service2service, {} agentMcpToolCalls rules",
                 current.get().users2service().size(),
@@ -72,6 +76,7 @@ public class PolicyDefinitionStore {
                 PolicyDocument next = loadAndValidateOrThrow();
                 current.set(next);
                 ZteAuditLogger.policyReloadSucceeded();
+                eventPublisher.publishEvent(new PolicyDocumentReloadedEvent(next));
                 return PolicyReloadResult.ok();
             } catch (PolicyLoadException e) {
                 List<String> errors = e.errors().isEmpty() ? List.of(e.getMessage()) : e.errors();

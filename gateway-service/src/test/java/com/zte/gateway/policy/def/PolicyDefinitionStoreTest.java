@@ -4,6 +4,7 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
+import org.springframework.context.ApplicationEventPublisher;
 import reactor.test.StepVerifier;
 
 import java.util.List;
@@ -11,6 +12,8 @@ import java.util.List;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 
 /**
@@ -22,6 +25,7 @@ class PolicyDefinitionStoreTest {
     @Mock YamlPolicyFileLoader loader;
     @Mock PolicyValidator validator;
     @Mock PolicyDefaultsProperties properties;
+    @Mock ApplicationEventPublisher eventPublisher;
 
     @Test
     void constructor_validDocument_loadsSuccessfully() {
@@ -29,7 +33,7 @@ class PolicyDefinitionStoreTest {
         when(loader.load(any())).thenReturn(doc);
         when(validator.validate(doc)).thenReturn(PolicyValidationResult.valid());
 
-        PolicyDefinitionStore store = new PolicyDefinitionStore(loader, validator, properties);
+        PolicyDefinitionStore store = new PolicyDefinitionStore(loader, validator, properties, eventPublisher);
 
         assertThat(store.current()).isEqualTo(doc);
     }
@@ -40,7 +44,7 @@ class PolicyDefinitionStoreTest {
         when(loader.load(any())).thenReturn(doc);
         when(validator.validate(doc)).thenReturn(new PolicyValidationResult(List.of("bad rule"), List.of()));
 
-        assertThatThrownBy(() -> new PolicyDefinitionStore(loader, validator, properties))
+        assertThatThrownBy(() -> new PolicyDefinitionStore(loader, validator, properties, eventPublisher))
                 .isInstanceOf(PolicyLoadException.class);
     }
 
@@ -54,7 +58,7 @@ class PolicyDefinitionStoreTest {
         when(loader.load(any())).thenReturn(initial, updated);
         when(validator.validate(any())).thenReturn(PolicyValidationResult.valid());
 
-        PolicyDefinitionStore store = new PolicyDefinitionStore(loader, validator, properties);
+        PolicyDefinitionStore store = new PolicyDefinitionStore(loader, validator, properties, eventPublisher);
         assertThat(store.current()).isEqualTo(initial);
 
         StepVerifier.create(store.reload())
@@ -62,6 +66,7 @@ class PolicyDefinitionStoreTest {
                 .verifyComplete();
 
         assertThat(store.current()).isEqualTo(updated);
+        verify(eventPublisher).publishEvent(new PolicyDocumentReloadedEvent(updated));
     }
 
     @Test
@@ -73,7 +78,7 @@ class PolicyDefinitionStoreTest {
                 .thenReturn(PolicyValidationResult.valid())   // constructor load
                 .thenReturn(new PolicyValidationResult(List.of("invalid on reload"), List.of())); // reload
 
-        PolicyDefinitionStore store = new PolicyDefinitionStore(loader, validator, properties);
+        PolicyDefinitionStore store = new PolicyDefinitionStore(loader, validator, properties, eventPublisher);
 
         StepVerifier.create(store.reload())
                 .assertNext(result -> {
@@ -83,5 +88,6 @@ class PolicyDefinitionStoreTest {
                 .verifyComplete();
 
         assertThat(store.current()).isEqualTo(initial);
+        verifyNoInteractions(eventPublisher);
     }
 }

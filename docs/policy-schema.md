@@ -34,7 +34,7 @@ Every rule, in every category, has the same shape:
 |---|---|---|---|
 | `id` | yes | string | Unique across the **whole document** (not just its category). Referenced in audit logs and validation errors. |
 | `effect` | yes | `ALLOW` \| `DENY` | What the rule does when it matches. |
-| `source` | yes | string (pattern) | Caller identity: a realm role name (`users2service`), a calling service/agent's OAuth2 client id (`service2service`, `agentMcpToolCalls`). |
+| `source` | yes | string (pattern) | Caller identity: a realm role name (`users2service`), a calling service/agent's OAuth2 client id (`service2service`, `agentMcpToolCalls`). `users2service` also accepts an IdP URN — `user:<name>`, `group:<name>`, `role:<name>` (ADR-014); a bare name is still exactly equivalent to `role:<name>`. |
 | `target` | yes | string (pattern) | What's being accessed: a service name (`users2service`, `service2service`) or an MCP tool name (`agentMcpToolCalls`). |
 | `pathPattern` | no | string (Ant pattern) | Request path scope. Omit/`null` to match any path. **Unused by `agentMcpToolCalls`** (tool calls aren't path-scoped). |
 | `methods` | no | string | Comma-separated HTTP verbs, or `"*"`. Omit/`null` to match any method. **Unused by `agentMcpToolCalls`**. |
@@ -44,6 +44,28 @@ Every rule, in every category, has the same shape:
 (via `PolicyMatcher`, the single shared evaluation engine for all three
 categories): `"*"` matches anything, `"agent-*"` matches a prefix, an exact
 string matches itself.
+
+## URN sources for `users2service` (ADR-014)
+
+`source` in a `users2service` rule additionally accepts an IdP-identity URN,
+parsed by `IdentityUrn.parse`:
+
+| Form | Matches |
+|---|---|
+| `role:<name>` | A Keycloak realm role — identical to the bare `<name>` form below. |
+| `user:<name>` | A Keycloak user, by `preferred_username`. |
+| `group:<name>` | A Keycloak group, by name (requires the `groups` JWT claim — see `zte-gateway`'s `groups-mapper` protocol mapper). |
+| `<name>` (no prefix) | Backward-compatible bare role name — treated identically to `role:<name>`. |
+| An unrecognized prefix (e.g. `agent:foo`) | Treated as a literal role name (`role:"agent:foo"`), not silently ignored — a mistyped prefix still produces a checkable (and likely orphaned) rule rather than a rule that never matches anything. |
+| A pattern containing `*`/`?` | Not resolvable to a URN — skipped by orphaned-rule checking, but still matched by `PolicyMatcher`'s normal `AntPathMatcher` semantics as before. |
+
+Every 15 minutes (`zte.idp.sync-interval-ms`, default `900000`) — or on demand
+via `POST /api/v1/admin/identities/sync` — the gateway syncs Keycloak's
+users/groups/roles into a local `idp_identities` Postgres cache. A
+`users2service` rule whose `source` doesn't resolve to any cached identity is
+never rejected, but logs an SLF4J `WARN` ("ORPHANED RULE: ...") at load time
+and on every reload, and is flagged in the Admin Console's Policies tab. See
+[ADR-014](adr/ADR-014-idp-identity-sync.md).
 
 ## Precedence
 

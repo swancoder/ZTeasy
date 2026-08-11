@@ -98,6 +98,16 @@ zte:
     default-effect: ${ZTE_POLICY_DEFAULT_EFFECT:DENY}
     user-client-id: ${ZTE_POLICY_USER_CLIENT_ID:zte-gateway}
 
+  # ── IdP identity sync (Stage 11 / ADR-014) ──
+  idp:
+    provider: ${ZTE_IDP_PROVIDER:keycloak}
+    sync-interval-ms: ${ZTE_IDP_SYNC_INTERVAL_MS:900000}   # 15 min
+    keycloak:
+      base-uri: ${ZTE_IDP_KEYCLOAK_BASE_URI:http://localhost:8180}
+      realm: ${ZTE_IDP_KEYCLOAK_REALM:zte-realm}
+      client-id: ${ZTE_IDP_KEYCLOAK_CLIENT_ID:zte-gateway}
+      client-secret: ${ZTE_IDP_KEYCLOAK_CLIENT_SECRET:zte-gateway-secret}
+
   # ── Request audit trail exclusions (Stage 12 / ADR-013 amendment) ──
   # Path prefixes that never generate a request_logs row or ZteAuditLogger.requestLog(...)
   # line — deliberately separate from zte-policies.yaml (a structured, hot-reloadable rule

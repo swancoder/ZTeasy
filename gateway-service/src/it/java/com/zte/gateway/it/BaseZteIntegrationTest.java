@@ -114,6 +114,13 @@ abstract class BaseZteIntegrationTest {
 
         // MCP backend (McpBackendClient) → WireMock as well; see McpProxyIT
         registry.add("mcp-backend.uri", () -> "http://localhost:" + WIREMOCK.port());
+
+        // IdP identity sync (ADR-014) — KeycloakIdpAdapter calls the real Testcontainers
+        // Keycloak's Admin REST API using zte-gateway's service account (realm-export.json
+        // grants it view-users/view-realm). Long sync interval — tests trigger sync manually
+        // via POST /api/v1/admin/identities/sync, not the @Scheduled job.
+        registry.add("zte.idp.keycloak.base-uri", KEYCLOAK::getAuthServerUrl);
+        registry.add("zte.idp.sync-interval-ms", () -> "3600000");
     }
 
     // ── Dynamic port injection ────────────────────────────────────────────────

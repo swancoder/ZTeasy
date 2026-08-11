@@ -14,10 +14,22 @@ import TableRow from '@mui/material/TableRow'
 import Chip from '@mui/material/Chip'
 import Typography from '@mui/material/Typography'
 import Stack from '@mui/material/Stack'
-import type { PolicyDocument, PolicyRule, ReloadResult } from './types'
+import Tooltip from '@mui/material/Tooltip'
+import type { IdpIdentityEntry, PolicyDocument, PolicyRule, ReloadResult } from './types'
 
 interface Props {
   accessToken: string
+}
+
+// Mirrors gateway-service's com.zte.gateway.identity.IdentityUrn.parse (ADR-014) —
+// intentionally duplicated (~10 lines) rather than shared, to keep this tab's
+// orphan-highlighting independent of the Identities tab's data fetch.
+function parseUrn(source: string): { type: 'USER' | 'GROUP' | 'ROLE'; name: string } | null {
+  if (!source || source.includes('*') || source.includes('?')) return null
+  if (source.startsWith('user:')) return { type: 'USER', name: source.slice('user:'.length) }
+  if (source.startsWith('group:')) return { type: 'GROUP', name: source.slice('group:'.length) }
+  if (source.startsWith('role:')) return { type: 'ROLE', name: source.slice('role:'.length) }
+  return { type: 'ROLE', name: source }
 }
 
 interface Category {
@@ -32,7 +44,7 @@ const CATEGORIES: Category[] = [
   { key: 'agentMcpToolCalls', title: 'agentMcpToolCalls', description: 'MCP agent (JWT azp) → MCP tool name' },
 ]
 
-function RuleTable({ rules }: { rules: PolicyRule[] }) {
+function RuleTable({ rules, identitySet }: { rules: PolicyRule[]; identitySet?: Set<string> }) {
   if (rules.length === 0) {
     return (
       <Typography color="text.secondary" sx={{ p: 2 }}>
@@ -40,6 +52,14 @@ function RuleTable({ rules }: { rules: PolicyRule[] }) {
       </Typography>
     )
   }
+
+  function isOrphaned(rule: PolicyRule): boolean {
+    if (!identitySet) return false
+    const urn = parseUrn(rule.source)
+    if (!urn) return false
+    return !identitySet.has(`${urn.type}:${urn.name}`)
+  }
+
   return (
     <TableContainer>
       <Table size="small">
@@ -55,23 +75,33 @@ function RuleTable({ rules }: { rules: PolicyRule[] }) {
           </TableRow>
         </TableHead>
         <TableBody>
-          {rules.map((rule) => (
-            <TableRow key={rule.id}>
-              <TableCell>{rule.id}</TableCell>
-              <TableCell>
-                <Chip
-                  label={rule.effect}
-                  color={rule.effect === 'DENY' ? 'error' : 'success'}
-                  size="small"
-                />
-              </TableCell>
-              <TableCell>{rule.source}</TableCell>
-              <TableCell>{rule.target}</TableCell>
-              <TableCell>{rule.pathPattern ?? '—'}</TableCell>
-              <TableCell>{rule.methods ?? '—'}</TableCell>
-              <TableCell>{rule.priority}</TableCell>
-            </TableRow>
-          ))}
+          {rules.map((rule) => {
+            const orphaned = isOrphaned(rule)
+            return (
+              <TableRow key={rule.id} sx={orphaned ? { bgcolor: 'warning.light' } : undefined}>
+                <TableCell>{rule.id}</TableCell>
+                <TableCell>
+                  <Chip
+                    label={rule.effect}
+                    color={rule.effect === 'DENY' ? 'error' : 'success'}
+                    size="small"
+                  />
+                </TableCell>
+                <TableCell>
+                  {rule.source}
+                  {orphaned && (
+                    <Tooltip title="No matching identity found in the synced IdP cache — check the Identities tab or run a sync">
+                      <span style={{ marginLeft: 6 }}>⚠️</span>
+                    </Tooltip>
+                  )}
+                </TableCell>
+                <TableCell>{rule.target}</TableCell>
+                <TableCell>{rule.pathPattern ?? '—'}</TableCell>
+                <TableCell>{rule.methods ?? '—'}</TableCell>
+                <TableCell>{rule.priority}</TableCell>
+              </TableRow>
+            )
+          })}
         </TableBody>
       </Table>
     </TableContainer>
@@ -80,6 +110,7 @@ function RuleTable({ rules }: { rules: PolicyRule[] }) {
 
 export default function PolicyDashboard({ accessToken }: Props) {
   const [policies, setPolicies] = useState<PolicyDocument | null>(null)
+  const [identitySet, setIdentitySet] = useState<Set<string>>(new Set())
   const [loading, setLoading] = useState(true)
   const [reloading, setReloading] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -103,9 +134,23 @@ export default function PolicyDashboard({ accessToken }: Props) {
     }
   }, [accessToken])
 
+  const fetchIdentitySet = useCallback(async () => {
+    try {
+      const res = await fetch('/api/v1/admin/identities/search', {
+        headers: { Authorization: `Bearer ${accessToken}` },
+      })
+      if (!res.ok) return
+      const identities: IdpIdentityEntry[] = await res.json()
+      setIdentitySet(new Set(identities.map((i) => `${i.type}:${i.name}`)))
+    } catch {
+      // Orphan-highlighting is best-effort — a failed identity fetch just means no rows get flagged.
+    }
+  }, [accessToken])
+
   useEffect(() => {
     fetchPolicies()
-  }, [fetchPolicies])
+    fetchIdentitySet()
+  }, [fetchPolicies, fetchIdentitySet])
 
   const handleReload = async () => {
     setReloading(true)
@@ -165,7 +210,10 @@ export default function PolicyDashboard({ accessToken }: Props) {
                 {category.description}
               </Typography>
             </Box>
-            <RuleTable rules={policies?.[category.key] ?? []} />
+            <RuleTable
+              rules={policies?.[category.key] ?? []}
+              identitySet={category.key === 'users2service' ? identitySet : undefined}
+            />
           </Paper>
         ))}
       </Stack>

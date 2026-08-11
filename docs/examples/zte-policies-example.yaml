@@ -27,6 +27,16 @@ users2service:
     methods: "GET"
     priority: 0
 
+  # IdP URN source (ADR-014) — same effect as `source: ADMIN` above, but
+  # addresses a specific synced Keycloak user rather than a whole role.
+  - id: u2s-named-user-read-service-a
+    effect: ALLOW
+    source: "user:zte-admin"    # Keycloak preferred_username, synced into idp_identities
+    target: service-a
+    pathPattern: "/api/v1/service-a/**"
+    methods: "GET"
+    priority: 0
+
   - id: u2s-emergency-lockout-service-b
     effect: DENY                # DENY always wins, even over the ADMIN rule above
     source: "*"

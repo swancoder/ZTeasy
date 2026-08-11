@@ -39,3 +39,13 @@ export interface RequestLogEntry {
   statusCode: number | null
   message: string | null
 }
+
+// Mirrors gateway-service's com.zte.gateway.identity.IdpIdentity (ADR-014).
+export interface IdpIdentityEntry {
+  id: string
+  type: 'USER' | 'GROUP' | 'ROLE'
+  externalId: string
+  name: string
+  displayName: string | null
+  lastSynced: string
+}

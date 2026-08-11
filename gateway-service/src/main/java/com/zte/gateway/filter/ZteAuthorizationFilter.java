@@ -1,6 +1,7 @@
 package com.zte.gateway.filter;
 
 import com.zte.auth.audit.ZteAuditLogger;
+import com.zte.gateway.identity.IdentitySources;
 import com.zte.gateway.policy.def.PolicyDefaultsProperties;
 import com.zte.gateway.policy.def.PolicyDefinitionStore;
 import com.zte.gateway.policy.def.PolicyEvaluation;
@@ -102,8 +103,9 @@ public class ZteAuthorizationFilter implements GlobalFilter, Ordered {
                     }
 
                     String targetService = RequestTargetResolver.targetService(path);
+                    List<String> sources = IdentitySources.enrich(roles, jwtAuth);
                     PolicyEvaluation yamlEval = policyMatcher.evaluate(
-                            policyDefinitionStore.current().users2service(), roles, targetService, path, method);
+                            policyDefinitionStore.current().users2service(), sources, targetService, path, method);
 
                     return switch (yamlEval.outcome()) {
                         case DENIED -> {

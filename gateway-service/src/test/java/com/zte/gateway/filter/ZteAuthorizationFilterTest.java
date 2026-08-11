@@ -188,6 +188,27 @@ class ZteAuthorizationFilterTest {
     }
 
     /**
+     * ADR-014: a YAML rule whose source is a {@code role:}-prefixed URN matches
+     * identically to the bare role-name form — {@link com.zte.gateway.identity.IdentitySources}
+     * enriches the sources list with {@code role:<r>} for every realm role.
+     */
+    @Test
+    void yamlUrnPrefixedRoleSource_matchesLikeBareRole() {
+        when(chain.filter(any())).thenReturn(Mono.empty());
+        withYamlRules(new PolicyRule("a1", RuleEffect.ALLOW, "role:ADMIN", "service-a", null, null, 0));
+
+        MockServerWebExchange  ex   = exchange();
+        JwtAuthenticationToken auth = jwtAuth(List.of("ADMIN"));
+
+        StepVerifier.create(
+                filter.filter(ex, chain)
+                      .contextWrite(ReactiveSecurityContextHolder.withAuthentication(auth)))
+                .verifyComplete();
+
+        verify(chain).filter(ex);
+    }
+
+    /**
      * A JWT with no realm roles and an azp identifying a service principal
      * (not the interactive user client) is service2service traffic — this filter
      * passes it straight through for ServiceToServiceAuthorizationFilter to decide.

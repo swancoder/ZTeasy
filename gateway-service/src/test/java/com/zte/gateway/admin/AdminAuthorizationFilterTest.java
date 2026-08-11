@@ -99,6 +99,26 @@ class AdminAuthorizationFilterTest {
         verify(chain).filter(ex);
     }
 
+    /**
+     * ADR-014: a YAML rule whose source is a {@code role:}-prefixed URN matches
+     * identically to the bare role-name form.
+     */
+    @Test
+    void adminRole_urnPrefixedYamlAllow_callsChain() {
+        when(chain.filter(any())).thenReturn(Mono.empty());
+        withYamlRules(new PolicyRule("a1", RuleEffect.ALLOW, "role:ADMIN", "admin", "/api/v1/admin/**", "*", 0));
+
+        MockServerWebExchange  ex   = exchange("/api/v1/admin/policies");
+        JwtAuthenticationToken auth = jwtAuth(List.of("ADMIN"));
+
+        StepVerifier.create(
+                filter.filter(ex, chain)
+                      .contextWrite(ReactiveSecurityContextHolder.withAuthentication(auth)))
+                .verifyComplete();
+
+        verify(chain).filter(ex);
+    }
+
     @Test
     void userRole_noMatchingYamlRule_returns403AndNeverCallsChain() {
         withYamlRules(new PolicyRule("a1", RuleEffect.ALLOW, "ADMIN", "admin", "/api/v1/admin/**", "*", 0));

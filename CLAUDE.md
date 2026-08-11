@@ -178,10 +178,26 @@
 - [x] **Same-day amendment**: found live that 30 of the first 34 `request_logs` rows were the Admin Console observing its own existence, not zero-trust enforcement — added `AuditExclusionProperties` (`zte.audit.excluded-path-prefixes` in `application.yml`, mirroring `PolicyDefaultsProperties`'s shape, deliberately separate from `zte-policies.yaml` and not hardcoded), default-excluding `/admin/`, `/api/v1/admin/`, `/api/v1/internal/`, `/actuator/`. Gates only `RequestAuditFilter`'s audit output (DB write + sync `requestLog` line) — `X-Request-Id`/`X-User-Id` handling stays universal
 - ADR: ADR-013-postgres-audit-logging.md
 
+### Stage 13 — IdP Identity Sync + URN-Based Policy Matching `COMPLETE`
+- [x] `keycloak/realm-export.json` — `zte-gateway`'s service account granted `realm-management`'s `view-users`/`view-realm` client roles; new `oidc-group-membership-mapper` protocol mapper (claim `groups`) — implemented but currently unexercised, `zte-realm` has no groups defined yet
+- [x] `V5__create_idp_identities.sql` (Flyway) — `idp_identities` table (`type` `VARCHAR(10)`+`CHECK`, not a native Postgres enum, same reasoning as `RuleEffect`; `UNIQUE (type, external_id)`); no secrets/passwords cached, only id/type/name
+- [x] `gateway-service/identity` (new package) — `IdentityType`, `IdpIdentity` (R2DBC record), `IdpIdentityRepository` (native `ON CONFLICT` UPSERT via `@Modifying @Query`, not `save()` — `save()`'s null-id convention would violate the unique constraint on the second sync cycle), `IdpClient` interface (`fetchUsers`/`fetchGroups`/`fetchRoles`), `KeycloakIdpAdapter` (`@ConditionalOnProperty(zte.idp.provider=keycloak)`, fresh client-credentials token per call, reuses `zte-gateway`'s existing service account)
+- [x] `IdentitySyncService` — `@Scheduled(zte.idp.sync-interval-ms:900000)`, non-blocking by construction (Spring's own `TaskScheduler` thread, no `.block()` anywhere in the chain); `AdminIdentitySyncController` (`POST /api/v1/admin/identities/sync`), `AdminIdentitySearchController` (`GET /api/v1/admin/identities/search?type=&q=`) — both covered by the existing `u2s-admin-console-api` YAML rule, no new security wiring
+- [x] `IdentityUrn.parse` (`user:<name>`/`group:<name>`/`role:<name>`, no-prefix implies `ROLE`, unknown prefix treated as a literal role name, wildcard sources unparseable) + `IdentitySources.enrich(roles, jwtAuth)` — `PolicyMatcher` itself needed **zero** code changes, the enriched sources list (bare role names + URN forms) is built entirely at the `ZteAuthorizationFilter`/`AdminAuthorizationFilter` call sites
+- [x] `PolicyDocumentReloadedEvent` (new `ApplicationEventPublisher`/`@EventListener` pattern in this codebase) — published by `PolicyDefinitionStore.doReload()` only on success; `OrphanedRuleChecker` (`@PostConstruct` + `@EventListener`) logs an SLF4J `WARN` `"ORPHANED RULE: ..."` for any `users2service` rule whose source doesn't resolve in `idp_identities` — purely observational, never rejects/deletes. Named, accepted cold-start race with `IdentitySyncService`'s own first `@Scheduled` run (self-corrects within one sync interval)
+- [x] `zt-admin-ui` — new `Identities.tsx` tab (plain MUI `Table`, "Sync Now" button); `PolicyDashboard.tsx` independently fetches `/api/v1/admin/identities/search` and flags orphaned `users2service` rows client-side (small intentionally-duplicated TS port of `IdentityUrn.parse`, not a new backend field on the shared `PolicyRule` shape)
+- [x] Unit tests: `IdentityUrnTest`, `IdentitySourcesTest`, `OrphanedRuleCheckerTest`, `IdentitySyncServiceTest`; `ZteAuthorizationFilterTest`/`AdminAuthorizationFilterTest`/`PolicyMatcherTest` pass **unmodified** (confirms bare-role backward compatibility) plus one new `role:`-prefixed-source test each; `PolicyDefinitionStoreTest` updated for the new `ApplicationEventPublisher` constructor param
+- [x] New IT `IdentitySyncIT` — real Testcontainers Keycloak Admin REST API round trip; this is what actually proves the realm-export.json service-account role grant works, not just a hope
+- ADR: ADR-014-idp-identity-sync.md
+
 ---
 
-## Stage 13+ Backlog (Not Yet Implemented)
+## Stage 14+ Backlog (Not Yet Implemented)
 
+- [ ] UUID-based user URNs (today `user:<name>` only matches by `preferred_username`)
+- [ ] Filesystem-watch or webhook-driven identity sync, replacing the fixed 15-min polling interval (see ADR-014)
+- [ ] A demo Keycloak group in `zte-realm`, to close the integration-level test gap for `group:`-scoped rules (see ADR-014 Self-Critique)
+- [ ] A second `IdpClient` implementation (Azure Entra ID or AWS IAM) — the concrete reason the adapter interface exists
 - [ ] Per-category `zte.policy.*.default-effect` overrides (today one `default-effect` applies to service2service and agentMcpToolCalls alike)
 - [ ] Filesystem watch-based auto-reload, layered on `PolicyDefinitionStore.reload()` (today: explicit `POST /api/v1/internal/policies/reload`)
 - [ ] HTTP (or HTTP+SSE) transport for `hubspot_server.py` — prerequisite for any real forwarding; it's stdio-only today

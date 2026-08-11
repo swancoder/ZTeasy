@@ -91,6 +91,19 @@
             "claim.name": "preferred_username",
             "jsonType.label": "String"
           }
+        },
+        {
+          "name": "groups-mapper",
+          "protocol": "openid-connect",
+          "protocolMapper": "oidc-group-membership-mapper",
+          "consentRequired": false,
+          "config": {
+            "claim.name": "groups",
+            "full.path": "false",
+            "userinfo.token.claim": "true",
+            "id.token.claim": "true",
+            "access.token.claim": "true"
+          }
         }
       ]
     },
@@ -209,6 +222,14 @@
         "USER"
       ],
       "clientRoles": {}
+    },
+    {
+      "username": "service-account-zte-gateway",
+      "serviceAccountClientId": "zte-gateway",
+      "enabled": true,
+      "clientRoles": {
+        "realm-management": ["view-users", "view-realm"]
+      }
     }
   ]
 }

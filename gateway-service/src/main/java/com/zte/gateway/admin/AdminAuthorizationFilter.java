@@ -1,6 +1,7 @@
 package com.zte.gateway.admin;
 
 import com.zte.auth.audit.ZteAuditLogger;
+import com.zte.gateway.identity.IdentitySources;
 import com.zte.gateway.policy.def.PolicyDefinitionStore;
 import com.zte.gateway.policy.def.PolicyEvaluation;
 import com.zte.gateway.policy.def.PolicyMatcher;
@@ -97,8 +98,9 @@ public class AdminAuthorizationFilter implements WebFilter {
         List<String> roles = RealmRoles.extract(jwtAuth);
         String method = exchange.getRequest().getMethod().name();
         String targetService = RequestTargetResolver.targetService(path);
+        List<String> sources = IdentitySources.enrich(roles, jwtAuth);
         PolicyEvaluation eval = policyMatcher.evaluate(
-                policyDefinitionStore.current().users2service(), roles, targetService, path, method);
+                policyDefinitionStore.current().users2service(), sources, targetService, path, method);
 
         return switch (eval.outcome()) {
             case ALLOWED -> {
