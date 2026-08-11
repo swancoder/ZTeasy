@@ -95,6 +95,9 @@ class McpProxySecurityWebFluxTest {
     @MockBean
     private com.zte.gateway.filter.AuditExclusionProperties auditExclusionProperties;
 
+    @MockBean
+    private com.zte.gateway.inventory.HealthTelemetryService healthTelemetryService;
+
     @BeforeEach
     void stubAuditExclusions() {
         // RequestAuditFilter's doFinally unconditionally consults this list — a bare

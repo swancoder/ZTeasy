@@ -87,5 +87,6 @@ hashes: `docs/SPECS.md` §2. Reasoning/alternatives/self-critique: the linked AD
 | 13 | IdP Identity Sync + URN-Based Policy Matching | [ADR-014](docs/adr/ADR-014-idp-identity-sync.md) |
 | 14 | Machine Identities (OIDC Clients) + URN Unification | [ADR-015](docs/adr/ADR-015-machine-identities-and-urn-unification.md) |
 | 15 | Identities UI Refactor (Actors vs. Access Containers) + Relational Caching | [Identities UI + Relations](docs/adr/identities-ui-actors-containers-and-relations-caching.md) |
+| 16 | APIM Inventory Registry — Auto-Discovery + Health Telemetry | [ADR-016](docs/adr/ADR-016-inventory-and-health-registry.md) |
 
 **Backlog:** tracked in `docs/SPECS.md` §9 (Roadmap) — not duplicated here.

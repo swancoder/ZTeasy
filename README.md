@@ -166,6 +166,7 @@ zte-lightweight/
 | [ADR-014](docs/adr/ADR-014-idp-identity-sync.md) | IdP Identity Sync and URN-Based Policy Matching | Accepted |
 | [ADR-015](docs/adr/ADR-015-machine-identities-and-urn-unification.md) | Machine Identities (OIDC Clients) and URN Unification | Accepted |
 | [Identities UI + Relational Caching](docs/adr/identities-ui-actors-containers-and-relations-caching.md) | Identities UI Refactor (Actors vs. Access Containers) and Relational Caching (deliberately unnumbered filename — see the ADR's own note) | Accepted |
+| [ADR-016](docs/adr/ADR-016-inventory-and-health-registry.md) | APIM Inventory Registry — Auto-Discovery and Health Telemetry | Accepted |
 
 ---
 
@@ -332,9 +333,10 @@ open http://localhost:8080/admin/index.html   # or just visit it in a browser
 skips the React build (mirrors the existing `-x :zt-agents:compileKotlin` escape hatch for
 the no-API-key case) — the gateway still builds and runs, just without `/admin/**` content.
 
-**Tabs:** "Policies", "Audit Trail", and "Identities" (all below) — each fetches independently
-on load. The Policies tab cross-references the Identities cache to flag `users2service` rules
-whose `source` doesn't resolve to any synced identity (see [IdP Identity Sync](#idp-identity-sync-adr-014-adr-015)).
+**Tabs:** "Policies", "Audit Trail", "Identities", and "Registry" (all below) — each
+fetches independently on load. The Policies tab cross-references the Identities cache to
+flag `users2service` rules whose `source` doesn't resolve to any synced identity (see
+[IdP Identity Sync](#idp-identity-sync-adr-014-adr-015)).
 
 ---
 
@@ -434,6 +436,58 @@ opening a Drawer with that identity's cached Roles/Groups — see
 
 Also visible in the Admin Console's "Identities" tab (Type, Name, Display Name, Last
 Synced) with a "Sync Now" button.
+
+---
+
+## APIM Inventory Registry (ADR-016)
+
+A central registry (`inventory_services`/`health_metrics`) of REST services and MCP
+agents this gateway fronts — onboarded manually via the Admin Console's "Registry" tab,
+auto-discovered, and health-monitored, both actively (periodic ping) and passively (real
+routed traffic).
+
+**Onboarding → auto-discovery:** `POST /api/v1/admin/inventory` persists a `PENDING` row
+and returns immediately — `AutoDiscoveryWorker` probes the service in the background
+(never delaying the response): `GET {base_url}/v3/api-docs` for `REST`, a stateless
+`POST {base_url}/message` JSON-RPC `tools/list` call for `MCP`. Success → `ACTIVE`;
+failure or timeout → `WARNING` ("reachable enough to route, but its schema/tool list
+couldn't be confirmed" — a degraded state that requires manual attention, not a hard
+failure).
+
+**Health polling:** every 60s (`zte.inventory.health-poll-interval-ms`), `HealthPollingService`
+pings every `ACTIVE`/`WARNING`/`DOWN` service's `/actuator/health` and records
+`last_ping_ms`/`actuator_status`. A failed ping flips `ACTIVE`→`DOWN`; a successful one
+flips `DOWN`→`ACTIVE` — self-healing. `WARNING` is never touched by this job: a
+successful raw health ping doesn't mean the service's actual API/tool contract works,
+so it must not silently clear a discovery failure.
+
+**Registering `service-a`/`service-b` themselves:** found live — `AutoDiscoveryWorker`/
+`HealthPollingService` use a plain `WebClient` with no ZTE mTLS client certificate
+(unlike `GatewayRouteConfig`'s routing `HttpClient`, configured via `MtlsHttpClientConfig`),
+so pointing `base_url` at either service's mTLS API port (8081/8082) will always
+discover/poll as unreachable. Register them via their plain-HTTP **management port**
+instead (`http://localhost:9081` / `:9082`) — the same port `docker-compose.yml`'s own
+healthcheck already uses for exactly this reason.
+
+**Passive telemetry:** `RequestAuditFilter` fires an async, non-blocking update
+(mirrors `RequestLogAuditService`'s fire-and-forget architecture, ADR-013) on every 2xx
+routed response, setting `health_metrics.last_successful_call` for the matching
+inventory entry (matched by name — must equal the path segment
+`RequestTargetResolver` derives, e.g. `service-a`). Never blocks the request thread; a
+target name with no matching registry row is a harmless no-op.
+
+```bash
+# Onboard a service
+curl -s -X POST -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/json" \
+  http://localhost:8080/api/v1/admin/inventory \
+  -d '{"name":"hubspot-mcp","targetType":"MCP","baseUrl":"http://localhost:9090"}'
+
+# List the registry (includes current health snapshot)
+curl -s -H "Authorization: Bearer $TOKEN" http://localhost:8080/api/v1/admin/inventory | python3 -m json.tool
+```
+
+See [ADR-016](docs/adr/ADR-016-inventory-and-health-registry.md) for the full design,
+including the MCP discovery assumption and the `WARNING`-is-sticky decision.
 
 ---
 
@@ -540,3 +594,4 @@ curl -s -H "Authorization: Bearer $TOKEN" http://localhost:8080/api/v1/service-a
 | 13 | IdP identity sync (`idp_identities` cache, `KeycloakIdpAdapter`), URN-based `users2service` sources, orphaned-rule detection, Admin Console "Identities" tab (ADR-014) | `dd8a13f` |
 | 14 | Machine identities (OIDC clients synced as `CLIENT` type), `client:<clientId>` URN unification for `service2service`/`agentMcpToolCalls`, orphaned-rule detection extended to all three categories (ADR-015) | `f5a30b8` |
 | 15 | Identities UI refactor (Actors vs. Access Containers, MUI Accordions, quick search, relations Drawer), `idp_identity_relations` caching, Keycloak system-client filtering | `1198921` |
+| 16 | APIM inventory registry (`inventory_services`/`health_metrics`), auto-discovery on onboarding, periodic health polling, passive `last_successful_call` telemetry, Admin Console "Registry" tab | — |

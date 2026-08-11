@@ -50,7 +50,8 @@ auditable — the opposite of a mesh's "hide it in the sidecar" approach. See
 | 13 | IdP identity sync (`idp_identities` cache, `KeycloakIdpAdapter`), URN-based `users2service` sources (`user:`/`group:`/`role:`), orphaned-rule detection, Admin Console "Identities" tab | ✅ Complete | `dd8a13f` | [014](adr/ADR-014-idp-identity-sync.md) |
 | 14 | Machine identities — OIDC clients synced as `CLIENT` type, `client:<clientId>` URN unification for `service2service`/`agentMcpToolCalls`, orphaned-rule detection extended to all three categories | ✅ Complete | `f5a30b8` | [015](adr/ADR-015-machine-identities-and-urn-unification.md) |
 | 15 | Identities UI refactor (Actors vs. Access Containers accordions, quick search, relations Drawer), `idp_identity_relations` caching, Keycloak system-client filtering | ✅ Complete | `1198921` | [Identities UI + Relations](adr/identities-ui-actors-containers-and-relations-caching.md) |
-| 16+ | Backlog (rate limiting, ABAC, MCP-audit unification…) | ⬜ Planned | — | see §9.2 |
+| 16 | APIM inventory registry (`inventory_services`/`health_metrics`), auto-discovery on onboarding, periodic health polling, passive `last_successful_call` telemetry, Admin Console "Registry" tab | ✅ Complete | — | [016](adr/ADR-016-inventory-and-health-registry.md) |
+| 17+ | Backlog (rate limiting, ABAC, MCP-audit unification…) | ⬜ Planned | — | see §9.2 |
 
 **Test status:** all unit tests green (`./gradlew test`), including the
 `policy.def` package (`PolicyValidatorTest`, `PolicyMatcherTest`,
@@ -86,7 +87,18 @@ works against the real Testcontainers Keycloak. Stage 15 adds
 relations); `IdentitySyncIT`'s `manualSync_excludesSystemClients`/
 `manualSync_thenRelationsEndpoint_reflectsRoleAssignment` prove both the
 system-client filter and the relations endpoint against the real
-Testcontainers Keycloak.
+Testcontainers Keycloak. Stage 16 adds `InventoryServiceTest` (mocked
+repositories/worker — create/update/delete/list join logic) and
+`HealthPollingServiceTest` (direct unit test of the pure
+`statusTransition` decision logic only — the actual `WebClient`-calling
+code has no dedicated mocked-HTTP unit test, consistent with the
+`KeycloakIdpAdapter`/`McpBackendClient` precedent); `RequestAuditFilterTest`
+extended for the new health-telemetry hook. New IT `InventoryRegistryIT`
+(6 scenarios) proves REST/MCP discovery (success and failure, via
+WireMock), full CRUD, duplicate-name rejection, and — the literal task
+verification — that real routed traffic through `/api/v1/service-a/hello`
+asynchronously updates `last_successful_call` (polled via Awaitility, same
+pattern as `RequestAuditIT`).
 
 ---
 
@@ -315,7 +327,11 @@ Reusable security config imported by every service (`ZteSecurityAutoConfiguratio
   sees denied requests and `/api/v1/admin/**`/`/api/v1/internal/**` traffic
   too (see §5.2b and ADR-013); the exclusion list then deliberately scopes
   that visibility back down to zero-trust-relevant traffic only, sparing the
-  Admin Console's own housekeeping calls and health checks.
+  Admin Console's own housekeeping calls and health checks. Also, since
+  ADR-016 (§5.2d) — from the same `doFinally`, on any 2xx status regardless
+  of the exclusion list (a separate concern with its own no-op-if-unregistered
+  safety net) — fires `HealthTelemetryService.recordSuccessfulCall(...)`
+  with the `RequestTargetResolver`-derived target name.
 - **`InternalPolicyController`** — `GET /api/v1/internal/policies`, permitAll
   via `InternalSecurityConfig` (`@Order(-100)`), Docker-network-only exposure.
   Returns `PolicyDefinitionStore.current().users2service()` (YAML-backed as
@@ -349,6 +365,10 @@ Reusable security config imported by every service (`ZteSecurityAutoConfiguratio
   **no** `WebClient`/Keycloak dependency anywhere in the class, the same
   Zero Trust reliability posture every other `/api/v1/admin/**` read
   endpoint already has. Backs the Identities tab's "info" Drawer.
+- **`AdminInventoryController`** (`admin` package, ADR-016) — `GET`/`POST`/`PUT`/`DELETE
+  /api/v1/admin/inventory[/{id}]`, same posture. `POST`/`PUT` return `409`
+  (not a raw constraint-violation error) on a duplicate `name`. Backs the
+  Admin Console's "Registry" tab.
 
 ### 5.2a YAML Policy Engine (ADR-011, ADR-012)
 
@@ -521,6 +541,81 @@ CASCADE`; `relation_type` `VARCHAR(20)`+`CHECK IN ('MEMBER_OF','HAS_ROLE')`,
 same non-native-enum reasoning; `UNIQUE (subject_id, target_id,
 relation_type)`).
 
+### 5.2d APIM Inventory Registry (ADR-016)
+
+`gateway-service/.../inventory` package — a central registry of REST
+services and MCP agents this gateway fronts, onboarded via the Admin
+Console, auto-discovered, and health-monitored:
+
+- **`TargetType`** — enum `REST`/`MCP`. **`InventoryStatus`** — enum
+  `PENDING`/`ACTIVE`/`WARNING`/`DOWN`; `PENDING`→`ACTIVE`/`WARNING` is set
+  once by `AutoDiscoveryWorker` right after registration, `ACTIVE`↔`DOWN`
+  is toggled repeatedly by `HealthPollingService`'s ping — `WARNING` is
+  never touched by the ping job (a successful raw health ping doesn't
+  confirm the service's actual API/tool contract, so it must not silently
+  clear a discovery failure).
+- **`InventoryEntry`** — R2DBC record (`@Table("inventory_services")`).
+  **`HealthMetric`** — R2DBC record (`@Table("health_metrics")`), one row
+  per service (`UNIQUE (service_id)`, not a history log), upserted in
+  place. **`InventoryView`** — `InventoryEntry` left-joined with its
+  `HealthMetric`, built in application code (`InventoryService.list()`
+  zips both repositories' `findAll()`s into a `Map`), not via a native
+  projected query — this project has no reliable precedent for
+  unannotated-DTO R2DBC projection, and getting it wrong silently is
+  exactly the class of subtle R2DBC failure this codebase has hit before.
+- **`InventoryRepository`** — `updateStatus`/`updateFields` are both scoped
+  `@Query` updates, not `save()`: constructing a full replacement
+  `InventoryEntry` for an update either forces a read-then-write to
+  preserve `created_at`, or nulls it and hits the column's `NOT NULL`
+  constraint on a plain `UPDATE` (which never applies a column `DEFAULT`)
+  — found live running `InventoryRegistryIT`, fixed with the scoped query.
+  **`HealthMetricRepository`** — `upsertPingResult` (native `ON CONFLICT`,
+  written by the poll job) and `upsertSuccessfulCallByServiceName` (same
+  upsert shape, but resolves `service_id` via a `SELECT` subquery on the
+  request's target *name* — one round trip, and a name with no matching
+  row is a harmless no-op).
+- **`InventoryService`** — `create()` persists a `PENDING` row and returns
+  immediately; `AutoDiscoveryWorker`'s probe is fired as an isolated
+  `.subscribe()`, not part of the returned `Mono` chain, so onboarding an
+  unreachable/slow service never delays the API response. `update()`
+  always resets to `PENDING` and re-triggers discovery (simpler than
+  conditional re-discovery; can never leave a stale `ACTIVE` pointing at a
+  changed URL). `delete()` cascades to `health_metrics` via `ON DELETE
+  CASCADE`.
+- **`AutoDiscoveryWorker`** — Java + Project Reactor (not Kotlin, despite
+  the task's own framing — `gateway-service` has been a pure Java 21
+  module since Stage 1; `zt-agents` is this repo's only Kotlin module, a
+  deliberate, narrow choice). Builds a fresh `WebClient` per call (unlike
+  `KeycloakIdpAdapter`/`McpBackendClient`'s one-fixed-target pattern —
+  every inventory entry has a different `base_url`). `REST`: `GET
+  {base_url}/v3/api-docs`. `MCP`: a stateless `POST {base_url}/message`
+  JSON-RPC `tools/list` call — an explicit, named assumption (this
+  gateway's own MCP proxy requires a `GET /sse` session handshake before
+  any `POST /message`; discovery assumes that's not required for a
+  one-shot schema probe, unverified against a real session-only agent).
+  Any failure (timeout, non-2xx, connection error) → `WARNING`, never a
+  thrown exception.
+- **`HealthPollingService`** — `@Scheduled(fixedDelayString =
+  "${zte.inventory.health-poll-interval-ms:60000}")` (`poll()`), `pollNow()`
+  is the directly-callable core (mirrors `IdentitySyncService`'s
+  `refresh()`/`syncNow()` split). Pings every `ACTIVE`/`WARNING`/`DOWN`
+  service's `/actuator/health` (not `PENDING` — its `base_url` hasn't
+  passed discovery yet, so a ping is premature noise). `statusTransition(...)`
+  (the `ACTIVE`↔`DOWN` decision) is package-visible + `static` specifically
+  for a direct unit test — same precedent `KeycloakIdpAdapter#isSystemClient`
+  established; the `WebClient`-calling code itself has no dedicated
+  unit test, proven only by `InventoryRegistryIT`.
+- **`HealthTelemetryService`** — directly mirrors `RequestLogAuditService`'s
+  architecture (`Sinks.Many` + one `Schedulers.boundedElastic()`
+  subscriber) — the async, non-blocking fire-and-forget write ADR-016's
+  own Self-Criticism instruction demanded. Fed by `RequestAuditFilter`
+  (§5.2) on every 2xx routed response.
+
+**Schema**: `V8__create_inventory_and_health.sql` — `inventory_services`
+(`target_type`/`status` both `VARCHAR`+`CHECK`, same non-native-enum
+reasoning as `idp_identities.type`; `name` `UNIQUE`), `health_metrics`
+(`service_id` `UNIQUE REFERENCES inventory_services(id) ON DELETE CASCADE`).
+
 ### 5.3 `service-a` / `service-b`
 
 - **`service-a/HelloController`** — `GET /api/v1/service-a/hello`; calls
@@ -581,6 +676,16 @@ Containers" (`GROUP`/`ROLE` types) — each type rendered as its own MUI
 existing icon convention, not `@mui/icons-material`) that opens an MUI
 `Drawer` fetching `GET /api/v1/admin/identities/{id}/relations` and
 rendering that identity's cached Roles/Groups in two `List`s.
+
+`Inventory.tsx` (Stage 16, `App.tsx`'s "Registry" tab) — same plain MUI
+`Table` pattern (not `@mui/x-data-grid`, the same repeatedly-reaffirmed
+dependency call), columns Name/Type/Base URL/Status (a colored `Chip` —
+green `ACTIVE`, amber `WARNING`, red `DOWN`, grey `PENDING`)/Ping (ms)/Last
+Successful Call, plus a delete action per row. "Onboard Service" header
+button opens an MUI `Dialog` form (name `TextField`, `target_type`
+dropdown via a `select` `TextField`, `base_url` `TextField`) posting to
+`POST /api/v1/admin/inventory` — this repo's first `Dialog`/`Select` usage,
+no new dependency (both ship in `@mui/material` core).
 
 ### 5.5 Infrastructure
 
@@ -688,6 +793,33 @@ upserts — no extra lookup query per relation), read by `GET
 /api/v1/admin/identities/{id}/relations` (§7) — the local-cache-only Actor
 detail view.
 
+`inventory_services` (PostgreSQL, Flyway
+`V8__create_inventory_and_health.sql`, ADR-016) — the APIM registry:
+
+| Column | Type | Notes |
+|---|---|---|
+| `id` | `UUID` | PK, `DEFAULT gen_random_uuid()` |
+| `name` | `VARCHAR(255)` | `UNIQUE` — also the name `RequestTargetResolver`'s path-segment extraction must match for passive telemetry (§5.2d) to find this row |
+| `target_type` | `VARCHAR(10)` + `CHECK (target_type IN ('REST','MCP'))` | Not a native Postgres enum — same reasoning as `idp_identities.type` |
+| `base_url` | `VARCHAR(512)` | |
+| `status` | `VARCHAR(10)` + `CHECK (status IN ('ACTIVE','WARNING','DOWN','PENDING'))`, `DEFAULT 'PENDING'` | See `InventoryStatus`'s transition rules, §5.2d |
+| `created_at` | `TIMESTAMPTZ` | `DEFAULT NOW()`, never touched by an update (see §5.2d's live-tested `updateFields` fix) |
+
+`health_metrics` (same migration) — current health snapshot, one row per service:
+
+| Column | Type | Notes |
+|---|---|---|
+| `id` | `UUID` | PK, `DEFAULT gen_random_uuid()` |
+| `service_id` | `UUID` | `UNIQUE REFERENCES inventory_services(id) ON DELETE CASCADE` |
+| `last_ping_ms` | `INTEGER`, nullable | Written by `HealthPollingService`'s periodic ping |
+| `actuator_status` | `VARCHAR(64)`, nullable | The polled service's own `/actuator/health` `status` field, or `"DOWN"` on ping failure/timeout |
+| `last_successful_call` | `TIMESTAMPTZ`, nullable | Written passively by `HealthTelemetryService` on real 2xx routed traffic (§5.2) |
+| `updated_at` | `TIMESTAMPTZ` | `DEFAULT NOW()`, updated on every upsert (either write path) |
+
+Written/read entirely by the `inventory` package (§5.2d) and `GET
+/api/v1/admin/inventory` (§7, joined with `inventory_services` in
+application code, not a native query).
+
 ---
 
 ## 7. API Reference
@@ -704,6 +836,8 @@ detail view.
 | `/api/v1/admin/identities/sync` | POST | JWT + `ADMIN` YAML rule | gateway | Manual IdP identity sync trigger (ADR-014) |
 | `/api/v1/admin/identities/search` | GET | JWT + `ADMIN` YAML rule | gateway | Search/list the `idp_identities` cache, `?type=&q=` (ADR-014) |
 | `/api/v1/admin/identities/{id}/relations` | GET | JWT + `ADMIN` YAML rule | gateway | Roles/groups related to an Actor identity, local-cache-only (Stage 15) |
+| `/api/v1/admin/inventory` | GET, POST | JWT + `ADMIN` YAML rule | gateway | List / onboard APIM registry entries (ADR-016) |
+| `/api/v1/admin/inventory/{id}` | PUT, DELETE | JWT + `ADMIN` YAML rule | gateway | Update / remove a registry entry (ADR-016) |
 | `/admin/**` | GET | none (SPA handles its own login) | gateway | Admin Console static bundle (ADR-012) |
 | `/sse` | GET | JWT | gateway (MCP proxy) | Opens an MCP session; SSE stream |
 | `/message?sessionId=<id>` | POST | JWT | gateway (MCP proxy) | JSON-RPC `tools/call`; result via SSE, not the response body |
@@ -804,21 +938,36 @@ isolation.
 
 ### 9.1 Completed (see §2 for commits/ADRs)
 
-Stages 1–15, plus the two undated additions (pre-commit doc automation,
+Stages 1–16, plus the two undated additions (pre-commit doc automation,
 `.env` config) — all ✅. Stage 11 (ADR-012) closed the "Full users2service
 migration to YAML-only" item that used to be listed below; Stage 12
 (ADR-013) closed the "DB-based request audit log" item that used to be
 listed below too; Stage 13 (ADR-014) adds IdP identity sync and URN-based
 `users2service` sources, Stage 14 (ADR-015) extends that to machine
 identities (OIDC clients) and unifies URN sources across all three policy
-categories, and Stage 15 (Identities UI + Relations ADR) closes the
+categories, Stage 15 (Identities UI + Relations ADR) closes the
 `fetchClients()`-noise-filtering backlog item ADR-015 itself named, adds
-`idp_identity_relations` caching, and redesigns the Identities tab —
-none of these three are closed backlog items on their own, all are new
-capabilities.
+`idp_identity_relations` caching, and redesigns the Identities tab, and
+Stage 16 (ADR-016) adds the APIM inventory registry, auto-discovery, and
+health telemetry — none of these four are closed backlog items on their
+own, all are new capabilities.
 
-### 9.2 Backlog — general (from `CLAUDE.md` Stage 16+)
+### 9.2 Backlog — general (from `CLAUDE.md` Stage 17+)
 
+- [ ] A "Retry Discovery" Admin Console action, to clear a stuck `WARNING`
+      inventory entry without deleting and re-onboarding it (ADR-016).
+- [ ] A `health_metrics` history table (ping latency over time), if
+      operators need trend visibility rather than just current state (ADR-016).
+- [ ] Validate `AutoDiscoveryWorker`'s MCP stateless-discovery assumption
+      against a real session-only agent; fall back to a full `GET /sse`
+      handshake for discovery if needed (ADR-016 Self-Critique).
+- [ ] Reconciliation for stale `inventory_services`/`health_metrics` rows
+      (a deleted/renamed service is only removed by an explicit `DELETE`)
+      — the same backlog item already named for `idp_identities` (ADR-016).
+- [ ] Warn on a name mismatch between a registered inventory service and
+      any `GatewayRouteConfig` route it's meant to represent, so passive
+      `last_successful_call` telemetry's exact-name-match requirement isn't
+      a silent trap (ADR-016 Self-Critique).
 - [ ] Reduce `fetchRelations()`'s per-user/per-client HTTP call count if
       sync duration becomes a problem at larger realm scale — no known
       Keycloak Admin API batch endpoint for this today (Stage 15 ADR
@@ -932,6 +1081,11 @@ capabilities.
 | Low | `KeycloakIdpAdapter.fetchClients()`/`fetchRelations()` have no dedicated mocked-`WebClient` unit test, same as `fetchUsers`/`fetchGroups`/`fetchRoles` | ADR-015, Stage 15 | Consistent with ADR-014 precedent — correctness proven by `IdentitySyncIT` (`manualSync_populatesClients`, `manualSync_excludesSystemClients`, `manualSync_thenRelationsEndpoint_reflectsRoleAssignment`) against a real Testcontainers Keycloak, not mocked HTTP |
 | Medium | `fetchRelations()` makes 2 HTTP calls per user and 2 per non-system client (service-account lookup + role-mappings) — an N+1-shaped call pattern with no known Keycloak Admin API batch alternative | Stage 15 ADR | Accepted for this realm's current scale; named explicitly as a real backlog item (§9.2), not silently absorbed |
 | Low | `idp_identity_relations` can be as stale as `idp_identities` itself — up to `zte.idp.sync-interval-ms` (15 min default) | Stage 15 ADR | Same accepted tradeoff `idp_identities` already has (ADR-014); manual sync gives an immediate override |
+| Medium | `AutoDiscoveryWorker`'s MCP `tools/list` probe assumes a stateless `POST {base_url}/message` call — an agent that strictly requires the `GET /sse` session handshake even for discovery always lands in `WARNING`, not because it's actually broken | ADR-016 | Named explicitly as an assumption, not a spec fact; unverified against a real stateful-only MCP agent — backlog item §9.2 |
+| Medium | Passive `last_successful_call` telemetry depends on an exact name match between a registered inventory entry and `RequestTargetResolver`'s path-derived service name — a mismatch silently means the entry never receives telemetry, with no warning | ADR-016 | Documented in `HealthMetricRepository.upsertSuccessfulCallByServiceName`'s Javadoc; no validation enforces the naming convention at onboarding time — backlog item §9.2 |
+| Low | `WARNING` inventory status has no UI-driven way to clear other than deleting and re-onboarding the service | ADR-016 | Deliberate MVP scope; a "Retry Discovery" action is a natural low-effort extension — backlog item §9.2 |
+| Low | `AutoDiscoveryWorker`/`HealthPollingService`'s actual `WebClient`-calling code has no dedicated mocked-HTTP unit test | ADR-016 | Consistent with the `KeycloakIdpAdapter`/`McpBackendClient` precedent — proven by `InventoryRegistryIT` against real WireMock targets instead; the one pure decision-logic piece (`HealthPollingService.statusTransition`) does have a direct unit test |
+| Low | `inventory_services`/`health_metrics` accumulate no reconciliation — a deleted/renamed service is only removed by an explicit `DELETE`, never automatically | ADR-016 | Consistent with this repo's established posture (`idp_identities` has the same property) — not a new gap; backlog item §9.2 |
 
 ---
 
@@ -955,10 +1109,10 @@ capabilities.
 | [014](adr/ADR-014-idp-identity-sync.md) | IdP Identity Sync and URN-Based Policy Matching |
 | [015](adr/ADR-015-machine-identities-and-urn-unification.md) | Machine Identities (OIDC Clients) and URN Unification |
 | [Identities UI + Relations](adr/identities-ui-actors-containers-and-relations-caching.md) | Identities UI Refactor (Actors vs. Access Containers) and Relational Caching — deliberately unnumbered filename, see the ADR's own note |
+| [016](adr/ADR-016-inventory-and-health-registry.md) | APIM Inventory Registry — Auto-Discovery and Health Telemetry |
 
 ---
 
-*This document reflects repo state at commit `1198921` (Stage 15, Identities UI Refactor
-and Relational Caching). Keep it in sync the same way as README/CLAUDE.md — per
-CLAUDE.md's mandatory workflow, update it alongside any task that completes a stage or
-changes the roadmap.*
+*This document reflects repo state at commit (pending — Stage 16, APIM Inventory
+Registry). Keep it in sync the same way as README/CLAUDE.md — per CLAUDE.md's mandatory
+workflow, update it alongside any task that completes a stage or changes the roadmap.*

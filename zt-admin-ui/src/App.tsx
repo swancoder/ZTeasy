@@ -11,8 +11,9 @@ import Tab from '@mui/material/Tab'
 import PolicyDashboard from './PolicyDashboard'
 import AuditTrail from './AuditTrail'
 import Identities from './Identities'
+import Inventory from './Inventory'
 
-type View = 'policies' | 'audit' | 'identities'
+type View = 'policies' | 'audit' | 'identities' | 'inventory'
 
 export default function App() {
   const auth = useAuth()
@@ -81,11 +82,13 @@ export default function App() {
           <Tab value="policies" label="Policies" />
           <Tab value="audit" label="Audit Trail" />
           <Tab value="identities" label="Identities" />
+          <Tab value="inventory" label="Registry" />
         </Tabs>
       </AppBar>
       {view === 'policies' && <PolicyDashboard accessToken={accessToken} />}
       {view === 'audit' && <AuditTrail accessToken={accessToken} />}
       {view === 'identities' && <Identities accessToken={accessToken} />}
+      {view === 'inventory' && <Inventory accessToken={accessToken} />}
     </Box>
   )
 }

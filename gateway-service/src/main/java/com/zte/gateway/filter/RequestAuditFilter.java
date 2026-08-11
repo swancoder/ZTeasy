@@ -3,6 +3,8 @@ package com.zte.gateway.filter;
 import com.zte.auth.audit.ZteAuditLogger;
 import com.zte.gateway.audit.RequestLog;
 import com.zte.gateway.audit.RequestLogAuditService;
+import com.zte.gateway.inventory.HealthTelemetryService;
+import com.zte.gateway.policy.def.RequestTargetResolver;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.core.Ordered;
@@ -65,10 +67,13 @@ public class RequestAuditFilter implements WebFilter, Ordered {
 
     private final RequestLogAuditService auditService;
     private final AuditExclusionProperties exclusions;
+    private final HealthTelemetryService healthTelemetryService;
 
-    public RequestAuditFilter(RequestLogAuditService auditService, AuditExclusionProperties exclusions) {
+    public RequestAuditFilter(RequestLogAuditService auditService, AuditExclusionProperties exclusions,
+                               HealthTelemetryService healthTelemetryService) {
         this.auditService = auditService;
         this.exclusions = exclusions;
+        this.healthTelemetryService = healthTelemetryService;
     }
 
     @Override
@@ -109,12 +114,22 @@ public class RequestAuditFilter implements WebFilter, Ordered {
                     return chain.filter(mutated);
                 })
                 .doFinally(signal -> {
-                    if (!isAuditScoped(path)) {
-                        return;
-                    }
                     Integer statusCode = exchange.getResponse().getStatusCode() != null
                             ? exchange.getResponse().getStatusCode().value()
                             : null;
+
+                    // Inventory health telemetry (ADR-016) — deliberately NOT gated by
+                    // isAuditScoped: it's a different concern (APIM registry freshness,
+                    // not the request_logs audit trail) with its own no-op-if-unregistered
+                    // safety net (HealthTelemetryService/upsertSuccessfulCallByServiceName),
+                    // so it doesn't need — or want — the same exclusion list.
+                    if (statusCode != null && statusCode >= 200 && statusCode < 300) {
+                        healthTelemetryService.recordSuccessfulCall(RequestTargetResolver.targetService(path));
+                    }
+
+                    if (!isAuditScoped(path)) {
+                        return;
+                    }
                     ZteAuditLogger.requestLog(traceId, path, statusCode);
                     auditService.record(RequestLog.of(
                             traceId, clientIp, userAgent, PROCESS_ID, path, statusCode, null));

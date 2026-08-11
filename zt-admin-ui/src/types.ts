@@ -52,11 +52,25 @@ export interface IdpIdentityEntry {
 }
 
 // Mirrors gateway-service's com.zte.gateway.admin.AdminIdentityRelationsController.RelatedIdentity
-// (ADR-016) — one Group/Role related to an Actor (User/Client), plus how.
+// (docs/adr/identities-ui-actors-containers-and-relations-caching.md) — one
+// Group/Role related to an Actor (User/Client), plus how.
 export interface RelatedIdentity {
   id: string
   type: 'USER' | 'GROUP' | 'ROLE' | 'CLIENT'
   name: string
   displayName: string | null
   relationType: 'MEMBER_OF' | 'HAS_ROLE'
+}
+
+// Mirrors gateway-service's com.zte.gateway.inventory.InventoryView (ADR-016).
+export interface InventoryEntry {
+  id: string
+  name: string
+  targetType: 'REST' | 'MCP'
+  baseUrl: string
+  status: 'ACTIVE' | 'WARNING' | 'DOWN' | 'PENDING'
+  createdAt: string
+  lastPingMs: number | null
+  actuatorStatus: string | null
+  lastSuccessfulCall: string | null
 }
