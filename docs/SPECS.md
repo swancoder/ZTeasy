@@ -48,7 +48,8 @@ auditable — the opposite of a mesh's "hide it in the sidecar" approach. See
 | 11 | Full YAML migration (retired `access_policies`/`PolicyService`) + React Admin Console (`zt-admin-ui`), ADMIN-JWT-gated admin API, `AdminAuthorizationFilter` | ✅ Complete | `00edf91` | [012](adr/ADR-012-full-yaml-migration-and-admin-console.md) |
 | 12 | R2DBC-backed `request_logs` audit trail, `X-Request-Id` distributed tracing, `GET /api/v1/admin/audit-logs`, Admin Console "Audit Trail" tab; `RequestAuditFilter` rewritten as a `WebFilter` | ✅ Complete | `e5e1c65` | [013](adr/ADR-013-postgres-audit-logging.md) |
 | 13 | IdP identity sync (`idp_identities` cache, `KeycloakIdpAdapter`), URN-based `users2service` sources (`user:`/`group:`/`role:`), orphaned-rule detection, Admin Console "Identities" tab | ✅ Complete | `dd8a13f` | [014](adr/ADR-014-idp-identity-sync.md) |
-| 14+ | Backlog (rate limiting, ABAC, MCP-audit unification…) | ⬜ Planned | — | see §9.2 |
+| 14 | Machine identities — OIDC clients synced as `CLIENT` type, `client:<clientId>` URN unification for `service2service`/`agentMcpToolCalls`, orphaned-rule detection extended to all three categories | ✅ Complete | — | [015](adr/ADR-015-machine-identities-and-urn-unification.md) |
+| 15+ | Backlog (rate limiting, ABAC, MCP-audit unification…) | ⬜ Planned | — | see §9.2 |
 
 **Test status:** all unit tests green (`./gradlew test`), including the
 `policy.def` package (`PolicyValidatorTest`, `PolicyMatcherTest`,
@@ -73,6 +74,12 @@ test each; `PolicyDefinitionStoreTest` updated for the new
 `ApplicationEventPublisher` constructor param. New IT `IdentitySyncIT`
 exercises the real Testcontainers Keycloak Admin REST API round trip — the
 actual proof the `realm-export.json` service-account role grant works.
+Stage 14 extends the same tests for `client:`-prefixed sources and
+`IdentityType.CLIENT` (`ServiceToServiceAuthorizationFilterTest`/
+`YamlMcpPolicyEngineTest` pass **unmodified** plus one new test each,
+confirming bare-clientId backward compatibility); `IdentitySyncIT`'s
+`manualSync_populatesClients` proves the new `view-clients` role grant
+works against the real Testcontainers Keycloak.
 
 ---
 
@@ -257,9 +264,10 @@ Reusable security config imported by every service (`ZteSecurityAutoConfiguratio
   admin API before the fix).
 - **`ServiceToServiceAuthorizationFilter`** (order `HIGHEST_PRECEDENCE+150`,
   new in ADR-011) — service2service enforcement for the traffic
-  `ZteAuthorizationFilter` passes through: matches the caller's `azp` against
-  YAML `service2service` rules; no DB fallback, `NO_MATCH` resolves to
-  `zte.policy.default-effect` (default `DENY`).
+  `ZteAuthorizationFilter` passes through: matches an `IdentitySources.enrichClient(azp)`-enriched
+  list (the bare `azp` plus its `client:<azp>` URN form, ADR-015 — see §5.2c)
+  against YAML `service2service` rules; no DB fallback, `NO_MATCH` resolves
+  to `zte.policy.default-effect` (default `DENY`).
 - **`policy/def` package** (ADR-011) — `PolicyDefinitionStore` (loads +
   validates `zte-policies.yaml` at startup, fails `ApplicationContext` refresh
   on invalid content; `AtomicReference<PolicyDocument>` hot-swap, mirroring
@@ -379,11 +387,11 @@ were the Admin Console's own traffic, not zero-trust enforcement points.
 Gates only `RequestAuditFilter`'s audit *output*; trace ID/`X-User-Id`
 handling stay universal.
 
-### 5.2c IdP Identity Sync (ADR-014)
+### 5.2c IdP Identity Sync (ADR-014; machine identities ADR-015)
 
 `gateway-service/.../identity` package:
 
-- **`IdentityType`** — enum `USER`/`GROUP`/`ROLE`.
+- **`IdentityType`** — enum `USER`/`GROUP`/`ROLE`/`CLIENT` (`CLIENT` added by ADR-015).
 - **`IdpIdentity`** — R2DBC record (`@Table("idp_identities")`); `id`/`lastSynced`
   left `null` on construction for freshly fetched (not-yet-persisted)
   identities, same DB-generated-PK convention as `RequestLog`.
@@ -395,7 +403,7 @@ handling stay universal.
   question about derived-query *parameter* enum binding (entity *field*
   mapping — reading `type` back out — is the well-established direction and
   needed no such care).
-- **`IdpClient`** — adapter interface (`fetchUsers()`/`fetchGroups()`/`fetchRoles()`,
+- **`IdpClient`** — adapter interface (`fetchUsers()`/`fetchGroups()`/`fetchRoles()`/`fetchClients()`,
   each `Flux<IdpIdentity>`). **`KeycloakIdpAdapter`** is the only
   implementation today (`@ConditionalOnProperty(zte.idp.provider=keycloak,
   matchIfMissing=true)`) — a future Azure Entra ID/AWS IAM adapter needs no
@@ -403,27 +411,43 @@ handling stay universal.
   `WebClient.Builder` (mirrors `McpBackendClient`'s pattern); obtains a
   fresh client-credentials token per `fetchX()` call, reusing `zte-gateway`'s
   existing service account (granted `realm-management`'s
-  `view-users`/`view-realm` roles in `keycloak/realm-export.json`) rather
-  than a new dedicated client.
+  `view-users`/`view-realm`/`view-clients` roles in `keycloak/realm-export.json`)
+  rather than a new dedicated client. `fetchClients()` (ADR-015) fetches
+  **every** client in the realm, not just `serviceAccountsEnabled` ones —
+  an accepted MVP simplification (Keycloak's Admin API has no server-side
+  filter for that anyway); `external_id`=the client's internal UUID,
+  `name`=`clientId`, `displayName`=`name`→`description`→`clientId` fallback.
 - **`IdentitySyncService`** — `@Scheduled(fixedDelayString =
   "${zte.idp.sync-interval-ms:900000}")` (`refresh()`), driven by Spring's
-  own `TaskScheduler` thread; `syncNow(): Mono<Integer>` fetches all three
+  own `TaskScheduler` thread; `syncNow(): Mono<Integer>` fetches all four
   kinds and upserts each — never calls `.block()`, so it never touches the
   Netty event loop by construction.
-- **`IdentityUrn`** — `parse(String source): Optional<IdentityUrn>`. No
-  prefix → implicit `ROLE` (backward compat); unrecognized prefix → literal
-  `ROLE` name (not silently ignored); any `*`/`?` → `Optional.empty()` (not
-  checkable against a fixed identity list).
+- **`IdentityUrn`** — `parse(String source, IdentityType defaultType):
+  Optional<IdentityUrn>` (the one-arg `parse(source)` is a thin delegate to
+  `parse(source, IdentityType.ROLE)`, unchanged for `users2service` callers).
+  No prefix → implicit `defaultType` (category-supplied: `ROLE` for
+  `users2service`, `CLIENT` for `service2service`/`agentMcpToolCalls` —
+  ADR-015, since every rule in those two categories predates URN sources and
+  was already a bare client id); unrecognized prefix → literal name of
+  `defaultType` (not silently ignored); any `*`/`?` → `Optional.empty()`
+  (not checkable against a fixed identity list); an explicit prefix
+  (`role:`/`user:`/`group:`/`client:`) always overrides the default.
 - **`IdentitySources`** — `enrich(List<String> realmRoles,
-  JwtAuthenticationToken): List<String>`. Builds the enriched sources list
-  `ZteAuthorizationFilter`/`AdminAuthorizationFilter` pass to
-  `PolicyMatcher.evaluate(...)` (§5.2) — bare role names (unchanged) plus
-  `role:<r>`/`user:<preferred_username>`/`group:<g>` URNs.
-  `PolicyMatcher` itself required **zero** code changes; it already does
-  generic string-list matching over whatever `sources` it's given.
+  JwtAuthenticationToken): List<String>`, used by
+  `ZteAuthorizationFilter`/`AdminAuthorizationFilter` — bare role names
+  (unchanged) plus `role:<r>`/`user:<preferred_username>`/`group:<g>` URNs.
+  `enrichClient(String clientId): List<String>` (ADR-015), used by
+  `ServiceToServiceAuthorizationFilter`/`YamlMcpPolicyEngine` — the bare
+  client id (unchanged) plus its `client:<clientId>` URN form. Both build
+  the enriched sources list passed to `PolicyMatcher.evaluate(...)` (§5.2) —
+  `PolicyMatcher` itself required **zero** code changes for either ADR; it
+  already does generic string-list matching over whatever `sources` it's
+  given.
 - **`OrphanedRuleChecker`** — `@PostConstruct` startup check +
-  `@EventListener(PolicyDocumentReloadedEvent.class)` for reloads. For each
-  `users2service` rule, `IdentityUrn.parse(rule.source())` then
+  `@EventListener(PolicyDocumentReloadedEvent.class)` for reloads. Checks
+  all three categories (`service2service`/`agentMcpToolCalls` added by
+  ADR-015, `Flux.merge`d alongside `users2service`, each with its own
+  default type): `IdentityUrn.parse(rule.source(), defaultType)` then
   `repository.existsByTypeAndName(...)`; logs SLF4J `WARN`
   `"ORPHANED RULE: ..."` when no match — never rejects or deletes.
   Deliberately decoupled from `PolicyValidator`/`PolicyMatcher` (which stay
@@ -433,13 +457,20 @@ handling stay universal.
   accepted race: this startup check can run before `IdentitySyncService`'s
   own first `@Scheduled` sync populates `idp_identities`, producing a
   transient false-positive that self-corrects within one sync interval, or
-  immediately after a manual sync/reload.
+  immediately after a manual sync/reload. Each per-rule check has its own
+  `onErrorResume` (found live during the ADR-014 session — a Flyway/R2DBC
+  startup-ordering race caused a query failure that `flatMap`'s single-error
+  propagation silently dropped for a second concurrent rule) — this
+  per-rule resilience is what makes `Flux.merge`-ing three category streams
+  safe without reintroducing that cross-category dropped-error risk.
 
 **Schema**: `V5__create_idp_identities.sql` — `idp_identities` (`type`
 `VARCHAR(10)`+`CHECK`, not a native Postgres enum — same reasoning as
 `RuleEffect`; `UNIQUE (type, external_id)`). Only `id`/`type`/`external_id`/
 `name`/`display_name`/`last_synced` — no IdP secrets or credentials are ever
-cached.
+cached. `V6__add_client_identity_type.sql` (ADR-015) widens the `type`
+`CHECK` constraint to add `'CLIENT'` — no new column or table, keeping
+machine identities in the same unified cache as users/groups/roles.
 
 ### 5.3 `service-a` / `service-b`
 
@@ -481,14 +512,17 @@ into that jar's `static/admin/`. Two source files carry the logic: `App.tsx`
 categories as tables, "Reload Policies" button posts to `POST
 /api/v1/admin/policies/reload`). No client-side routing — the OIDC
 `redirect_uri` points at the exact served file, `/admin/index.html`.
-`AuditTrail.tsx` (ADR-013) and `Identities.tsx` (ADR-014) are the same shape,
-added as further `Tabs` entries in `App.tsx`. `Identities.tsx` fetches `GET
-/api/v1/admin/identities/search` and has a "Sync Now" button (`POST
-/api/v1/admin/identities/sync`); `PolicyDashboard.tsx` also independently
-fetches that same search endpoint to flag `users2service` rows whose
-`source` isn't in the synced cache (a small, intentionally duplicated
-TypeScript port of `IdentityUrn.parse`, not a shared-state lift — keeps the
-tabs self-contained).
+`AuditTrail.tsx` (ADR-013) and `Identities.tsx` (ADR-014, automatically
+renders the `CLIENT` type added by ADR-015 — no hardcoded type list) are the
+same shape, added as further `Tabs` entries in `App.tsx`. `Identities.tsx`
+fetches `GET /api/v1/admin/identities/search` and has a "Sync Now" button
+(`POST /api/v1/admin/identities/sync`); `PolicyDashboard.tsx` also
+independently fetches that same search endpoint to flag rows in **all
+three** categories (`service2service`/`agentMcpToolCalls` added by ADR-015,
+via a per-category `defaultSourceType` field driving the same
+`IdentityUrn.parse`-mirroring logic) whose `source` isn't in the synced
+cache (a small, intentionally duplicated TypeScript port, not a shared-state
+lift — keeps the tabs self-contained).
 
 ### 5.5 Infrastructure
 
@@ -560,16 +594,17 @@ Stage 1):
 Written by `RequestLogAuditService` (§5.2b), read via `GET
 /api/v1/admin/audit-logs` (§7) — `findTop100ByOrderByTimestampDesc()`.
 
-`idp_identities` (PostgreSQL, Flyway `V5__create_idp_identities.sql`,
-ADR-014) — the local IdP identity cache. No secrets/credentials, ever:
+`idp_identities` (PostgreSQL, Flyway `V5__create_idp_identities.sql` +
+`V6__add_client_identity_type.sql`, ADR-014/ADR-015) — the local IdP
+identity cache. No secrets/credentials, ever:
 
 | Column | Type | Notes |
 |---|---|---|
 | `id` | `UUID` | PK, `DEFAULT gen_random_uuid()` |
-| `type` | `VARCHAR(10)` + `CHECK (type IN ('USER','GROUP','ROLE'))` | Not a native Postgres enum — same reasoning as `RuleEffect`, avoids an R2DBC enum codec registrar |
+| `type` | `VARCHAR(10)` + `CHECK (type IN ('USER','GROUP','ROLE','CLIENT'))` | Not a native Postgres enum — same reasoning as `RuleEffect`, avoids an R2DBC enum codec registrar; `CLIENT` added by `V6`/ADR-015 |
 | `external_id` | `VARCHAR(255)` | The IdP's own identifier (Keycloak internal UUID); `UNIQUE (type, external_id)` |
-| `name` | `VARCHAR(255)`, indexed with `type` | Username / group name / role name — what `IdentityUrn`/`users2service` sources match against |
-| `display_name` | `VARCHAR(255)`, nullable | firstName+lastName (USER, falling back to username), group name (GROUP), role description falling back to name (ROLE) |
+| `name` | `VARCHAR(255)`, indexed with `type` | Username / group name / role name / OIDC `clientId` — what `IdentityUrn`/policy sources match against |
+| `display_name` | `VARCHAR(255)`, nullable | firstName+lastName (USER, falling back to username), group name (GROUP), role description falling back to name (ROLE), client `name`→`description`→`clientId` fallback (CLIENT) |
 | `last_synced` | `TIMESTAMPTZ` | `DEFAULT NOW()`, updated on every upsert |
 
 Written by `IdentitySyncService` via `IdpIdentityRepository.upsert(...)` (a
@@ -645,8 +680,10 @@ coexisting with Gateway routing on non-overlapping paths.
 ### 8.3 Current policy logic
 
 `YamlMcpPolicyEngine` (ADR-011, replacing the Stage 8 `DummyMcpPolicyEngine`
-placeholder) — real per-agent authorization: matches `(agentId, toolName)`
-against the `agentMcpToolCalls` rules in `zte-policies.yaml` via the shared
+placeholder) — real per-agent authorization: matches
+`(IdentitySources.enrichClient(agentId), toolName)` (the bare `agentId` plus
+its `client:<agentId>` URN form, ADR-015 — see §5.2c) against the
+`agentMcpToolCalls` rules in `zte-policies.yaml` via the shared
 `PolicyMatcher` (deny always overrides allow); no match resolves to
 `zte.policy.default-effect` (default `DENY`). `evaluate()` stays synchronous
 and zero-I/O per ADR-009 §8.2 — it reads `PolicyDefinitionStore`'s
@@ -689,15 +726,22 @@ isolation.
 
 ### 9.1 Completed (see §2 for commits/ADRs)
 
-Stages 1–13, plus the two undated additions (pre-commit doc automation,
+Stages 1–14, plus the two undated additions (pre-commit doc automation,
 `.env` config) — all ✅. Stage 11 (ADR-012) closed the "Full users2service
 migration to YAML-only" item that used to be listed below; Stage 12
 (ADR-013) closed the "DB-based request audit log" item that used to be
 listed below too; Stage 13 (ADR-014) adds IdP identity sync and URN-based
-`users2service` sources — not a closed backlog item, a new capability.
+`users2service` sources, and Stage 14 (ADR-015) extends that to machine
+identities (OIDC clients) and unifies URN sources across all three policy
+categories — neither is a closed backlog item, both are new capabilities.
 
-### 9.2 Backlog — general (from `CLAUDE.md` Stage 14+)
+### 9.2 Backlog — general (from `CLAUDE.md` Stage 15+)
 
+- [ ] Filter `fetchClients()` to `serviceAccountsEnabled` clients only, once/if
+      the Keycloak-builtin-client noise in the Identities tab becomes a real
+      usability complaint (ADR-015).
+- [ ] A visual distinction in the Identities tab between "actor" clients
+      (referenced by ≥1 policy rule) and unused/built-in ones (ADR-015).
 - [ ] UUID-based user URNs — today `user:<name>` only matches by
       `preferred_username` (ADR-014).
 - [ ] Filesystem-watch or webhook-driven identity sync, replacing the fixed
@@ -794,6 +838,8 @@ listed below too; Stage 13 (ADR-014) adds IdP identity sync and URN-based
 | Medium | `idp_identities` can be stale for up to `zte.idp.sync-interval-ms` (15 min default) — a Keycloak identity created/renamed after the last sync isn't URN-addressable until the next sync | ADR-014 | Deliberate tradeoff to keep `PolicyMatcher.evaluate()` zero-I/O (ADR-009 §8.2); `POST /api/v1/admin/identities/sync` gives an immediate manual override |
 | Low | `OrphanedRuleChecker`'s `@PostConstruct` startup check and `IdentitySyncService`'s first `@Scheduled` run have no guaranteed ordering — a cold start can produce a transient false-positive "orphaned" warning | ADR-014 | Named, not silently accepted; self-corrects within one sync interval or after a manual sync/reload; purely observational (SLF4J only), never affects request handling |
 | Low | No integration-level test exercises `group:`-scoped `users2service` matching end-to-end — `zte-realm` has no groups defined yet | ADR-014 | `groups-mapper` protocol mapper and `IdentitySources`'s group-claim handling are unit-tested in isolation (`IdentitySourcesTest`); backlog item §9.2 |
+| Low | `idp_identities` includes every Keycloak built-in client (`account`, `broker`, `admin-cli`, etc.), not just the realm's real actors — `fetchClients()` has no `serviceAccountsEnabled` filter | ADR-015 | Deliberate MVP simplification; harmless for policy matching/orphan-checking (these clients never appear as a rule `source`), a minor Identities-tab browsability cost only; backlog item §9.2 |
+| Low | `KeycloakIdpAdapter.fetchClients()` has no dedicated mocked-`WebClient` unit test, same as `fetchUsers`/`fetchGroups`/`fetchRoles` | ADR-015 | Consistent with ADR-014 precedent — correctness proven by `IdentitySyncIT` (`manualSync_populatesClients`) against a real Testcontainers Keycloak, not mocked HTTP |
 
 ---
 
@@ -815,10 +861,11 @@ listed below too; Stage 13 (ADR-014) adds IdP identity sync and URN-based
 | [012](adr/ADR-012-full-yaml-migration-and-admin-console.md) | Full YAML Policy Migration and React Admin Console |
 | [013](adr/ADR-013-postgres-audit-logging.md) | R2DBC-Backed Request Audit Logging with Distributed Tracing |
 | [014](adr/ADR-014-idp-identity-sync.md) | IdP Identity Sync and URN-Based Policy Matching |
+| [015](adr/ADR-015-machine-identities-and-urn-unification.md) | Machine Identities (OIDC Clients) and URN Unification |
 
 ---
 
-*This document reflects repo state at commit `dd8a13f` (Stage 13, IdP Identity Sync +
-URN-Based Policy Matching). Keep it in sync the same way as README/CLAUDE.md — per CLAUDE.md's
+*This document reflects repo state at commit (pending — Stage 14, Machine Identities and
+URN Unification). Keep it in sync the same way as README/CLAUDE.md — per CLAUDE.md's
 mandatory workflow, update it alongside any task that completes a stage or changes the
 roadmap.*

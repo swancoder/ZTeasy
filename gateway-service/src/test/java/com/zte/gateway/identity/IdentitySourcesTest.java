@@ -54,4 +54,11 @@ class IdentitySourcesTest {
 
         assertThat(sources).containsExactlyInAnyOrder("ADMIN", "role:ADMIN");
     }
+
+    @Test
+    void enrichClient_addsBareClientIdAndClientPrefixedUrn() {
+        List<String> sources = IdentitySources.enrichClient("agent-a");
+
+        assertThat(sources).containsExactlyInAnyOrder("agent-a", "client:agent-a");
+    }
 }

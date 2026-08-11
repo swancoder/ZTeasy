@@ -98,6 +98,24 @@ class ServiceToServiceAuthorizationFilterTest {
         verify(chain).filter(any());
     }
 
+    /**
+     * ADR-015: a YAML rule whose source is a {@code client:}-prefixed URN matches
+     * identically to the bare client-id form — {@link com.zte.gateway.identity.IdentitySources#enrichClient}
+     * enriches the sources list with {@code client:<clientId>}.
+     */
+    @Test
+    void servicePrincipal_urnPrefixedAllowRule_callsChain() {
+        when(chain.filter(any())).thenReturn(Mono.empty());
+        withRules(new PolicyRule("s1", RuleEffect.ALLOW, "client:agent-a", "service-a", null, null, 0));
+        JwtAuthenticationToken auth = jwtWithAzp("agent-a");
+
+        StepVerifier.create(filter.filter(exchange(), chain)
+                        .contextWrite(ReactiveSecurityContextHolder.withAuthentication(auth)))
+                .verifyComplete();
+
+        verify(chain).filter(any());
+    }
+
     @Test
     void servicePrincipal_explicitDenyRule_returns403() {
         withRules(new PolicyRule("s1", RuleEffect.DENY, "agent-a", "service-a", null, null, 0));

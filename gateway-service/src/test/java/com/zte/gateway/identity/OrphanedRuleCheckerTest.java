@@ -86,6 +86,42 @@ class OrphanedRuleCheckerTest {
     }
 
     @Test
+    void service2service_bareSourceDefaultsToClient() {
+        PolicyDocument document = new PolicyDocument(1, List.of(), List.of(
+                new PolicyRule("s1", RuleEffect.ALLOW, "agent-a", "service-a", null, null, 0)
+        ), List.of());
+        when(policyDefinitionStore.current()).thenReturn(document);
+
+        new OrphanedRuleChecker(repository, policyDefinitionStore).checkOnStartup();
+
+        verify(repository).existsByTypeAndName(eq("CLIENT"), eq("agent-a"));
+    }
+
+    @Test
+    void agentMcpToolCalls_clientPrefixedSourceChecked() {
+        PolicyDocument document = new PolicyDocument(1, List.of(), List.of(), List.of(
+                new PolicyRule("m1", RuleEffect.ALLOW, "client:agent-b", "update_deal_stage", null, null, 0)
+        ));
+        when(policyDefinitionStore.current()).thenReturn(document);
+
+        new OrphanedRuleChecker(repository, policyDefinitionStore).checkOnStartup();
+
+        verify(repository).existsByTypeAndName(eq("CLIENT"), eq("agent-b"));
+    }
+
+    @Test
+    void agentMcpToolCalls_wildcardDenySource_neverQueried() {
+        PolicyDocument document = new PolicyDocument(1, List.of(), List.of(), List.of(
+                new PolicyRule("d1", RuleEffect.DENY, "*", "delete*", null, null, 100)
+        ));
+        when(policyDefinitionStore.current()).thenReturn(document);
+
+        new OrphanedRuleChecker(repository, policyDefinitionStore).checkOnStartup();
+
+        verify(repository, never()).existsByTypeAndName(any(), any());
+    }
+
+    @Test
     void reloadEvent_reChecksNewDocument() {
         when(policyDefinitionStore.current()).thenReturn(PolicyDocument.empty());
         OrphanedRuleChecker checker = new OrphanedRuleChecker(repository, policyDefinitionStore);

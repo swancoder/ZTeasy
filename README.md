@@ -164,6 +164,7 @@ zte-lightweight/
 | [ADR-012](docs/adr/ADR-012-full-yaml-migration-and-admin-console.md) | Full YAML Policy Migration and React Admin Console | Accepted |
 | [ADR-013](docs/adr/ADR-013-postgres-audit-logging.md) | R2DBC-Backed Request Audit Logging with Distributed Tracing | Accepted |
 | [ADR-014](docs/adr/ADR-014-idp-identity-sync.md) | IdP Identity Sync and URN-Based Policy Matching | Accepted |
+| [ADR-015](docs/adr/ADR-015-machine-identities-and-urn-unification.md) | Machine Identities (OIDC Clients) and URN Unification | Accepted |
 
 ---
 
@@ -265,7 +266,7 @@ Every rule, in every category, shares one shape:
 |---|---|---|
 | `id` | yes | Unique across the whole document — referenced in audit logs and validation errors |
 | `effect` | yes | `ALLOW` or `DENY` |
-| `source` | yes | Caller identity (Ant pattern): realm role name, or service/agent OAuth2 client id. For `users2service` only, also accepts an IdP URN — `user:<name>`, `group:<name>`, `role:<name>` (see [IdP Identity Sync](#idp-identity-sync-adr-014) below); a bare name with no prefix still means `role:<name>` exactly as before (fully backward compatible) |
+| `source` | yes | Caller identity (Ant pattern): realm role name, or service/agent OAuth2 client id. Every category also accepts an IdP URN — `user:<name>`, `group:<name>`, `role:<name>` (`users2service`), `client:<clientId>` (`service2service`/`agentMcpToolCalls`) — see [IdP Identity Sync](#idp-identity-sync-adr-014-adr-015) below; a bare name with no prefix still means the category's implied form exactly as before (`role:` for `users2service`, `client:` for the other two — fully backward compatible) |
 | `target` | yes | What's accessed (Ant pattern): service name, or MCP tool name |
 | `pathPattern` | no | Request path scope (Ant pattern); unused by `agentMcpToolCalls` |
 | `methods` | no | Comma-separated HTTP verbs, or `*`; unused by `agentMcpToolCalls` |
@@ -332,7 +333,7 @@ the no-API-key case) — the gateway still builds and runs, just without `/admin
 
 **Tabs:** "Policies", "Audit Trail", and "Identities" (all below) — each fetches independently
 on load. The Policies tab cross-references the Identities cache to flag `users2service` rules
-whose `source` doesn't resolve to any synced identity (see [IdP Identity Sync](#idp-identity-sync-adr-014)).
+whose `source` doesn't resolve to any synced identity (see [IdP Identity Sync](#idp-identity-sync-adr-014-adr-015)).
 
 ---
 
@@ -378,34 +379,40 @@ today, reserved for a future MCP-audit unification (see ADR-013 Future Migration
 
 ---
 
-## IdP Identity Sync (ADR-014)
+## IdP Identity Sync (ADR-014, ADR-015)
 
-`users2service` rules can now target a synced IdP identity, not just a bare realm-role
-name — `zte-gateway`'s service account (`realm-management`'s `view-users`/`view-realm`
-roles, granted in `keycloak/realm-export.json`) periodically pulls Keycloak's users,
-groups, and roles into a local `idp_identities` Postgres cache, via an `IdpClient` adapter
-interface (`KeycloakIdpAdapter` today; a future Azure Entra ID/AWS IAM adapter is a
-drop-in). No sensitive IdP data (passwords, secrets, tokens) is ever cached — only
-id/type/name.
+Policy rules can now target a synced IdP identity instead of a bare role name or client
+id — `zte-gateway`'s service account (`realm-management`'s `view-users`/`view-realm`/
+`view-clients` roles, granted in `keycloak/realm-export.json`) periodically pulls
+Keycloak's users, groups, roles, **and OIDC clients** (ADR-015 — machine identities like
+Agent A/B and `zte-gateway` itself) into a local `idp_identities` Postgres cache, via an
+`IdpClient` adapter interface (`KeycloakIdpAdapter` today; a future Azure Entra ID/AWS
+IAM adapter is a drop-in). No sensitive IdP data (passwords, secrets, tokens) is ever
+cached — only id/type/name. `fetchClients()` syncs every client in the realm, not just
+`serviceAccountsEnabled` ones — a handful of Keycloak-builtin clients (`broker`,
+`admin-cli`, etc.) end up in the cache too, harmlessly (see ADR-015 Self-Critique).
 
-**URN sources**, `users2service` only: `role:<name>` (equivalent to the pre-existing bare
-`<name>` form), `user:<preferred_username>`, `group:<name>` — see the Format table above.
-`PolicyMatcher` itself is unchanged; the enriched sources list is built at the filter call
-sites (`ZteAuthorizationFilter`/`AdminAuthorizationFilter`).
+**URN sources**: `role:<name>`/`user:<preferred_username>`/`group:<name>` for
+`users2service`, `client:<clientId>` for `service2service`/`agentMcpToolCalls` — see the
+Format table above. A bare name (no prefix) still means the category's implied form
+exactly as before either ADR — fully backward compatible. `PolicyMatcher` itself is
+unchanged; the enriched sources list is built at the filter/engine call sites
+(`ZteAuthorizationFilter`/`AdminAuthorizationFilter` via `IdentitySources.enrich`;
+`ServiceToServiceAuthorizationFilter`/`YamlMcpPolicyEngine` via `IdentitySources.enrichClient`).
 
 ```bash
 # Manual sync (also runs automatically every 15 min, zte.idp.sync-interval-ms)
 curl -s -X POST -H "Authorization: Bearer $TOKEN" http://localhost:8080/api/v1/admin/identities/sync
 
 # Search the cache (used by the Admin Console's autocomplete / Identities tab)
-curl -s -H "Authorization: Bearer $TOKEN" "http://localhost:8080/api/v1/admin/identities/search?type=ROLE" | python3 -m json.tool
+curl -s -H "Authorization: Bearer $TOKEN" "http://localhost:8080/api/v1/admin/identities/search?type=CLIENT" | python3 -m json.tool
 ```
 
-**Orphaned rules:** a `users2service` rule whose `source` doesn't resolve to any cached
+**Orphaned rules:** a rule in any category whose `source` doesn't resolve to any cached
 identity logs an SLF4J `WARN` `"ORPHANED RULE: ..."` line (checked at startup and on every
 policy reload) and is highlighted in the Admin Console's Policies tab — never rejected or
 deleted. A transient false-positive is possible on a cold start, before the first sync has
-run; see [ADR-014](docs/adr/ADR-014-idp-identity-sync.md) Self-Critique.
+run; see [ADR-014](docs/adr/ADR-014-idp-identity-sync.md)/[ADR-015](docs/adr/ADR-015-machine-identities-and-urn-unification.md) Self-Critique.
 
 Also visible in the Admin Console's "Identities" tab (Type, Name, Display Name, Last
 Synced) with a "Sync Now" button.
@@ -513,3 +520,4 @@ curl -s -H "Authorization: Bearer $TOKEN" http://localhost:8080/api/v1/service-a
 | 11 | Full YAML migration (retired `access_policies`/`PolicyService`) + React Admin Console (`zt-admin-ui`), new ADMIN-JWT-gated admin API, `AdminAuthorizationFilter` (WebFilter, not GlobalFilter — see ADR-012) | `00edf91` |
 | 12 | R2DBC-backed `request_logs` audit trail, `X-Request-Id` distributed tracing, `GET /api/v1/admin/audit-logs`, Admin Console "Audit Trail" tab; `RequestAuditFilter` rewritten as a WebFilter (ADR-013) | `e5e1c65` |
 | 13 | IdP identity sync (`idp_identities` cache, `KeycloakIdpAdapter`), URN-based `users2service` sources, orphaned-rule detection, Admin Console "Identities" tab (ADR-014) | `dd8a13f` |
+| 14 | Machine identities (OIDC clients synced as `CLIENT` type), `client:<clientId>` URN unification for `service2service`/`agentMcpToolCalls`, orphaned-rule detection extended to all three categories (ADR-015) | — |

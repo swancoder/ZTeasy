@@ -1,6 +1,6 @@
 package com.zte.gateway.identity;
 
-/** The three IdP identity kinds this cache tracks (ADR-014). */
+/** The IdP identity kinds this cache tracks (ADR-014 — USER/GROUP/ROLE; ADR-015 — CLIENT). */
 public enum IdentityType {
-    USER, GROUP, ROLE
+    USER, GROUP, ROLE, CLIENT
 }

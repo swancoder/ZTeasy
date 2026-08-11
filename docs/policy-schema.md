@@ -34,7 +34,7 @@ Every rule, in every category, has the same shape:
 |---|---|---|---|
 | `id` | yes | string | Unique across the **whole document** (not just its category). Referenced in audit logs and validation errors. |
 | `effect` | yes | `ALLOW` \| `DENY` | What the rule does when it matches. |
-| `source` | yes | string (pattern) | Caller identity: a realm role name (`users2service`), a calling service/agent's OAuth2 client id (`service2service`, `agentMcpToolCalls`). `users2service` also accepts an IdP URN — `user:<name>`, `group:<name>`, `role:<name>` (ADR-014); a bare name is still exactly equivalent to `role:<name>`. |
+| `source` | yes | string (pattern) | Caller identity: a realm role name (`users2service`), a calling service/agent's OAuth2 client id (`service2service`, `agentMcpToolCalls`). Every category also accepts an IdP URN — `user:<name>`, `group:<name>`, `role:<name>` (ADR-014), `client:<clientId>` (ADR-015); a bare name is still exactly equivalent to the category's implied prefix (`role:` for `users2service`, `client:` for `service2service`/`agentMcpToolCalls`). |
 | `target` | yes | string (pattern) | What's being accessed: a service name (`users2service`, `service2service`) or an MCP tool name (`agentMcpToolCalls`). |
 | `pathPattern` | no | string (Ant pattern) | Request path scope. Omit/`null` to match any path. **Unused by `agentMcpToolCalls`** (tool calls aren't path-scoped). |
 | `methods` | no | string | Comma-separated HTTP verbs, or `"*"`. Omit/`null` to match any method. **Unused by `agentMcpToolCalls`**. |
@@ -45,27 +45,31 @@ Every rule, in every category, has the same shape:
 categories): `"*"` matches anything, `"agent-*"` matches a prefix, an exact
 string matches itself.
 
-## URN sources for `users2service` (ADR-014)
+## URN sources (ADR-014, extended by ADR-015)
 
-`source` in a `users2service` rule additionally accepts an IdP-identity URN,
-parsed by `IdentityUrn.parse`:
+`source` in any category additionally accepts an IdP-identity URN, parsed by
+`IdentityUrn.parse(source, defaultType)` — `defaultType` is what a
+*bare* (no-prefix) source implies, and depends on the category:
 
 | Form | Matches |
 |---|---|
-| `role:<name>` | A Keycloak realm role — identical to the bare `<name>` form below. |
+| `role:<name>` | A Keycloak realm role. |
 | `user:<name>` | A Keycloak user, by `preferred_username`. |
 | `group:<name>` | A Keycloak group, by name (requires the `groups` JWT claim — see `zte-gateway`'s `groups-mapper` protocol mapper). |
-| `<name>` (no prefix) | Backward-compatible bare role name — treated identically to `role:<name>`. |
-| An unrecognized prefix (e.g. `agent:foo`) | Treated as a literal role name (`role:"agent:foo"`), not silently ignored — a mistyped prefix still produces a checkable (and likely orphaned) rule rather than a rule that never matches anything. |
+| `client:<clientId>` | An OIDC client (ADR-015) — matches the caller's JWT `azp` claim, by Keycloak `clientId`. |
+| `<name>` (no prefix) | `users2service`: identical to `role:<name>`. `service2service`/`agentMcpToolCalls`: identical to `client:<name>` — every rule in those two categories predates ADR-015 and was already a bare client id. |
+| An unrecognized prefix (e.g. `agent:foo`) | Treated as a literal name of the category's default type, not silently ignored — a mistyped prefix still produces a checkable (and likely orphaned) rule rather than a rule that never matches anything. |
 | A pattern containing `*`/`?` | Not resolvable to a URN — skipped by orphaned-rule checking, but still matched by `PolicyMatcher`'s normal `AntPathMatcher` semantics as before. |
 
 Every 15 minutes (`zte.idp.sync-interval-ms`, default `900000`) — or on demand
 via `POST /api/v1/admin/identities/sync` — the gateway syncs Keycloak's
-users/groups/roles into a local `idp_identities` Postgres cache. A
-`users2service` rule whose `source` doesn't resolve to any cached identity is
-never rejected, but logs an SLF4J `WARN` ("ORPHANED RULE: ...") at load time
-and on every reload, and is flagged in the Admin Console's Policies tab. See
-[ADR-014](adr/ADR-014-idp-identity-sync.md).
+users/groups/roles/**clients** into a local `idp_identities` Postgres cache
+(clients as of ADR-015 — fetches *every* client in the realm, not just
+`serviceAccountsEnabled` ones, an accepted MVP simplification). A rule in any
+category whose `source` doesn't resolve to any cached identity is never
+rejected, but logs an SLF4J `WARN` ("ORPHANED RULE: ...") at load time and
+on every reload, and is flagged in the Admin Console's Policies tab. See
+[ADR-014](adr/ADR-014-idp-identity-sync.md), [ADR-015](adr/ADR-015-machine-identities-and-urn-unification.md).
 
 ## Precedence
 

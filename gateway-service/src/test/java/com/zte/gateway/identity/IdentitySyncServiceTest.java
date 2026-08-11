@@ -22,7 +22,7 @@ class IdentitySyncServiceTest {
     @Mock IdpIdentityRepository repository;
 
     @Test
-    void syncNow_upsertsEveryFetchedIdentityAcrossAllThreeKinds() {
+    void syncNow_upsertsEveryFetchedIdentityAcrossAllFourKinds() {
         when(idpClient.fetchUsers()).thenReturn(Flux.just(
                 IdpIdentity.fetched(IdentityType.USER, "u1", "zte-admin", "ZTE Admin")));
         when(idpClient.fetchGroups()).thenReturn(Flux.just(
@@ -30,18 +30,21 @@ class IdentitySyncServiceTest {
         when(idpClient.fetchRoles()).thenReturn(Flux.just(
                 IdpIdentity.fetched(IdentityType.ROLE, "r1", "ADMIN", "ADMIN"),
                 IdpIdentity.fetched(IdentityType.ROLE, "r2", "USER", "USER")));
+        when(idpClient.fetchClients()).thenReturn(Flux.just(
+                IdpIdentity.fetched(IdentityType.CLIENT, "c1", "agent-a", "MCP Agent A")));
         when(repository.upsert(any(), any(), any(), any())).thenReturn(Mono.empty());
 
         IdentitySyncService service = new IdentitySyncService(idpClient, repository);
 
         StepVerifier.create(service.syncNow())
-                .expectNext(4)
+                .expectNext(5)
                 .verifyComplete();
 
         verify(repository).upsert("USER", "u1", "zte-admin", "ZTE Admin");
         verify(repository).upsert("GROUP", "g1", "ops-team", "ops-team");
         verify(repository).upsert("ROLE", "r1", "ADMIN", "ADMIN");
         verify(repository).upsert("ROLE", "r2", "USER", "USER");
+        verify(repository).upsert("CLIENT", "c1", "agent-a", "MCP Agent A");
     }
 
     @Test
@@ -49,6 +52,7 @@ class IdentitySyncServiceTest {
         when(idpClient.fetchUsers()).thenReturn(Flux.empty());
         when(idpClient.fetchGroups()).thenReturn(Flux.empty());
         when(idpClient.fetchRoles()).thenReturn(Flux.empty());
+        when(idpClient.fetchClients()).thenReturn(Flux.empty());
 
         IdentitySyncService service = new IdentitySyncService(idpClient, repository);
 

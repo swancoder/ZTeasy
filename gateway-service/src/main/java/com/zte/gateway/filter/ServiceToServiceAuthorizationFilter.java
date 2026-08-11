@@ -1,6 +1,7 @@
 package com.zte.gateway.filter;
 
 import com.zte.auth.audit.ZteAuditLogger;
+import com.zte.gateway.identity.IdentitySources;
 import com.zte.gateway.policy.def.PolicyDefaultsProperties;
 import com.zte.gateway.policy.def.PolicyDefinitionStore;
 import com.zte.gateway.policy.def.PolicyEvaluation;
@@ -26,7 +27,6 @@ import org.springframework.web.server.ServerWebExchange;
 import reactor.core.publisher.Mono;
 
 import java.nio.charset.StandardCharsets;
-import java.util.List;
 
 /**
  * Zero Trust authorization filter for <b>service2service</b> traffic (ADR-011):
@@ -94,7 +94,7 @@ public class ServiceToServiceAuthorizationFilter implements GlobalFilter, Ordere
 
                     PolicyEvaluation eval = policyMatcher.evaluate(
                             policyDefinitionStore.current().service2service(),
-                            List.of(callerService), targetService, path, method);
+                            IdentitySources.enrichClient(callerService), targetService, path, method);
 
                     RuleEffect resolved = switch (eval.outcome()) {
                         case DENIED -> RuleEffect.DENY;

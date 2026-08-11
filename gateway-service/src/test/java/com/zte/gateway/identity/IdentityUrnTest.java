@@ -42,6 +42,31 @@ class IdentityUrnTest {
     }
 
     @Test
+    void clientPrefix_parsesToClient() {
+        assertThat(IdentityUrn.parse("client:agent-a", IdentityType.ROLE))
+                .contains(new IdentityUrn(IdentityType.CLIENT, "agent-a"));
+    }
+
+    @Test
+    void noPrefix_usesCallerSuppliedDefaultType() {
+        assertThat(IdentityUrn.parse("agent-a", IdentityType.CLIENT))
+                .contains(new IdentityUrn(IdentityType.CLIENT, "agent-a"));
+    }
+
+    @Test
+    void explicitPrefix_overridesDefaultTypeRegardless() {
+        // A service2service/agentMcpToolCalls rule (default CLIENT) using role: explicitly
+        // still means ROLE — the default only applies to a bare, unprefixed source.
+        assertThat(IdentityUrn.parse("role:ADMIN", IdentityType.CLIENT))
+                .contains(new IdentityUrn(IdentityType.ROLE, "ADMIN"));
+    }
+
+    @Test
+    void oneArgOverload_isEquivalentToRoleDefault() {
+        assertThat(IdentityUrn.parse("ADMIN")).isEqualTo(IdentityUrn.parse("ADMIN", IdentityType.ROLE));
+    }
+
+    @Test
     void wildcardSource_isNotCheckable() {
         assertThat(IdentityUrn.parse("*")).isEqualTo(Optional.empty());
         assertThat(IdentityUrn.parse("role:AD*")).isEqualTo(Optional.empty());

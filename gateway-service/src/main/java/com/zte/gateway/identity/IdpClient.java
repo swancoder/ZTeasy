@@ -19,4 +19,13 @@ public interface IdpClient {
     Flux<IdpIdentity> fetchGroups();
 
     Flux<IdpIdentity> fetchRoles();
+
+    /**
+     * OIDC clients (machine identities — ADR-015), e.g. {@code agent-a},
+     * {@code zte-gateway}, and any of the realm's built-in clients. Fetches
+     * <em>all</em> clients, not just {@code serviceAccountsEnabled} ones — an
+     * accepted MVP simplification (ADR-015 Self-Critique), not a filtered
+     * "actors only" view.
+     */
+    Flux<IdpIdentity> fetchClients();
 }

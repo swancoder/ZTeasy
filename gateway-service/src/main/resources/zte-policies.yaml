@@ -1,4 +1,6 @@
-# ZTE YAML policy definitions (Stage 10 / ADR-011, Stage 11 / ADR-012).
+# ZTE YAML policy definitions (Stage 10 / ADR-011, Stage 11 / ADR-012,
+# Stage 14 / ADR-015 — client:<clientId> URN sources for service2service/
+# agentMcpToolCalls).
 #
 # Schema: docs/policy-schema.md — full annotated example covering all three
 # categories: docs/examples/zte-policies-example.yaml
@@ -29,6 +31,10 @@ users2service:
     pathPattern: /api/v1/admin/**
     methods: "*"
 
+# Empty by default (fail-closed via zte.policy.default-effect). When adding a
+# rule, prefer the client:<clientId> URN form for source (ADR-015) — matches
+# an OIDC client id synced into idp_identities, same as the bare form still
+# does for backward compatibility.
 service2service: []
 
 agentMcpToolCalls:
@@ -51,14 +57,16 @@ agentMcpToolCalls:
     priority: 100
 
   # Explicit per-agent grants — everything else falls through to
-  # zte.policy.default-effect (DENY).
+  # zte.policy.default-effect (DENY). client:<clientId> URN form (ADR-015) —
+  # validated against idp_identities (synced OIDC clients) on load/reload,
+  # same as users2service sources already are.
   - id: mcp-allow-agent-a-get-deals
     effect: ALLOW
-    source: agent-a
+    source: "client:agent-a"
     target: get_deals
     priority: 10
   - id: mcp-allow-agent-b-update-deal-stage
     effect: ALLOW
-    source: agent-b
+    source: "client:agent-b"
     target: update_deal_stage
     priority: 10

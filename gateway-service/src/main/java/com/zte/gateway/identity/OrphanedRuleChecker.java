@@ -13,13 +13,18 @@ import reactor.core.publisher.Flux;
 import reactor.core.publisher.Mono;
 
 /**
- * Purely observational check (ADR-014): for every {@code users2service} rule
- * whose {@code source} parses to a concrete {@link IdentityUrn} (wildcard
- * sources are skipped — not checkable against a fixed identity list), warns
- * via SLF4J when no matching identity exists in the local {@code
- * idp_identities} cache. Never rejects, blocks, or mutates the policy
- * document — that is a deliberate product decision (task explicitly says
- * "DO NOT reject"), not an oversight.
+ * Purely observational check (ADR-014; extended to {@code service2service}/
+ * {@code agentMcpToolCalls} by ADR-015): for every rule in all three
+ * categories whose {@code source} parses to a concrete {@link IdentityUrn}
+ * (wildcard sources are skipped — not checkable against a fixed identity
+ * list), warns via SLF4J when no matching identity exists in the local
+ * {@code idp_identities} cache. {@code users2service} sources default a
+ * bare (no-prefix) name to {@link IdentityType#ROLE}; {@code
+ * service2service}/{@code agentMcpToolCalls} default to {@link
+ * IdentityType#CLIENT} — every pre-ADR-015 rule in those two categories was
+ * already a bare OAuth2 client id. Never rejects, blocks, or mutates the
+ * policy document — that is a deliberate product decision (task explicitly
+ * says "DO NOT reject"), not an oversight.
  *
  * <p>Runs at startup ({@link #checkOnStartup()}) and on every successful
  * {@link PolicyDocumentReloadedEvent}. Decoupled from {@link
@@ -54,13 +59,18 @@ public class OrphanedRuleChecker {
     }
 
     private void check(PolicyDocument document) {
-        Flux.fromIterable(document.users2service())
-                .flatMap(this::checkRule)
+        Flux.merge(
+                        Flux.fromIterable(document.users2service())
+                                .flatMap(rule -> checkRule(rule, IdentityType.ROLE)),
+                        Flux.fromIterable(document.service2service())
+                                .flatMap(rule -> checkRule(rule, IdentityType.CLIENT)),
+                        Flux.fromIterable(document.agentMcpToolCalls())
+                                .flatMap(rule -> checkRule(rule, IdentityType.CLIENT)))
                 .subscribe(v -> {}, ex -> log.error("[ZTE-ORPHANED-RULE-CHECK] check stream failed", ex));
     }
 
-    private Mono<Void> checkRule(PolicyRule rule) {
-        return IdentityUrn.parse(rule.source())
+    private Mono<Void> checkRule(PolicyRule rule, IdentityType defaultType) {
+        return IdentityUrn.parse(rule.source(), defaultType)
                 .map(urn -> repository.existsByTypeAndName(urn.type().name(), urn.name())
                         .doOnNext(exists -> {
                             if (!exists) {

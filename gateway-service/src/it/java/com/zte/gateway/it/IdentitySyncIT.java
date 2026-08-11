@@ -11,9 +11,9 @@ import static org.hamcrest.Matchers.hasItem;
 /**
  * E2E test for ADR-014's IdP identity sync — this is what actually proves
  * {@code zte-gateway}'s service account really has the {@code view-users}/
- * {@code view-realm} realm-management roles granted in
- * {@code keycloak/realm-export.json} (Part A of the plan flagged this as the
- * highest-risk, least unit-testable piece), not just a hope.
+ * {@code view-realm}/{@code view-clients} (ADR-015) realm-management roles
+ * granted in {@code keycloak/realm-export.json} (Part A of the plan flagged
+ * this as the highest-risk, least unit-testable piece), not just a hope.
  *
  * <p>Chain exercised: ADMIN JWT → {@code POST /api/v1/admin/identities/sync}
  * → {@code KeycloakIdpAdapter} → real Testcontainers Keycloak Admin REST API
@@ -35,7 +35,9 @@ class IdentitySyncIT extends BaseZteIntegrationTest {
             .post("/api/v1/admin/identities/sync")
         .then()
             .statusCode(200)
-            .body("synced", greaterThanOrEqualTo(4)); // ADMIN, USER roles + zte-admin, zte-test-user users, at least
+            // ADMIN/USER roles + zte-admin/zte-test-user users + at least
+            // zte-gateway/agent-a/agent-b/zte-admin-ui clients, at least.
+            .body("synced", greaterThanOrEqualTo(8));
 
         given()
             .baseUri("http://localhost:" + gatewayPort)
@@ -58,6 +60,32 @@ class IdentitySyncIT extends BaseZteIntegrationTest {
             .statusCode(200)
             .body("name", hasItem(ADMIN_USERNAME))
             .body("name", hasItem(USER_USERNAME));
+    }
+
+    @Test
+    @DisplayName("Manual sync populates idp_identities with OIDC clients (ADR-015)")
+    void manualSync_populatesClients() {
+        String token = getAdminToken();
+
+        given()
+            .baseUri("http://localhost:" + gatewayPort)
+            .header("Authorization", "Bearer " + token)
+        .when()
+            .post("/api/v1/admin/identities/sync")
+        .then()
+            .statusCode(200);
+
+        given()
+            .baseUri("http://localhost:" + gatewayPort)
+            .header("Authorization", "Bearer " + token)
+            .queryParam("type", "CLIENT")
+        .when()
+            .get("/api/v1/admin/identities/search")
+        .then()
+            .statusCode(200)
+            .body("name", hasItem("agent-a"))
+            .body("name", hasItem("agent-b"))
+            .body("name", hasItem("zte-gateway"));
     }
 
     @Test

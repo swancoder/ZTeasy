@@ -40,4 +40,14 @@ public final class IdentitySources {
 
         return sources;
     }
+
+    /**
+     * The {@code service2service}/{@code agentMcpToolCalls} counterpart of
+     * {@link #enrich} (ADR-015): the bare OAuth2 client id (unchanged — every
+     * existing bare-clientId YAML rule keeps matching) plus its {@code
+     * client:<clientId>} URN form.
+     */
+    public static List<String> enrichClient(String clientId) {
+        return List.of(clientId, "client:" + clientId);
+    }
 }

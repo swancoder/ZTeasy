@@ -53,6 +53,19 @@ class YamlMcpPolicyEngineTest {
         assertThat(decision.allowed()).isTrue();
     }
 
+    /**
+     * ADR-015: a {@code client:}-prefixed source matches identically to the
+     * bare client-id form.
+     */
+    @Test
+    void urnPrefixedAllowRule_isAllowed() {
+        withRules(new PolicyRule("a1", RuleEffect.ALLOW, "client:agent-a", "get_deals", null, null, 0));
+
+        PolicyDecision decision = engine.evaluate("agent-a", "get_deals", Map.of());
+
+        assertThat(decision.allowed()).isTrue();
+    }
+
     @Test
     void explicitDenyRule_isDenied() {
         withRules(new PolicyRule("d1", RuleEffect.DENY, "*", "delete*", null, null, 100));

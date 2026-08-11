@@ -190,10 +190,26 @@
 - [x] New IT `IdentitySyncIT` — real Testcontainers Keycloak Admin REST API round trip; this is what actually proves the realm-export.json service-account role grant works, not just a hope
 - ADR: ADR-014-idp-identity-sync.md
 
+### Stage 14 — Machine Identities (OIDC Clients) + URN Unification `COMPLETE`
+- [x] `keycloak/realm-export.json` — `zte-gateway`'s service account granted `realm-management`'s `view-clients` client role (alongside Stage 13's `view-users`/`view-realm`)
+- [x] `V6__add_client_identity_type.sql` (Flyway) — widens `idp_identities`' existing `type` `CHECK` constraint (`idp_identities_type_check`) to add `CLIENT`; no new column/table — keeps machine identities in the same unified cache
+- [x] `IdentityType.CLIENT` + `IdpClient.fetchClients()` + `KeycloakIdpAdapter` implementation (Keycloak `GET /admin/realms/{realm}/clients`, `external_id`=client's internal UUID, `name`=`clientId`, `displayName`=`name`→`description`→`clientId` fallback) — fetches **every** client in the realm (Keycloak built-ins included), not just `serviceAccountsEnabled` ones, an accepted MVP simplification (ADR-015 Self-Critique)
+- [x] `IdentitySyncService.syncNow()` — `Flux.merge`s `fetchClients()` alongside the existing three
+- [x] `IdentityUrn.parse(source, defaultType)` — new overload: a bare (no-prefix) source's implied type is now caller-supplied per category (`users2service`→`ROLE` via the original one-arg `parse(source)`, now a thin delegate; `service2service`/`agentMcpToolCalls`→`CLIENT`, since every pre-ADR-015 rule in those categories was already a bare client id) — an explicit prefix (`role:`/`user:`/`group:`/`client:`) always overrides the default regardless
+- [x] `IdentitySources.enrichClient(clientId)` (mirrors `enrich(roles, jwtAuth)`) — wired into `ServiceToServiceAuthorizationFilter`/`YamlMcpPolicyEngine`'s `policyMatcher.evaluate(...)` calls, replacing the old single-bare-string `List.of(callerService)`/`List.of(agentId)`; `PolicyMatcher` itself needed **zero** further changes
+- [x] `OrphanedRuleChecker.check(document)` — extended from one `Flux` (users2service) to three `Flux.merge`d streams (one per category, each with the correct default type); the per-rule `onErrorResume` resilience added live in the Stage 13 session (Flyway/R2DBC startup race fix) is what makes merging streams safe without reintroducing cross-category dropped-error risk
+- [x] `zte-policies.yaml`/`docs/examples/zte-policies-example.yaml` — `service2service`/`agentMcpToolCalls` example sources migrated to the `client:<clientId>` form; verified non-breaking for any bare-form rule via `enrichClient`'s backward-compatible enrichment
+- [x] `zt-admin-ui` — `Identities.tsx` needed no changes (renders whatever `type` the API returns, no hardcoded list); `PolicyDashboard.tsx`'s orphan highlighting extended from `users2service`-only to all three categories via a new per-`Category.defaultSourceType` field driving the client-side `parseUrn` port
+- [x] Unit tests: `IdentityUrnTest`/`IdentitySourcesTest`/`OrphanedRuleCheckerTest` extended for `client:`/defaultType cases; `ServiceToServiceAuthorizationFilterTest`/`YamlMcpPolicyEngineTest` pass **unmodified** (confirms bare-clientId backward compatibility) plus one new `client:`-prefixed test each; `IdentitySyncServiceTest` updated for the new `fetchClients()` dependency
+- [x] `IdentitySyncIT` extended (`manualSync_populatesClients`) — real Testcontainers Keycloak Admin REST API proof that `agent-a`/`agent-b`/`zte-gateway` land as `CLIENT`-type identities, and that the new `view-clients` role grant actually works
+- ADR: ADR-015-machine-identities-and-urn-unification.md
+
 ---
 
-## Stage 14+ Backlog (Not Yet Implemented)
+## Stage 15+ Backlog (Not Yet Implemented)
 
+- [ ] Filter `fetchClients()` to `serviceAccountsEnabled` clients only, once/if the Keycloak-builtin-client noise in the Identities tab becomes a real usability complaint (see ADR-015 Future Migration Path)
+- [ ] A visual distinction in the Identities tab between "actor" clients (referenced by ≥1 policy rule) and unused/built-in ones
 - [ ] UUID-based user URNs (today `user:<name>` only matches by `preferred_username`)
 - [ ] Filesystem-watch or webhook-driven identity sync, replacing the fixed 15-min polling interval (see ADR-014)
 - [ ] A demo Keycloak group in `zte-realm`, to close the integration-level test gap for `group:`-scoped rules (see ADR-014 Self-Critique)

@@ -37,9 +37,10 @@ public class IdentitySyncService {
                 ex -> log.error("[ZTE-IDENTITY-SYNC] scheduled sync failed", ex));
     }
 
-    /** Fetches users/groups/roles and upserts each; returns the total count upserted. */
+    /** Fetches users/groups/roles/clients and upserts each; returns the total count upserted. */
     public Mono<Integer> syncNow() {
-        return Flux.merge(idpClient.fetchUsers(), idpClient.fetchGroups(), idpClient.fetchRoles())
+        return Flux.merge(idpClient.fetchUsers(), idpClient.fetchGroups(), idpClient.fetchRoles(),
+                        idpClient.fetchClients())
                 .flatMap(identity -> repository
                         .upsert(identity.type().name(), identity.externalId(), identity.name(), identity.displayName())
                         .thenReturn(1))

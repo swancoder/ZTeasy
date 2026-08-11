@@ -18,13 +18,14 @@ import reactor.core.publisher.Mono;
  * <p>Obtains a fresh client-credentials token per {@code fetchX()} call — no
  * cross-call token caching. Keycloak's default 300s access-token lifespan is
  * shorter than the 15-min sync interval anyway, so caching across sync
- * cycles buys nothing, and reusing one token across the 3 calls within a
- * single sync isn't worth the added state for 3 cheap extra token requests
+ * cycles buys nothing, and reusing one token across the 4 calls within a
+ * single sync isn't worth the added state for 4 cheap extra token requests
  * per cycle (ADR-014).
  *
  * <p>Reuses the {@code zte-gateway} client's existing service account
- * (granted {@code view-users}/{@code view-realm} realm-management roles in
- * {@code keycloak/realm-export.json}) rather than a dedicated client.
+ * (granted {@code view-users}/{@code view-realm}/{@code view-clients}
+ * realm-management roles in {@code keycloak/realm-export.json} — the last
+ * one added by ADR-015) rather than a dedicated client.
  */
 @Component
 @ConditionalOnProperty(prefix = "zte.idp", name = "provider", havingValue = "keycloak", matchIfMissing = true)
@@ -74,6 +75,16 @@ public class KeycloakIdpAdapter implements IdpClient {
                 .retrieve()
                 .bodyToFlux(KeycloakRole.class)
                 .map(r -> IdpIdentity.fetched(IdentityType.ROLE, r.id, r.name, r.displayName())));
+    }
+
+    @Override
+    public Flux<IdpIdentity> fetchClients() {
+        return withToken(token -> client.get()
+                .uri("/admin/realms/{realm}/clients", realm)
+                .headers(h -> h.setBearerAuth(token))
+                .retrieve()
+                .bodyToFlux(KeycloakClient.class)
+                .map(c -> IdpIdentity.fetched(IdentityType.CLIENT, c.id, c.clientId, c.displayName())));
     }
 
     private Flux<IdpIdentity> withToken(java.util.function.Function<String, Flux<IdpIdentity>> call) {
@@ -128,6 +139,20 @@ public class KeycloakIdpAdapter implements IdpClient {
 
         String displayName() {
             return StringUtils.hasText(description) ? description : name;
+        }
+    }
+
+    @JsonIgnoreProperties(ignoreUnknown = true)
+    private static class KeycloakClient {
+        public String id;
+        public String clientId;
+        public String name;
+        public String description;
+
+        String displayName() {
+            if (StringUtils.hasText(name)) return name;
+            if (StringUtils.hasText(description)) return description;
+            return clientId;
         }
     }
 }

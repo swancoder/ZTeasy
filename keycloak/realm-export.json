@@ -228,7 +228,7 @@
       "serviceAccountClientId": "zte-gateway",
       "enabled": true,
       "clientRoles": {
-        "realm-management": ["view-users", "view-realm"]
+        "realm-management": ["view-users", "view-realm", "view-clients"]
       }
     }
   ]

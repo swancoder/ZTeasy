@@ -1,5 +1,6 @@
 package com.zte.gateway.mcp.policy;
 
+import com.zte.gateway.identity.IdentitySources;
 import com.zte.gateway.policy.def.PolicyDefaultsProperties;
 import com.zte.gateway.policy.def.PolicyDefinitionStore;
 import com.zte.gateway.policy.def.PolicyEvaluation;
@@ -7,7 +8,6 @@ import com.zte.gateway.policy.def.PolicyMatcher;
 import com.zte.gateway.policy.def.RuleEffect;
 import org.springframework.stereotype.Component;
 
-import java.util.List;
 import java.util.Map;
 
 /**
@@ -45,7 +45,7 @@ public class YamlMcpPolicyEngine implements McpPolicyEngine {
 
         PolicyEvaluation eval = policyMatcher.evaluate(
                 policyDefinitionStore.current().agentMcpToolCalls(),
-                List.of(agentId), toolName, null, null);
+                IdentitySources.enrichClient(agentId), toolName, null, null);
 
         return switch (eval.outcome()) {
             case DENIED -> PolicyDecision.deny(

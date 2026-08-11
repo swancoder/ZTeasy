@@ -21,30 +21,38 @@ interface Props {
   accessToken: string
 }
 
-// Mirrors gateway-service's com.zte.gateway.identity.IdentityUrn.parse (ADR-014) —
-// intentionally duplicated (~10 lines) rather than shared, to keep this tab's
+type IdentityTypeName = 'USER' | 'GROUP' | 'ROLE' | 'CLIENT'
+
+// Mirrors gateway-service's com.zte.gateway.identity.IdentityUrn.parse
+// (ADR-014, client: prefix + defaultType added by ADR-015) — intentionally
+// duplicated (~10 lines) rather than shared, to keep this tab's
 // orphan-highlighting independent of the Identities tab's data fetch.
-function parseUrn(source: string): { type: 'USER' | 'GROUP' | 'ROLE'; name: string } | null {
+function parseUrn(source: string, defaultType: IdentityTypeName): { type: IdentityTypeName; name: string } | null {
   if (!source || source.includes('*') || source.includes('?')) return null
   if (source.startsWith('user:')) return { type: 'USER', name: source.slice('user:'.length) }
   if (source.startsWith('group:')) return { type: 'GROUP', name: source.slice('group:'.length) }
   if (source.startsWith('role:')) return { type: 'ROLE', name: source.slice('role:'.length) }
-  return { type: 'ROLE', name: source }
+  if (source.startsWith('client:')) return { type: 'CLIENT', name: source.slice('client:'.length) }
+  return { type: defaultType, name: source }
 }
 
 interface Category {
   key: keyof Omit<PolicyDocument, 'schemaVersion'>
   title: string
   description: string
+  // What a bare (no-prefix) source implies — ROLE for users2service (ADR-014),
+  // CLIENT for service2service/agentMcpToolCalls (ADR-015), since every rule
+  // in those two categories predates URN sources and was already a client id.
+  defaultSourceType: IdentityTypeName
 }
 
 const CATEGORIES: Category[] = [
-  { key: 'users2service', title: 'users2service', description: 'Human user (realm role) → gateway REST service' },
-  { key: 'service2service', title: 'service2service', description: 'Calling service/agent (JWT azp) → gateway REST service' },
-  { key: 'agentMcpToolCalls', title: 'agentMcpToolCalls', description: 'MCP agent (JWT azp) → MCP tool name' },
+  { key: 'users2service', title: 'users2service', description: 'Human user (realm role) → gateway REST service', defaultSourceType: 'ROLE' },
+  { key: 'service2service', title: 'service2service', description: 'Calling service/agent (JWT azp) → gateway REST service', defaultSourceType: 'CLIENT' },
+  { key: 'agentMcpToolCalls', title: 'agentMcpToolCalls', description: 'MCP agent (JWT azp) → MCP tool name', defaultSourceType: 'CLIENT' },
 ]
 
-function RuleTable({ rules, identitySet }: { rules: PolicyRule[]; identitySet?: Set<string> }) {
+function RuleTable({ rules, identitySet, defaultSourceType }: { rules: PolicyRule[]; identitySet?: Set<string>; defaultSourceType: IdentityTypeName }) {
   if (rules.length === 0) {
     return (
       <Typography color="text.secondary" sx={{ p: 2 }}>
@@ -55,7 +63,7 @@ function RuleTable({ rules, identitySet }: { rules: PolicyRule[]; identitySet?: 
 
   function isOrphaned(rule: PolicyRule): boolean {
     if (!identitySet) return false
-    const urn = parseUrn(rule.source)
+    const urn = parseUrn(rule.source, defaultSourceType)
     if (!urn) return false
     return !identitySet.has(`${urn.type}:${urn.name}`)
   }
@@ -212,7 +220,8 @@ export default function PolicyDashboard({ accessToken }: Props) {
             </Box>
             <RuleTable
               rules={policies?.[category.key] ?? []}
-              identitySet={category.key === 'users2service' ? identitySet : undefined}
+              identitySet={identitySet}
+              defaultSourceType={category.defaultSourceType}
             />
           </Paper>
         ))}

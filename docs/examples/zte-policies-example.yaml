@@ -1,5 +1,6 @@
-# Full annotated example of the ZTE YAML policy schema (ADR-011),
-# demonstrating all three categories with both ALLOW and DENY rules.
+# Full annotated example of the ZTE YAML policy schema (ADR-011, IdP URN
+# sources ADR-014/ADR-015), demonstrating all three categories with both
+# ALLOW and DENY rules.
 #
 # This is documentation, not the file the gateway loads at runtime — the
 # running default is gateway-service/src/main/resources/zte-policies.yaml,
@@ -47,9 +48,12 @@ users2service:
 
 # ── service2service: calling service/agent identity (JWT azp) → gateway REST service ──
 service2service:
+  # client:<clientId> URN source (ADR-015) — matches an OIDC client id synced
+  # into idp_identities; the bare "agent-a" form still works identically
+  # (backward compatible), same relationship role:ADMIN has to bare ADMIN.
   - id: s2s-agent-a-read-service-a
     effect: ALLOW
-    source: agent-a
+    source: "client:agent-a"
     target: service-a
     pathPattern: "/api/v1/service-a/**"
     methods: "GET"
@@ -57,7 +61,7 @@ service2service:
 
   - id: s2s-deny-agent-b-service-a
     effect: DENY
-    source: agent-b
+    source: "client:agent-b"
     target: service-a
     pathPattern: "/**"
     methods: "*"
@@ -80,13 +84,13 @@ agentMcpToolCalls:
 
   - id: mcp-allow-agent-a-get-deals
     effect: ALLOW
-    source: agent-a
+    source: "client:agent-a"
     target: get_deals
     priority: 0
 
   - id: mcp-allow-agent-b-update-deal-stage
     effect: ALLOW
-    source: agent-b
+    source: "client:agent-b"
     target: update_deal_stage
     priority: 0
 

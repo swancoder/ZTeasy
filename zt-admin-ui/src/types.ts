@@ -40,10 +40,11 @@ export interface RequestLogEntry {
   message: string | null
 }
 
-// Mirrors gateway-service's com.zte.gateway.identity.IdpIdentity (ADR-014).
+// Mirrors gateway-service's com.zte.gateway.identity.IdpIdentity (ADR-014,
+// CLIENT type added by ADR-015).
 export interface IdpIdentityEntry {
   id: string
-  type: 'USER' | 'GROUP' | 'ROLE'
+  type: 'USER' | 'GROUP' | 'ROLE' | 'CLIENT'
   externalId: string
   name: string
   displayName: string | null
