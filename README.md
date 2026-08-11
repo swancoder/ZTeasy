@@ -165,6 +165,7 @@ zte-lightweight/
 | [ADR-013](docs/adr/ADR-013-postgres-audit-logging.md) | R2DBC-Backed Request Audit Logging with Distributed Tracing | Accepted |
 | [ADR-014](docs/adr/ADR-014-idp-identity-sync.md) | IdP Identity Sync and URN-Based Policy Matching | Accepted |
 | [ADR-015](docs/adr/ADR-015-machine-identities-and-urn-unification.md) | Machine Identities (OIDC Clients) and URN Unification | Accepted |
+| [Identities UI + Relational Caching](docs/adr/identities-ui-actors-containers-and-relations-caching.md) | Identities UI Refactor (Actors vs. Access Containers) and Relational Caching (deliberately unnumbered filename — see the ADR's own note) | Accepted |
 
 ---
 
@@ -379,7 +380,7 @@ today, reserved for a future MCP-audit unification (see ADR-013 Future Migration
 
 ---
 
-## IdP Identity Sync (ADR-014, ADR-015)
+## IdP Identity Sync (ADR-014, ADR-015, Identities UI + Relations)
 
 Policy rules can now target a synced IdP identity instead of a bare role name or client
 id — `zte-gateway`'s service account (`realm-management`'s `view-users`/`view-realm`/
@@ -388,9 +389,10 @@ Keycloak's users, groups, roles, **and OIDC clients** (ADR-015 — machine ident
 Agent A/B and `zte-gateway` itself) into a local `idp_identities` Postgres cache, via an
 `IdpClient` adapter interface (`KeycloakIdpAdapter` today; a future Azure Entra ID/AWS
 IAM adapter is a drop-in). No sensitive IdP data (passwords, secrets, tokens) is ever
-cached — only id/type/name. `fetchClients()` syncs every client in the realm, not just
-`serviceAccountsEnabled` ones — a handful of Keycloak-builtin clients (`broker`,
-`admin-cli`, etc.) end up in the cache too, harmlessly (see ADR-015 Self-Critique).
+cached — only id/type/name. `fetchClients()` excludes Keycloak's own realm-builtin
+clients (`account`, `broker`, `realm-management`, `admin-cli`,
+`security-admin-console`, and their `account-`/`broker-`-prefixed satellite clients) —
+only real business clients/agents land in the cache.
 
 **URN sources**: `role:<name>`/`user:<preferred_username>`/`group:<name>` for
 `users2service`, `client:<clientId>` for `service2service`/`agentMcpToolCalls` — see the
@@ -400,12 +402,22 @@ unchanged; the enriched sources list is built at the filter/engine call sites
 (`ZteAuthorizationFilter`/`AdminAuthorizationFilter` via `IdentitySources.enrich`;
 `ServiceToServiceAuthorizationFilter`/`YamlMcpPolicyEngine` via `IdentitySources.enrichClient`).
 
+**Relations** (`idp_identity_relations`, synced the same cycle): a User's group
+memberships and realm-role assignments, and a Client's realm-role assignments (via its
+service-account user) are cached too, resolved to `idp_identities`' internal ids with
+zero extra Keycloak calls beyond the sync itself. `GET
+/api/v1/admin/identities/{id}/relations` reads **only** local Postgres — no live
+Keycloak dependency on that request path, ever.
+
 ```bash
 # Manual sync (also runs automatically every 15 min, zte.idp.sync-interval-ms)
 curl -s -X POST -H "Authorization: Bearer $TOKEN" http://localhost:8080/api/v1/admin/identities/sync
 
 # Search the cache (used by the Admin Console's autocomplete / Identities tab)
 curl -s -H "Authorization: Bearer $TOKEN" "http://localhost:8080/api/v1/admin/identities/search?type=CLIENT" | python3 -m json.tool
+
+# Roles/groups related to a given Actor identity (cached only, no Keycloak call)
+curl -s -H "Authorization: Bearer $TOKEN" "http://localhost:8080/api/v1/admin/identities/<id>/relations" | python3 -m json.tool
 ```
 
 **Orphaned rules:** a rule in any category whose `source` doesn't resolve to any cached
@@ -413,6 +425,12 @@ identity logs an SLF4J `WARN` `"ORPHANED RULE: ..."` line (checked at startup an
 policy reload) and is highlighted in the Admin Console's Policies tab — never rejected or
 deleted. A transient false-positive is possible on a cold start, before the first sync has
 run; see [ADR-014](docs/adr/ADR-014-idp-identity-sync.md)/[ADR-015](docs/adr/ADR-015-machine-identities-and-urn-unification.md) Self-Critique.
+
+**Identities tab layout:** split into "Actors" (Users, Clients) and "Access Containers"
+(Groups, Roles), each type its own MUI Accordion (expanded by default if non-empty), with
+a client-side "Quick search" filter by name and an "info" button on User/Client rows
+opening a Drawer with that identity's cached Roles/Groups — see
+[the Identities UI ADR](docs/adr/identities-ui-actors-containers-and-relations-caching.md).
 
 Also visible in the Admin Console's "Identities" tab (Type, Name, Display Name, Last
 Synced) with a "Sync Now" button.
@@ -521,3 +539,4 @@ curl -s -H "Authorization: Bearer $TOKEN" http://localhost:8080/api/v1/service-a
 | 12 | R2DBC-backed `request_logs` audit trail, `X-Request-Id` distributed tracing, `GET /api/v1/admin/audit-logs`, Admin Console "Audit Trail" tab; `RequestAuditFilter` rewritten as a WebFilter (ADR-013) | `e5e1c65` |
 | 13 | IdP identity sync (`idp_identities` cache, `KeycloakIdpAdapter`), URN-based `users2service` sources, orphaned-rule detection, Admin Console "Identities" tab (ADR-014) | `dd8a13f` |
 | 14 | Machine identities (OIDC clients synced as `CLIENT` type), `client:<clientId>` URN unification for `service2service`/`agentMcpToolCalls`, orphaned-rule detection extended to all three categories (ADR-015) | `f5a30b8` |
+| 15 | Identities UI refactor (Actors vs. Access Containers, MUI Accordions, quick search, relations Drawer), `idp_identity_relations` caching, Keycloak system-client filtering | — |

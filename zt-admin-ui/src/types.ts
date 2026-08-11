@@ -50,3 +50,13 @@ export interface IdpIdentityEntry {
   displayName: string | null
   lastSynced: string
 }
+
+// Mirrors gateway-service's com.zte.gateway.admin.AdminIdentityRelationsController.RelatedIdentity
+// (ADR-016) — one Group/Role related to an Actor (User/Client), plus how.
+export interface RelatedIdentity {
+  id: string
+  type: 'USER' | 'GROUP' | 'ROLE' | 'CLIENT'
+  name: string
+  displayName: string | null
+  relationType: 'MEMBER_OF' | 'HAS_ROLE'
+}

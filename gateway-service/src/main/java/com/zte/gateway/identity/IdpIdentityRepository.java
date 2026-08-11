@@ -23,15 +23,24 @@ public interface IdpIdentityRepository extends ReactiveCrudRepository<IdpIdentit
      * ADR-013) would attempt a fresh INSERT every time and violate the
      * {@code UNIQUE (type, external_id)} constraint on the second sync. One
      * round trip, no read-then-write race.
+     *
+     * <p>{@code RETURNING id} (ADR-016) — {@link IdentitySyncService} needs
+     * the (possibly pre-existing, possibly freshly generated) internal PK
+     * back to resolve {@code idp_identity_relations}' subject/target
+     * columns, without a second lookup query per identity. Deliberately
+     * <strong>not</strong> {@code @Modifying}: that annotation switches
+     * Spring Data R2DBC's result handling to "read the affected-row-count",
+     * which is exactly wrong for an {@code INSERT ... RETURNING} whose
+     * result set needs to be mapped to {@code UUID}, not counted.
      */
-    @Modifying
     @Query("""
             INSERT INTO idp_identities (type, external_id, name, display_name, last_synced)
             VALUES (:type, :externalId, :name, :displayName, NOW())
             ON CONFLICT (type, external_id)
             DO UPDATE SET name = EXCLUDED.name, display_name = EXCLUDED.display_name, last_synced = NOW()
+            RETURNING id
             """)
-    Mono<Void> upsert(@Param("type") String type, @Param("externalId") String externalId,
+    Mono<UUID> upsert(@Param("type") String type, @Param("externalId") String externalId,
                        @Param("name") String name, @Param("displayName") String displayName);
 
     /**

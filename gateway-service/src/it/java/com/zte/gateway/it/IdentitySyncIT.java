@@ -7,6 +7,7 @@ import static io.restassured.RestAssured.given;
 import static org.hamcrest.Matchers.equalTo;
 import static org.hamcrest.Matchers.greaterThanOrEqualTo;
 import static org.hamcrest.Matchers.hasItem;
+import static org.hamcrest.Matchers.not;
 
 /**
  * E2E test for ADR-014's IdP identity sync — this is what actually proves
@@ -86,6 +87,70 @@ class IdentitySyncIT extends BaseZteIntegrationTest {
             .body("name", hasItem("agent-a"))
             .body("name", hasItem("agent-b"))
             .body("name", hasItem("zte-gateway"));
+    }
+
+    @Test
+    @DisplayName("Manual sync excludes Keycloak system clients (ADR-016)")
+    void manualSync_excludesSystemClients() {
+        String token = getAdminToken();
+
+        given()
+            .baseUri("http://localhost:" + gatewayPort)
+            .header("Authorization", "Bearer " + token)
+        .when()
+            .post("/api/v1/admin/identities/sync")
+        .then()
+            .statusCode(200);
+
+        given()
+            .baseUri("http://localhost:" + gatewayPort)
+            .header("Authorization", "Bearer " + token)
+            .queryParam("type", "CLIENT")
+        .when()
+            .get("/api/v1/admin/identities/search")
+        .then()
+            .statusCode(200)
+            .body("name", not(hasItem("account")))
+            .body("name", not(hasItem("account-console")))
+            .body("name", not(hasItem("broker")))
+            .body("name", not(hasItem("realm-management")))
+            .body("name", not(hasItem("admin-cli")))
+            .body("name", not(hasItem("security-admin-console")));
+    }
+
+    @Test
+    @DisplayName("Relations endpoint reflects synced role assignments, reading only the local cache (ADR-016)")
+    void manualSync_thenRelationsEndpoint_reflectsRoleAssignment() {
+        String token = getAdminToken();
+
+        given()
+            .baseUri("http://localhost:" + gatewayPort)
+            .header("Authorization", "Bearer " + token)
+        .when()
+            .post("/api/v1/admin/identities/sync")
+        .then()
+            .statusCode(200);
+
+        String adminUserId =
+            given()
+                .baseUri("http://localhost:" + gatewayPort)
+                .header("Authorization", "Bearer " + token)
+                .queryParam("type", "USER")
+                .queryParam("q", ADMIN_USERNAME)
+            .when()
+                .get("/api/v1/admin/identities/search")
+            .then()
+                .statusCode(200)
+                .extract().path("find { it.name == '" + ADMIN_USERNAME + "' }.id");
+
+        given()
+            .baseUri("http://localhost:" + gatewayPort)
+            .header("Authorization", "Bearer " + token)
+        .when()
+            .get("/api/v1/admin/identities/" + adminUserId + "/relations")
+        .then()
+            .statusCode(200)
+            .body("findAll { it.relationType == 'HAS_ROLE' }.name", hasItem("ADMIN"));
     }
 
     @Test

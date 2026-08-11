@@ -12,6 +12,9 @@ import org.springframework.web.reactive.function.client.WebClient;
 import reactor.core.publisher.Flux;
 import reactor.core.publisher.Mono;
 
+import java.util.List;
+import java.util.Set;
+
 /**
  * {@link IdpClient} implementation for Keycloak's Admin REST API.
  *
@@ -84,10 +87,101 @@ public class KeycloakIdpAdapter implements IdpClient {
                 .headers(h -> h.setBearerAuth(token))
                 .retrieve()
                 .bodyToFlux(KeycloakClient.class)
+                .filter(c -> !isSystemClient(c.clientId))
                 .map(c -> IdpIdentity.fetched(IdentityType.CLIENT, c.id, c.clientId, c.displayName())));
     }
 
-    private Flux<IdpIdentity> withToken(java.util.function.Function<String, Flux<IdpIdentity>> call) {
+    @Override
+    public Flux<IdpRelation> fetchRelations() {
+        return withToken(token -> Flux.merge(userRelations(token), clientRelations(token)));
+    }
+
+    private Flux<IdpRelation> userRelations(String token) {
+        return client.get()
+                .uri("/admin/realms/{realm}/users", realm)
+                .headers(h -> h.setBearerAuth(token))
+                .retrieve()
+                .bodyToFlux(KeycloakUser.class)
+                .flatMap(u -> Flux.merge(groupMemberships(token, u.id), userRoleAssignments(token, u.id)));
+    }
+
+    private Flux<IdpRelation> groupMemberships(String token, String userId) {
+        return client.get()
+                .uri("/admin/realms/{realm}/users/{userId}/groups", realm, userId)
+                .headers(h -> h.setBearerAuth(token))
+                .retrieve()
+                .bodyToFlux(KeycloakGroup.class)
+                .map(g -> new IdpRelation(userId, g.id, RelationType.MEMBER_OF));
+    }
+
+    private Flux<IdpRelation> userRoleAssignments(String token, String userId) {
+        return client.get()
+                .uri("/admin/realms/{realm}/users/{userId}/role-mappings/realm", realm, userId)
+                .headers(h -> h.setBearerAuth(token))
+                .retrieve()
+                .bodyToFlux(KeycloakRole.class)
+                .map(r -> new IdpRelation(userId, r.id, RelationType.HAS_ROLE));
+    }
+
+    /**
+     * Machine identities' role assignments live on their <em>service
+     * account user</em>, a separate Keycloak entity from the client itself
+     * — one extra lookup per client to resolve it, then its realm
+     * role-mappings. {@code onErrorResume}: a client without
+     * {@code serviceAccountsEnabled} 404s on the service-account-user
+     * lookup; skipped rather than failing the whole relations fetch for one
+     * client, same resilience posture {@code OrphanedRuleChecker}'s
+     * per-rule handling already established.
+     */
+    private Flux<IdpRelation> clientRelations(String token) {
+        return client.get()
+                .uri("/admin/realms/{realm}/clients", realm)
+                .headers(h -> h.setBearerAuth(token))
+                .retrieve()
+                .bodyToFlux(KeycloakClient.class)
+                .filter(c -> !isSystemClient(c.clientId))
+                .flatMap(c -> serviceAccountRoleAssignments(token, c.id).onErrorResume(ex -> Flux.empty()));
+    }
+
+    private Flux<IdpRelation> serviceAccountRoleAssignments(String token, String clientUuid) {
+        return client.get()
+                .uri("/admin/realms/{realm}/clients/{clientUuid}/service-account-user", realm, clientUuid)
+                .headers(h -> h.setBearerAuth(token))
+                .retrieve()
+                .bodyToMono(KeycloakUser.class)
+                .flatMapMany(serviceAccountUser -> client.get()
+                        .uri("/admin/realms/{realm}/users/{userId}/role-mappings/realm", realm, serviceAccountUser.id)
+                        .headers(h -> h.setBearerAuth(token))
+                        .retrieve()
+                        .bodyToFlux(KeycloakRole.class)
+                        // subject is the CLIENT's own external_id, not the service-account user's —
+                        // idp_identities never caches service-account users as USER rows (Keycloak's
+                        // own /users endpoint excludes them, confirmed live in the ADR-014 session).
+                        .map(r -> new IdpRelation(clientUuid, r.id, RelationType.HAS_ROLE)));
+    }
+
+    /**
+     * Keycloak's every-realm built-in clients (ADR-016) — never a legitimate
+     * policy-rule {@code source} or business actor, so excluded from the
+     * cache entirely rather than synced-then-ignored. Exact-match set (not
+     * just the two prefixes) because the bare {@code "account"}/{@code
+     * "broker"} client ids don't themselves start with {@code "account-"}/
+     * {@code "broker-"} — only their satellite clients
+     * ({@code account-console}) do.
+     */
+    private static final Set<String> SYSTEM_CLIENT_IDS =
+            Set.of("account", "broker", "realm-management", "admin-cli", "security-admin-console");
+    private static final List<String> SYSTEM_CLIENT_PREFIXES = List.of("account-", "broker-");
+
+    // Package-private (not private) so KeycloakIdpAdapterTest can unit-test this
+    // pure predicate directly — this adapter's HTTP calls stay proven only via
+    // IdentitySyncIT against a real Keycloak (ADR-014's established precedent).
+    static boolean isSystemClient(String clientId) {
+        if (SYSTEM_CLIENT_IDS.contains(clientId)) return true;
+        return SYSTEM_CLIENT_PREFIXES.stream().anyMatch(clientId::startsWith);
+    }
+
+    private <T> Flux<T> withToken(java.util.function.Function<String, Flux<T>> call) {
         return fetchToken().flatMapMany(call);
     }
 
