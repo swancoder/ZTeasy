@@ -466,16 +466,15 @@ inject the application's default `WebClient.Builder`, which already carries the
 gateway's ZTE mTLS client certificate whenever `zte.mtls.enabled=true` — the same
 builder every other outbound gateway component uses, confirmed both by inspecting
 Spring Boot's `ClientHttpConnectorAutoConfiguration` and live (see ADR-016's amendment
-section). Pointing `base_url` at either service's mTLS API port (8081/8082) at
-onboarding time now correctly discovers `ACTIVE` — both services expose `/v3/api-docs`
-(`springdoc-openapi-starter-webflux-ui`). Health polling is a separate story: it pings
-`/actuator/health` on that same `base_url`, but `service-a`/`service-b` only expose
-`/actuator/health` on their plain-HTTP **management port**, not the mTLS API port — so
-a service registered at its API port will always show `DOWN` after its first health
-poll cycle, even though discovery and real traffic both work fine. There is no
-per-entry management-port field today (tracked in `docs/SPECS.md` §9.2); registering
-at the management port (`http://localhost:9081` / `:9082`) instead keeps health
-polling green at the cost of discovery no longer exercising the real mTLS path.
+section). Register `base_url=https://localhost:8081` (or `:8082`) so discovery exercises
+the real mTLS API port — both services expose `/v3/api-docs`
+(`springdoc-openapi-starter-webflux-ui`), so this correctly reaches `ACTIVE`. Health
+polling pings a different endpoint (`/actuator/health`), which `service-a`/`service-b`
+only expose on their separate plain-HTTP **management port**, not the mTLS API port —
+set the optional `management_url` field (`http://localhost:9081` / `:9082`) at onboarding
+time so health polling targets the right port instead of `base_url`; leaving it blank
+falls back to `base_url`, which will show `DOWN` for these two services specifically
+(ADR-016 amendment, 2026-08-11).
 
 **Passive telemetry:** `RequestAuditFilter` fires an async, non-blocking update
 (mirrors `RequestLogAuditService`'s fire-and-forget architecture, ADR-013) on every 2xx

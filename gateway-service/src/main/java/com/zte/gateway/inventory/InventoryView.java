@@ -15,6 +15,7 @@ public record InventoryView(
         String name,
         TargetType targetType,
         String baseUrl,
+        String managementUrl,
         InventoryStatus status,
         Instant createdAt,
         Integer lastPingMs,

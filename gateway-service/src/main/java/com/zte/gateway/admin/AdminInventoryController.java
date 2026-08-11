@@ -47,7 +47,7 @@ class AdminInventoryController {
 
     @PostMapping
     public Mono<ResponseEntity<Object>> create(@RequestBody InventoryRequest request) {
-        return inventoryService.create(request.name(), request.targetType(), request.baseUrl())
+        return inventoryService.create(request.name(), request.targetType(), request.baseUrl(), request.managementUrl())
                 .<ResponseEntity<Object>>map(entry -> ResponseEntity.status(HttpStatus.CREATED).body(entry))
                 .onErrorResume(DuplicateServiceNameException.class, ex -> Mono.just(
                         ResponseEntity.status(HttpStatus.CONFLICT).body(Map.of("error", ex.getMessage()))));
@@ -55,7 +55,7 @@ class AdminInventoryController {
 
     @PutMapping("/{id}")
     public Mono<InventoryEntry> update(@PathVariable UUID id, @RequestBody InventoryRequest request) {
-        return inventoryService.update(id, request.name(), request.targetType(), request.baseUrl());
+        return inventoryService.update(id, request.name(), request.targetType(), request.baseUrl(), request.managementUrl());
     }
 
     @DeleteMapping("/{id}")
@@ -63,7 +63,13 @@ class AdminInventoryController {
         return inventoryService.delete(id).thenReturn(ResponseEntity.noContent().build());
     }
 
-    /** Onboarding/update form body — {@code name}, {@code target_type} (dropdown), {@code base_url}. */
-    record InventoryRequest(String name, TargetType targetType, String baseUrl) {
+    /**
+     * Onboarding/update form body — {@code name}, {@code target_type}
+     * (dropdown), {@code base_url}. {@code managementUrl} (ADR-016
+     * amendment) is optional — {@code null}/omitted means "health polling
+     * uses {@code base_url}, same as before"; set it only when a target's
+     * {@code /actuator/health} lives at a different host:port.
+     */
+    record InventoryRequest(String name, TargetType targetType, String baseUrl, String managementUrl) {
     }
 }

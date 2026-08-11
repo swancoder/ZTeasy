@@ -45,6 +45,7 @@ export default function Inventory({ accessToken }: Props) {
   const [formName, setFormName] = useState('')
   const [formTargetType, setFormTargetType] = useState<'REST' | 'MCP'>('REST')
   const [formBaseUrl, setFormBaseUrl] = useState('')
+  const [formManagementUrl, setFormManagementUrl] = useState('')
 
   const fetchServices = useCallback(async () => {
     setLoading(true)
@@ -72,6 +73,7 @@ export default function Inventory({ accessToken }: Props) {
     setFormName('')
     setFormTargetType('REST')
     setFormBaseUrl('')
+    setFormManagementUrl('')
   }
 
   const handleOnboard = async () => {
@@ -80,7 +82,12 @@ export default function Inventory({ accessToken }: Props) {
       const res = await fetch('/api/v1/admin/inventory', {
         method: 'POST',
         headers: { Authorization: `Bearer ${accessToken}`, 'Content-Type': 'application/json' },
-        body: JSON.stringify({ name: formName, targetType: formTargetType, baseUrl: formBaseUrl }),
+        body: JSON.stringify({
+          name: formName,
+          targetType: formTargetType,
+          baseUrl: formBaseUrl,
+          managementUrl: formManagementUrl || null,
+        }),
       })
       if (res.ok) {
         setSnackbar({ message: `${formName} onboarded — discovery running in the background`, severity: 'success' })
@@ -152,6 +159,7 @@ export default function Inventory({ accessToken }: Props) {
                 <TableCell>Name</TableCell>
                 <TableCell>Type</TableCell>
                 <TableCell>Base URL</TableCell>
+                <TableCell>Management URL</TableCell>
                 <TableCell>Status</TableCell>
                 <TableCell>Ping (ms)</TableCell>
                 <TableCell>Last Successful Call</TableCell>
@@ -166,6 +174,9 @@ export default function Inventory({ accessToken }: Props) {
                     <Chip label={service.targetType} size="small" />
                   </TableCell>
                   <TableCell sx={{ fontFamily: 'monospace', fontSize: '0.8rem' }}>{service.baseUrl}</TableCell>
+                  <TableCell sx={{ fontFamily: 'monospace', fontSize: '0.8rem' }}>
+                    {service.managementUrl ?? '—'}
+                  </TableCell>
                   <TableCell>
                     <Chip label={service.status} color={STATUS_COLOR[service.status]} size="small" />
                   </TableCell>
@@ -214,6 +225,14 @@ export default function Inventory({ accessToken }: Props) {
               fullWidth
               value={formBaseUrl}
               onChange={(e) => setFormBaseUrl(e.target.value)}
+            />
+            <TextField
+              label="Management URL (optional)"
+              placeholder="e.g. http://localhost:9081 — only if /actuator/health lives elsewhere"
+              helperText="Leave blank if the service's health endpoint is at the Base URL above"
+              fullWidth
+              value={formManagementUrl}
+              onChange={(e) => setFormManagementUrl(e.target.value)}
             />
           </Stack>
         </DialogContent>

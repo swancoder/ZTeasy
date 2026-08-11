@@ -47,9 +47,11 @@ public interface InventoryRepository extends ReactiveCrudRepository<InventoryEnt
     @Modifying
     @Query("""
             UPDATE inventory_services
-            SET name = :name, target_type = :targetType, base_url = :baseUrl, status = :status
+            SET name = :name, target_type = :targetType, base_url = :baseUrl,
+                management_url = :managementUrl, status = :status
             WHERE id = :id
             """)
     Mono<Void> updateFields(@Param("id") UUID id, @Param("name") String name, @Param("targetType") String targetType,
-                             @Param("baseUrl") String baseUrl, @Param("status") String status);
+                             @Param("baseUrl") String baseUrl, @Param("managementUrl") String managementUrl,
+                             @Param("status") String status);
 }

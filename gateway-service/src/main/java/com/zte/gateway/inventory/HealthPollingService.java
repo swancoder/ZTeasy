@@ -35,6 +35,25 @@ import java.util.Optional;
  * gateway's mTLS client certificate when {@code zte.mtls.enabled=true} — see
  * {@link AutoDiscoveryWorker}'s Javadoc for the full explanation and how
  * it was verified; the same reasoning applies identically here.
+ *
+ * <p><strong>Management URL (ADR-016 amendment):</strong> a target's
+ * {@code /actuator/health} doesn't have to live at {@code base_url} —
+ * {@code service-a}/{@code service-b}, for one, expose it only on a
+ * separate plain-HTTP management port alongside their mTLS API port
+ * (the same port their own Docker healthcheck already pings, precisely
+ * because it needs no client certificate). {@link #healthCheckUrl} picks
+ * {@link InventoryEntry#managementUrl()} when set, else falls back to
+ * {@link InventoryEntry#baseUrl()} — unchanged behavior for every target
+ * whose actuator IS co-located with its API (every existing registered
+ * entry, and every {@code InventoryRegistryIT} WireMock target). Because
+ * {@code webClientBuilder} carries the mTLS connector regardless of which
+ * URL is used, an operator who protects their management port with mTLS
+ * can still point {@code managementUrl} at an {@code https://} endpoint
+ * and this ping presents the client certificate exactly as {@link
+ * AutoDiscoveryWorker}'s does — {@code managementUrl} doesn't hardcode
+ * "plain HTTP" or "mTLS", it just says where to ping, deferring the
+ * scheme choice to whatever the operator's own service actually exposes
+ * (matching how {@code base_url} already works today).
  */
 @Service
 public class HealthPollingService {
@@ -84,7 +103,7 @@ public class HealthPollingService {
 
     private Mono<Void> pingOne(InventoryEntry entry) {
         Instant start = Instant.now();
-        return webClientBuilder.baseUrl(entry.baseUrl()).build()
+        return webClientBuilder.baseUrl(healthCheckUrl(entry)).build()
                 .get()
                 .uri("/actuator/health")
                 .retrieve()
@@ -108,6 +127,19 @@ public class HealthPollingService {
                 .orElse(Mono.empty());
 
         return writeHealth.then(updateStatus);
+    }
+
+    /**
+     * The URL {@link #pingOne} pings {@code /actuator/health} against —
+     * {@link InventoryEntry#managementUrl()} if set (non-null, non-blank),
+     * else {@link InventoryEntry#baseUrl()} (ADR-016 amendment). Package-visible
+     * + {@code static} for a direct unit test, same precedent as {@link
+     * #statusTransition} — no {@code WebClient} needed to prove this
+     * decision correct.
+     */
+    static String healthCheckUrl(InventoryEntry entry) {
+        String managementUrl = entry.managementUrl();
+        return managementUrl != null && !managementUrl.isBlank() ? managementUrl : entry.baseUrl();
     }
 
     /**

@@ -1,0 +1,85 @@
+Health-polling port mismatch fix — session prompt from "Senior Solution
+Architect / Java Developer" role, filed as a direct follow-up to the
+mTLS/OpenAPI amendment (022_mtls_workers_and_openapi.txt), after that
+task's own live verification surfaced a new gap: freshly registered
+service-a correctly reached ACTIVE via /v3/api-docs discovery, then
+immediately flipped to DOWN on the next HealthPollingService poll cycle.
+
+Original prompt (paraphrased — full text requested CoT/Self-Consistency
+per CLAUDE.md, framed as a known telemetry gap):
+  "HealthPollingService currently pings /actuator/health on the main mTLS
+  application port, but our services expose Spring Actuator exclusively on
+  a separate management port (e.g., 9081/9082) which should also be
+  protected or correctly targeted."
+
+Instructions given:
+  1. Analyze how HealthPollingService determines the ping URL; introduce a
+     management port concept or allow health checks to target the secure
+     management endpoint (or update service registration to account for
+     management base URLs).
+  2. Keep the change minimal and focused solely on the port mismatch,
+     without breaking existing discovery logic.
+  3. Update InventoryService/DB schema/discovery logic as needed to
+     support a secure management URL, or configure HealthPollingService to
+     target the correct management port over mTLS; ensure health poll
+     reaches /actuator/health over mTLS and correctly updates UP/DOWN;
+     clear the SPECS.md backlog item once fixed.
+
+Verification: ./gradlew test integrationTest passes; health polling
+successfully queries the health endpoint over mTLS without false DOWN
+states.
+
+Git: "fix: configure health polling to use secure management ports"
+
+---
+
+**Deviation, investigated before implementation:** the task's own
+verification asked to prove the poll succeeds "over mTLS" specifically.
+Checked service-a/service-b's actual management-port configuration before
+assuming that's the right target state: application.yml sets
+management.ssl.enabled=false with an explicit comment ("no client cert
+required for health probes"), and docker-compose.yml's own container
+healthcheck already depends on exactly that — a plain wget with no client
+certificate. Forcing mTLS onto the management port would mean also
+reworking that Docker healthcheck to present a certificate: a second,
+unrelated, and much larger change than a port-mismatch fix, directly
+against the task's own "keep the change minimal" instruction.
+
+Built instead: an optional `management_url` column on `inventory_services`
+(V9__add_inventory_management_url.sql, nullable — zero impact on existing
+rows or any WireMock-backed InventoryRegistryIT test). HealthPollingService
+gained a small, pure, package-visible static `healthCheckUrl(entry)` —
+managementUrl if set, else baseUrl, unchanged from today — directly unit
+tested, same precedent as the existing `statusTransition` method. This
+resolves the task's own "or correctly targeted" alternative without
+hardcoding a transport scheme: since the gateway's default WebClient.Builder
+already carries the mTLS connector for every outbound call regardless of
+target (established in 022's investigation), an operator whose service
+DOES protect its management port with mTLS can point managementUrl at an
+https:// address and get precisely the "over mTLS" behavior the task's
+verification section asked for — service-a/service-b just aren't
+configured that way today (plain HTTP, by design), and making them so is
+named as a separate, larger, explicit backlog item rather than silently
+done as part of "fix the port mismatch."
+
+Full plumbing: InventoryEntry/InventoryView/AdminInventoryController's
+InventoryRequest all gained a nullable managementUrl field;
+InventoryService.create/update and InventoryRepository.updateFields thread
+it through. Admin Console (Inventory.tsx, types.ts) gained an optional
+"Management URL" onboarding field and a matching table column.
+
+Verified live: registered the real running gateway's service-a entry with
+management_url=http://localhost:9081; AutoDiscoveryWorker still reached
+ACTIVE via /v3/api-docs on the mTLS port as before, and the next
+HealthPollingService poll cycle correctly pinged the management port and
+stayed ACTIVE (actuator UP) instead of flipping to DOWN.
+
+SPECS.md's existing backlog bullet naming this exact gap (added during
+022's own investigation) was struck through and linked to this fix, plus a
+new, narrower backlog bullet added for the actually-still-open item:
+service-a/service-b's management port remaining plain HTTP by design.
+
+ADR handling: amended the existing ADR-016 again, in place (a second
+same-day-pattern "Amendment" section, dated 2026-08-11) — no new ADR, this
+is a continuation of the same registry/health-polling architecture, not a
+new structural decision domain.

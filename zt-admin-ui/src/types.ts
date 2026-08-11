@@ -68,6 +68,8 @@ export interface InventoryEntry {
   name: string
   targetType: 'REST' | 'MCP'
   baseUrl: string
+  // Optional — health polling pings this instead of baseUrl when set (ADR-016 amendment).
+  managementUrl: string | null
   status: 'ACTIVE' | 'WARNING' | 'DOWN' | 'PENDING'
   createdAt: string
   lastPingMs: number | null

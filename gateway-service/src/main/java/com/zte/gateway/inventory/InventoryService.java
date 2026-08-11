@@ -51,11 +51,11 @@ public class InventoryService {
      * is also DB-{@code UNIQUE}, but checking first gives a clean 409 instead
      * of a raw constraint-violation error).
      */
-    public Mono<InventoryEntry> create(String name, TargetType targetType, String baseUrl) {
+    public Mono<InventoryEntry> create(String name, TargetType targetType, String baseUrl, String managementUrl) {
         return repository.existsByName(name)
                 .flatMap(exists -> exists
                         ? Mono.<InventoryEntry>error(new DuplicateServiceNameException(name))
-                        : repository.save(InventoryEntry.pending(name, targetType, baseUrl)))
+                        : repository.save(InventoryEntry.pending(name, targetType, baseUrl, managementUrl)))
                 .doOnNext(this::triggerDiscoveryAsync);
     }
 
@@ -66,8 +66,8 @@ public class InventoryService {
      * chosen because an unconditional reset can never leave a stale
      * {@code ACTIVE} status pointing at a since-changed {@code base_url}.
      */
-    public Mono<InventoryEntry> update(UUID id, String name, TargetType targetType, String baseUrl) {
-        return repository.updateFields(id, name, targetType.name(), baseUrl, InventoryStatus.PENDING.name())
+    public Mono<InventoryEntry> update(UUID id, String name, TargetType targetType, String baseUrl, String managementUrl) {
+        return repository.updateFields(id, name, targetType.name(), baseUrl, managementUrl, InventoryStatus.PENDING.name())
                 .then(repository.findById(id))
                 .doOnNext(this::triggerDiscoveryAsync);
     }
@@ -87,7 +87,8 @@ public class InventoryService {
 
     private InventoryView toView(InventoryEntry entry, HealthMetric health) {
         return new InventoryView(
-                entry.id(), entry.name(), entry.targetType(), entry.baseUrl(), entry.status(), entry.createdAt(),
+                entry.id(), entry.name(), entry.targetType(), entry.baseUrl(), entry.managementUrl(),
+                entry.status(), entry.createdAt(),
                 health != null ? health.lastPingMs() : null,
                 health != null ? health.actuatorStatus() : null,
                 health != null ? health.lastSuccessfulCall() : null);

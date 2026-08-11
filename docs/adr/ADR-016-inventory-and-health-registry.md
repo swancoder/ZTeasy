@@ -245,6 +245,64 @@ check, not a new automated test.
 
 ---
 
+## Amendment (2026-08-11): `management_url` for health polling on a separate port
+
+Filed as a follow-up after the mTLS/OpenAPI amendment above was verified
+live: with `service-a` correctly reaching `ACTIVE` via `/v3/api-docs`,
+`HealthPollingService`'s very next poll cycle flipped it straight to
+`DOWN`. Root cause, found live before writing any code: `pingOne` pings
+`{base_url}/actuator/health`, but `service-a`/`service-b` only expose
+`/actuator/health` on a **separate plain-HTTP management port** (9081/9082)
+— confirmed by `curl`ing `/actuator/health` on the mTLS API port (8081)
+with a valid client certificate and getting a `404` (the endpoint simply
+isn't registered there), while the same request against the management
+port returns `200`. This is a pre-existing gap dating to this ADR's
+original Stage 16 implementation, not a regression from the mTLS/OpenAPI
+amendment — the two happened to surface together only because that
+amendment was the first time this repo's own `service-a` was registered
+and watched through a full discovery + health-poll cycle.
+
+**The task that filed this asked for two alternative fixes** ("target the
+secure management endpoint... or update service registration to account
+for management base URLs") **and separately asked verification to prove
+the poll succeeds "over mTLS."** Investigated before picking one:
+`service-a`/`service-b`'s management port is plain HTTP **by deliberate,
+pre-existing design** — `application.yml` comments it explicitly ("no
+client cert required for health probes"), and `docker-compose.yml`'s own
+container `healthcheck` already depends on exactly that (`wget` with no
+client certificate). Forcing that port to require mTLS would mean also
+reworking the Docker healthcheck to present a client certificate — a
+second, unrelated, and much larger change than "fix health polling,"
+directly conflicting with this task's own "keep the change minimal"
+instruction.
+
+**What was built instead:** an optional `management_url` column
+(`inventory_services`, `V9__add_inventory_management_url.sql`, nullable —
+existing rows and every `InventoryRegistryIT` WireMock-backed test are
+unaffected). `HealthPollingService.healthCheckUrl(entry)` — a small, pure,
+package-visible static method with a direct unit test, same precedent
+`statusTransition` established — pings `managementUrl` when set, else
+falls back to `baseUrl` exactly as before. This resolves the task's
+"correctly targeted" branch without hardcoding a scheme: `webClientBuilder`
+carries the gateway's mTLS connector regardless of which URL is requested,
+so an operator whose service *does* protect its management port with mTLS
+can still set `managementUrl` to an `https://` address and get exactly the
+"over mTLS" behavior the task's verification section asked for — `service-a`/
+`service-b` just don't happen to be configured that way today, and making
+them so is out of scope here (would mean adding `management.ssl.enabled=true`
++ `client-auth: need` to both services, and giving the Docker healthcheck
+a client certificate — a real, larger change, tracked as a `docs/SPECS.md`
+§9.2 backlog item rather than done as part of "fix the port mismatch").
+
+**Verified live:** registered `service-a` at `base_url=https://localhost:8081`,
+`management_url=http://localhost:9081` via the real running gateway's
+`/api/v1/admin/inventory`; `AutoDiscoveryWorker` reached `ACTIVE` as before,
+and the next `HealthPollingService` poll cycle correctly pinged the
+management port and kept it `ACTIVE` (actuator `UP`) instead of flipping to
+`DOWN`.
+
+---
+
 ## Alternatives Considered
 
 ### On-demand schema re-fetch per Admin Console page load, instead of caching `status` (rejected)

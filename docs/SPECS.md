@@ -554,7 +554,10 @@ Console, auto-discovered, and health-monitored:
   never touched by the ping job (a successful raw health ping doesn't
   confirm the service's actual API/tool contract, so it must not silently
   clear a discovery failure).
-- **`InventoryEntry`** — R2DBC record (`@Table("inventory_services")`).
+- **`InventoryEntry`** — R2DBC record (`@Table("inventory_services")`);
+  `managementUrl` (nullable, `management_url` column) is the optional
+  target `HealthPollingService` pings instead of `baseUrl` (ADR-016
+  amendment, 2026-08-11 — see below).
   **`HealthMetric`** — R2DBC record (`@Table("health_metrics")`), one row
   per service (`UNIQUE (service_id)`, not a history log), upserted in
   place. **`InventoryView`** — `InventoryEntry` left-joined with its
@@ -641,6 +644,28 @@ on the mTLS port (8081) — but `service-a`/`service-b` only expose
 §5.3), so this ping always 404s for both services regardless of the
 OpenAPI fix. Pre-existing since Stage 16, not a regression from this
 amendment — tracked in §9 roadmap rather than fixed here.
+
+**ADR-016 amendment, 2026-08-11 — `management_url`.** Fixed the gap named
+above: `inventory_services` gained an optional `management_url` column
+(`V9__add_inventory_management_url.sql`, nullable — existing rows and
+every `InventoryRegistryIT` WireMock target unaffected).
+`HealthPollingService.healthCheckUrl(entry)` — package-visible, `static`,
+directly unit-tested (same precedent as `statusTransition`) — pings
+`managementUrl` when set, else falls back to `baseUrl` exactly as before.
+Investigated, not assumed, before picking this over forcing mTLS onto the
+management port itself: `service-a`/`service-b`'s management port is
+plain HTTP by deliberate pre-existing design (`application.yml`'s own
+comment; `docker-compose.yml`'s container `healthcheck` already depends on
+it being unauthenticated). `managementUrl` doesn't hardcode a scheme — the
+gateway's default `WebClient.Builder` carries the mTLS connector
+regardless of target, so an operator whose own service protects its
+management port with mTLS can still set `managementUrl` to an `https://`
+address and get that. `InventoryEntry`/`InventoryView`/`AdminInventoryController.InventoryRequest`
+all gained the matching `managementUrl` field (nullable throughout); the
+Admin Console's onboarding dialog gained an optional "Management URL"
+field and the registry table an extra column. Verified live: `service-a`
+registered with `management_url=http://localhost:9081` stayed `ACTIVE`
+through a full health-poll cycle instead of flipping to `DOWN`.
 
 ### 5.3 `service-a` / `service-b`
 
@@ -994,14 +1019,20 @@ own, all are new capabilities.
       any `GatewayRouteConfig` route it's meant to represent, so passive
       `last_successful_call` telemetry's exact-name-match requirement isn't
       a silent trap (ADR-016 Self-Critique).
-- [ ] `HealthPollingService.pingOne` pings `{base_url}/actuator/health` on
-      the target's main mTLS port, but `service-a`/`service-b` (and any
-      future `REST` target following the same pattern) only expose
-      `/actuator/health` on a separate plain management port — every such
-      entry always 404s and sits at `DOWN` regardless of real health;
-      needs either a per-entry management-port field or a documented
-      convention that management endpoints must also be reachable on the
-      main port (found live during the ADR-016 mTLS/OpenAPI amendment).
+- [x] ~~`HealthPollingService.pingOne` pings `{base_url}/actuator/health`
+      on the target's main mTLS port, but `service-a`/`service-b` only
+      expose `/actuator/health` on a separate plain management port~~ —
+      fixed via the optional `inventory_services.management_url` column
+      (ADR-016 amendment, 2026-08-11, §5.2d) — `HealthPollingService` pings
+      it instead of `base_url` when set.
+- [ ] `service-a`/`service-b`'s management port (9081/9082) is plain HTTP
+      by deliberate design (their own Docker `healthcheck` depends on it
+      needing no client cert) — genuinely enforcing mTLS end-to-end would
+      mean adding `management.ssl.enabled=true` + `client-auth: need` to
+      both services *and* reworking their Docker healthchecks to present a
+      client certificate; `management_url` (above) supports pointing at an
+      `https://` management endpoint today, but neither example service is
+      configured that way (ADR-016 amendment, 2026-08-11).
 - [ ] Reduce `fetchRelations()`'s per-user/per-client HTTP call count if
       sync duration becomes a problem at larger realm scale — no known
       Keycloak Admin API batch endpoint for this today (Stage 15 ADR
