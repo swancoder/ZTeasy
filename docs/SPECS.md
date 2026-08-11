@@ -48,7 +48,7 @@ auditable — the opposite of a mesh's "hide it in the sidecar" approach. See
 | 11 | Full YAML migration (retired `access_policies`/`PolicyService`) + React Admin Console (`zt-admin-ui`), ADMIN-JWT-gated admin API, `AdminAuthorizationFilter` | ✅ Complete | `00edf91` | [012](adr/ADR-012-full-yaml-migration-and-admin-console.md) |
 | 12 | R2DBC-backed `request_logs` audit trail, `X-Request-Id` distributed tracing, `GET /api/v1/admin/audit-logs`, Admin Console "Audit Trail" tab; `RequestAuditFilter` rewritten as a `WebFilter` | ✅ Complete | `e5e1c65` | [013](adr/ADR-013-postgres-audit-logging.md) |
 | 13 | IdP identity sync (`idp_identities` cache, `KeycloakIdpAdapter`), URN-based `users2service` sources (`user:`/`group:`/`role:`), orphaned-rule detection, Admin Console "Identities" tab | ✅ Complete | `dd8a13f` | [014](adr/ADR-014-idp-identity-sync.md) |
-| 14 | Machine identities — OIDC clients synced as `CLIENT` type, `client:<clientId>` URN unification for `service2service`/`agentMcpToolCalls`, orphaned-rule detection extended to all three categories | ✅ Complete | — | [015](adr/ADR-015-machine-identities-and-urn-unification.md) |
+| 14 | Machine identities — OIDC clients synced as `CLIENT` type, `client:<clientId>` URN unification for `service2service`/`agentMcpToolCalls`, orphaned-rule detection extended to all three categories | ✅ Complete | `f5a30b8` | [015](adr/ADR-015-machine-identities-and-urn-unification.md) |
 | 15+ | Backlog (rate limiting, ABAC, MCP-audit unification…) | ⬜ Planned | — | see §9.2 |
 
 **Test status:** all unit tests green (`./gradlew test`), including the
@@ -865,7 +865,7 @@ categories — neither is a closed backlog item, both are new capabilities.
 
 ---
 
-*This document reflects repo state at commit (pending — Stage 14, Machine Identities and
+*This document reflects repo state at commit `f5a30b8` (Stage 14, Machine Identities and
 URN Unification). Keep it in sync the same way as README/CLAUDE.md — per CLAUDE.md's
 mandatory workflow, update it alongside any task that completes a stage or changes the
 roadmap.*
