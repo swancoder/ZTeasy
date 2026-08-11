@@ -50,7 +50,7 @@ auditable — the opposite of a mesh's "hide it in the sidecar" approach. See
 | 13 | IdP identity sync (`idp_identities` cache, `KeycloakIdpAdapter`), URN-based `users2service` sources (`user:`/`group:`/`role:`), orphaned-rule detection, Admin Console "Identities" tab | ✅ Complete | `dd8a13f` | [014](adr/ADR-014-idp-identity-sync.md) |
 | 14 | Machine identities — OIDC clients synced as `CLIENT` type, `client:<clientId>` URN unification for `service2service`/`agentMcpToolCalls`, orphaned-rule detection extended to all three categories | ✅ Complete | `f5a30b8` | [015](adr/ADR-015-machine-identities-and-urn-unification.md) |
 | 15 | Identities UI refactor (Actors vs. Access Containers accordions, quick search, relations Drawer), `idp_identity_relations` caching, Keycloak system-client filtering | ✅ Complete | `1198921` | [Identities UI + Relations](adr/identities-ui-actors-containers-and-relations-caching.md) |
-| 16 | APIM inventory registry (`inventory_services`/`health_metrics`), auto-discovery on onboarding, periodic health polling, passive `last_successful_call` telemetry, Admin Console "Registry" tab | ✅ Complete | — | [016](adr/ADR-016-inventory-and-health-registry.md) |
+| 16 | APIM inventory registry (`inventory_services`/`health_metrics`), auto-discovery on onboarding, periodic health polling, passive `last_successful_call` telemetry, Admin Console "Registry" tab | ✅ Complete | `c3fd7de` | [016](adr/ADR-016-inventory-and-health-registry.md) |
 | 17+ | Backlog (rate limiting, ABAC, MCP-audit unification…) | ⬜ Planned | — | see §9.2 |
 
 **Test status:** all unit tests green (`./gradlew test`), including the
@@ -1113,6 +1113,6 @@ own, all are new capabilities.
 
 ---
 
-*This document reflects repo state at commit (pending — Stage 16, APIM Inventory
+*This document reflects repo state at commit `c3fd7de` (Stage 16, APIM Inventory
 Registry). Keep it in sync the same way as README/CLAUDE.md — per CLAUDE.md's mandatory
 workflow, update it alongside any task that completes a stage or changes the roadmap.*

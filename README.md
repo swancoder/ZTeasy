@@ -594,4 +594,4 @@ curl -s -H "Authorization: Bearer $TOKEN" http://localhost:8080/api/v1/service-a
 | 13 | IdP identity sync (`idp_identities` cache, `KeycloakIdpAdapter`), URN-based `users2service` sources, orphaned-rule detection, Admin Console "Identities" tab (ADR-014) | `dd8a13f` |
 | 14 | Machine identities (OIDC clients synced as `CLIENT` type), `client:<clientId>` URN unification for `service2service`/`agentMcpToolCalls`, orphaned-rule detection extended to all three categories (ADR-015) | `f5a30b8` |
 | 15 | Identities UI refactor (Actors vs. Access Containers, MUI Accordions, quick search, relations Drawer), `idp_identity_relations` caching, Keycloak system-client filtering | `1198921` |
-| 16 | APIM inventory registry (`inventory_services`/`health_metrics`), auto-discovery on onboarding, periodic health polling, passive `last_successful_call` telemetry, Admin Console "Registry" tab | — |
+| 16 | APIM inventory registry (`inventory_services`/`health_metrics`), auto-discovery on onboarding, periodic health polling, passive `last_successful_call` telemetry, Admin Console "Registry" tab | `c3fd7de` |
