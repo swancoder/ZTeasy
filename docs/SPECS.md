@@ -1178,7 +1178,7 @@ own, all are new capabilities.
 
 ---
 
-*This document reflects repo state at commit `dde42b1` (Stage 16, APIM Inventory
-Registry, plus same-day mTLS/OpenAPI amendment). Keep it in sync the same way as
-README/CLAUDE.md — per CLAUDE.md's mandatory workflow, update it alongside any task
-that completes a stage or changes the roadmap.*
+*This document reflects repo state at commit `98e0944` (Stage 16, APIM Inventory
+Registry, plus the mTLS/OpenAPI and management-URL health-polling amendments). Keep
+it in sync the same way as README/CLAUDE.md — per CLAUDE.md's mandatory workflow,
+update it alongside any task that completes a stage or changes the roadmap.*
