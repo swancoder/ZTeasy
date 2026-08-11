@@ -47,7 +47,7 @@ auditable — the opposite of a mesh's "hide it in the sidecar" approach. See
 | 10 | YAML Policy Engine (users2service / service2service / agent@mcp), no-downtime reload, unified audit, real MCP enforcement | ✅ Complete | `d76c709` | [011](adr/ADR-011-yaml-policy-engine.md) |
 | 11 | Full YAML migration (retired `access_policies`/`PolicyService`) + React Admin Console (`zt-admin-ui`), ADMIN-JWT-gated admin API, `AdminAuthorizationFilter` | ✅ Complete | `00edf91` | [012](adr/ADR-012-full-yaml-migration-and-admin-console.md) |
 | 12 | R2DBC-backed `request_logs` audit trail, `X-Request-Id` distributed tracing, `GET /api/v1/admin/audit-logs`, Admin Console "Audit Trail" tab; `RequestAuditFilter` rewritten as a `WebFilter` | ✅ Complete | `e5e1c65` | [013](adr/ADR-013-postgres-audit-logging.md) |
-| 13 | IdP identity sync (`idp_identities` cache, `KeycloakIdpAdapter`), URN-based `users2service` sources (`user:`/`group:`/`role:`), orphaned-rule detection, Admin Console "Identities" tab | ✅ Complete | — | [014](adr/ADR-014-idp-identity-sync.md) |
+| 13 | IdP identity sync (`idp_identities` cache, `KeycloakIdpAdapter`), URN-based `users2service` sources (`user:`/`group:`/`role:`), orphaned-rule detection, Admin Console "Identities" tab | ✅ Complete | `dd8a13f` | [014](adr/ADR-014-idp-identity-sync.md) |
 | 14+ | Backlog (rate limiting, ABAC, MCP-audit unification…) | ⬜ Planned | — | see §9.2 |
 
 **Test status:** all unit tests green (`./gradlew test`), including the
@@ -818,7 +818,7 @@ listed below too; Stage 13 (ADR-014) adds IdP identity sync and URN-based
 
 ---
 
-*This document reflects repo state at commit `e5e1c65` (Stage 12, R2DBC Audit Logging +
-Distributed Tracing). Keep it in sync the same way as README/CLAUDE.md — per CLAUDE.md's
+*This document reflects repo state at commit `dd8a13f` (Stage 13, IdP Identity Sync +
+URN-Based Policy Matching). Keep it in sync the same way as README/CLAUDE.md — per CLAUDE.md's
 mandatory workflow, update it alongside any task that completes a stage or changes the
 roadmap.*

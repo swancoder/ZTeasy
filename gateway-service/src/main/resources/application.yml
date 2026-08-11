@@ -98,7 +98,7 @@ zte:
     default-effect: ${ZTE_POLICY_DEFAULT_EFFECT:DENY}
     user-client-id: ${ZTE_POLICY_USER_CLIENT_ID:zte-gateway}
 
-  # ── IdP identity sync (Stage 11 / ADR-014) ──
+  # ── IdP identity sync (Stage 13 / ADR-014) ──
   idp:
     provider: ${ZTE_IDP_PROVIDER:keycloak}
     sync-interval-ms: ${ZTE_IDP_SYNC_INTERVAL_MS:900000}   # 15 min
