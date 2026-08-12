@@ -667,6 +667,35 @@ field and the registry table an extra column. Verified live: `service-a`
 registered with `management_url=http://localhost:9081` stayed `ACTIVE`
 through a full health-poll cycle instead of flipping to `DOWN`.
 
+**ADR-016 amendment, 2026-08-12 — captured discovery payloads (API
+Catalog).** `AutoDiscoveryWorker` previously discarded the `/v3/api-docs`/
+`tools/list` response body after checking reachability; it's now captured
+into a new `inventory_services.discovered_schema JSONB` column
+(`V10__add_discovered_schema.sql`) and served on demand via
+`GET /api/v1/admin/inventory/{id}/schema`, rendered in the Admin Console
+(`SchemaDrawer.tsx`) as Swagger UI (`REST`) or a plain tool list (`MCP`).
+R2DBC↔`jsonb` mapping was investigated by decompiling
+`r2dbc-postgresql:1.0.7.RELEASE` (confirmed a built-in `JsonStringCodec`
+handles `jsonb -> String` reads with no custom converter); writes use an
+explicit `CAST(:schema AS jsonb)` in a native `@Query` since the driver's
+default `String` bind is `VARCHAR`, which Postgres won't implicitly
+coerce. `discovered_schema` deliberately never touches `InventoryEntry`/
+`InventoryView`/`findAll()` — two new, independent `InventoryRepository`
+queries handle it instead — so the registry list view's payload size is
+unaffected by construction, not by convention. Switching the probes from
+`.toBodilessEntity()` to `.retrieve().bodyToMono(String.class)` (needed to
+read the body) introduced a real regression, caught before merging: an
+empty response body now completes the `Mono` with **no element**
+(`toBodilessEntity()` always emitted exactly one), which would have broken
+the existing "empty-body 2xx is still `ACTIVE`" case — fixed with
+`.defaultIfEmpty("")`. A `ObjectMapper#readTree` validity check guards the
+`jsonb` cast against a non-JSON response body (Postgres would otherwise
+reject the write and that failure would ride along with the chained
+`status` update). Adding `swagger-ui-react` roughly tripled the Admin
+Console's built bundle (589 KB → 1.88 MB raw, 538 KB gzipped) — a known,
+accepted cost of the specified library, not mitigated (no code-splitting)
+since that wasn't asked for.
+
 ### 5.3 `service-a` / `service-b`
 
 - **`service-a/HelloController`** — `GET /api/v1/service-a/hello`; calls
@@ -844,8 +873,9 @@ upserts — no extra lookup query per relation), read by `GET
 /api/v1/admin/identities/{id}/relations` (§7) — the local-cache-only Actor
 detail view.
 
-`inventory_services` (PostgreSQL, Flyway
-`V8__create_inventory_and_health.sql`, ADR-016) — the APIM registry:
+`inventory_services` (PostgreSQL, Flyway `V8__create_inventory_and_health.sql`,
+`V9__add_inventory_management_url.sql`, `V10__add_discovered_schema.sql`,
+ADR-016 + amendments) — the APIM registry:
 
 | Column | Type | Notes |
 |---|---|---|
@@ -853,7 +883,9 @@ detail view.
 | `name` | `VARCHAR(255)` | `UNIQUE` — also the name `RequestTargetResolver`'s path-segment extraction must match for passive telemetry (§5.2d) to find this row |
 | `target_type` | `VARCHAR(10)` + `CHECK (target_type IN ('REST','MCP'))` | Not a native Postgres enum — same reasoning as `idp_identities.type` |
 | `base_url` | `VARCHAR(512)` | |
+| `management_url` | `VARCHAR(512)`, nullable | `V9` amendment — `HealthPollingService` pings this instead of `base_url` when set; `NULL` falls back to `base_url` unchanged (§5.2d) |
 | `status` | `VARCHAR(10)` + `CHECK (status IN ('ACTIVE','WARNING','DOWN','PENDING'))`, `DEFAULT 'PENDING'` | See `InventoryStatus`'s transition rules, §5.2d |
+| `discovered_schema` | `JSONB`, nullable | `V10` amendment — raw response body from the last successful `AutoDiscoveryWorker` probe; deliberately excluded from `findAll()`/the list view (§5.2d) |
 | `created_at` | `TIMESTAMPTZ` | `DEFAULT NOW()`, never touched by an update (see §5.2d's live-tested `updateFields` fix) |
 
 `health_metrics` (same migration) — current health snapshot, one row per service:
@@ -889,6 +921,7 @@ application code, not a native query).
 | `/api/v1/admin/identities/{id}/relations` | GET | JWT + `ADMIN` YAML rule | gateway | Roles/groups related to an Actor identity, local-cache-only (Stage 15) |
 | `/api/v1/admin/inventory` | GET, POST | JWT + `ADMIN` YAML rule | gateway | List / onboard APIM registry entries (ADR-016) |
 | `/api/v1/admin/inventory/{id}` | PUT, DELETE | JWT + `ADMIN` YAML rule | gateway | Update / remove a registry entry (ADR-016) |
+| `/api/v1/admin/inventory/{id}/schema` | GET | JWT + `ADMIN` YAML rule | gateway | Fetch the last successfully captured discovery payload, raw; `404` if none (ADR-016 amendment) |
 | `/admin/**` | GET | none (SPA handles its own login) | gateway | Admin Console static bundle (ADR-012) |
 | `/sse` | GET | JWT | gateway (MCP proxy) | Opens an MCP session; SSE stream |
 | `/message?sessionId=<id>` | POST | JWT | gateway (MCP proxy) | JSON-RPC `tools/call`; result via SSE, not the response body |
@@ -1033,6 +1066,15 @@ own, all are new capabilities.
       client certificate; `management_url` (above) supports pointing at an
       `https://` management endpoint today, but neither example service is
       configured that way (ADR-016 amendment, 2026-08-11).
+- [ ] No size limit on a captured `discovered_schema` payload — bounded
+      only by `zte.inventory.discovery-timeout-ms`, not response size; a
+      lower-severity gap than on a public endpoint since onboarding is an
+      `ADMIN`-only action against an operator-supplied URL (ADR-016
+      amendment, 2026-08-12, Self-Criticism).
+- [ ] Code-split `zt-admin-ui`'s bundle — `swagger-ui-react` roughly
+      tripled it (589 KB → 1.88 MB raw); a natural candidate for a dynamic
+      `import()` behind the "View Schema" action if bundle size becomes a
+      real problem (ADR-016 amendment, 2026-08-12, Self-Criticism).
 - [ ] Reduce `fetchRelations()`'s per-user/per-client HTTP call count if
       sync duration becomes a problem at larger realm scale — no known
       Keycloak Admin API batch endpoint for this today (Stage 15 ADR

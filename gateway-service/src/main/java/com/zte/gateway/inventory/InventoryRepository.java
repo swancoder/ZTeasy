@@ -54,4 +54,31 @@ public interface InventoryRepository extends ReactiveCrudRepository<InventoryEnt
     Mono<Void> updateFields(@Param("id") UUID id, @Param("name") String name, @Param("targetType") String targetType,
                              @Param("baseUrl") String baseUrl, @Param("managementUrl") String managementUrl,
                              @Param("status") String status);
+
+    /**
+     * Persists a successful discovery probe's raw response body (ADR-016
+     * amendment) — {@code CAST(:schema AS jsonb)}, not a bare parameter,
+     * because the R2DBC Postgres driver's default bind for a {@code String}
+     * parameter is {@code VARCHAR}; Postgres rejects an implicit
+     * {@code varchar -> jsonb} assignment in a parameterized {@code UPDATE},
+     * so the cast has to be explicit. Deliberately separate from {@link
+     * InventoryEntry}/{@code findAll()} entirely — {@link AutoDiscoveryWorker}
+     * calls this only on success, {@link InventoryService#list()} never
+     * selects this column at all, so the registry list view's payload size
+     * doesn't grow with each service's captured schema.
+     */
+    @Modifying
+    @Query("UPDATE inventory_services SET discovered_schema = CAST(:schema AS jsonb) WHERE id = :id")
+    Mono<Void> updateDiscoveredSchema(@Param("id") UUID id, @Param("schema") String schema);
+
+    /**
+     * The on-demand fetch behind {@code GET .../inventory/{id}/schema} — a
+     * single-column, single-row query kept off {@link InventoryEntry}
+     * entirely (see {@link #updateDiscoveredSchema}'s Javadoc). Empty when
+     * {@code id} doesn't exist; also effectively empty (a {@code null}
+     * element) when the row exists but nothing has been captured yet —
+     * both map to a 404 in {@code AdminInventoryController}.
+     */
+    @Query("SELECT discovered_schema FROM inventory_services WHERE id = :id")
+    Mono<String> findDiscoveredSchemaById(@Param("id") UUID id);
 }

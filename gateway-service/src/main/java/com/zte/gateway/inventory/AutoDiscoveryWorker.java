@@ -1,5 +1,6 @@
 package com.zte.gateway.inventory;
 
+import com.fasterxml.jackson.databind.ObjectMapper;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
@@ -33,6 +34,23 @@ import java.util.Map;
  * is a normal, expected onboarding outcome (the task's own "degraded state
  * where manual routing is required" framing), not an application error.
  *
+ * <p><strong>Captured schema (ADR-016 amendment):</strong> on a successful
+ * probe, the raw response body — the OpenAPI document for {@code REST}, the
+ * JSON-RPC {@code tools/list} response for {@code MCP} — is persisted to
+ * {@code inventory_services.discovered_schema} via {@link
+ * InventoryRepository#updateDiscoveredSchema}, for the Admin Console's
+ * on-demand schema viewer. Only ever written on success; a failed/{@code
+ * WARNING} probe leaves whatever was captured last time untouched, same
+ * reasoning as {@code status} itself. Validated with {@link ObjectMapper}
+ * before writing — Postgres would reject a plain {@code CAST(text AS
+ * jsonb)} of anything that isn't valid JSON (a target returning a 200 with
+ * an HTML error page at {@code /v3/api-docs}, for instance), which would
+ * otherwise fail the whole update including the {@code status} write it's
+ * chained after; a blank body (the historic empty-200 case this worker
+ * already tolerated) is treated the same way — {@code ACTIVE}, nothing
+ * captured — rather than attempting to cast an empty string, which
+ * Postgres rejects outright (not valid JSON).
+ *
  * <p><strong>mTLS:</strong> {@code webClientBuilder} below is this
  * application's single Spring-Boot-autoconfigured default {@code
  * WebClient.Builder} — <em>not</em> a plain, unauthenticated client. When
@@ -64,17 +82,20 @@ public class AutoDiscoveryWorker {
 
     private final WebClient.Builder webClientBuilder;
     private final InventoryRepository repository;
+    private final ObjectMapper objectMapper;
     private final Duration timeout;
 
     public AutoDiscoveryWorker(WebClient.Builder webClientBuilder, InventoryRepository repository,
+                                ObjectMapper objectMapper,
                                 @Value("${zte.inventory.discovery-timeout-ms:5000}") long timeoutMs) {
         this.webClientBuilder = webClientBuilder;
         this.repository = repository;
+        this.objectMapper = objectMapper;
         this.timeout = Duration.ofMillis(timeoutMs);
     }
 
     public Mono<Void> discoverAndUpdateStatus(InventoryEntry entry) {
-        Mono<InventoryStatus> probe = entry.targetType() == TargetType.MCP
+        Mono<ProbeResult> probe = entry.targetType() == TargetType.MCP
                 ? probeMcpToolsList(entry.baseUrl())
                 : probeRestApiDocs(entry.baseUrl());
 
@@ -83,23 +104,42 @@ public class AutoDiscoveryWorker {
                 .onErrorResume(ex -> {
                     log.info("[ZTE-INVENTORY-DISCOVERY] id={} name={} baseUrl={} unreachable/failed: {}",
                             entry.id(), entry.name(), entry.baseUrl(), ex.toString());
-                    return Mono.just(InventoryStatus.WARNING);
+                    return Mono.just(ProbeResult.WARNING);
                 })
-                .doOnNext(status -> log.info("[ZTE-INVENTORY-DISCOVERY] id={} name={} -> {}",
-                        entry.id(), entry.name(), status))
-                .flatMap(status -> repository.updateStatus(entry.id(), status.name()));
+                .doOnNext(result -> log.info("[ZTE-INVENTORY-DISCOVERY] id={} name={} -> {}",
+                        entry.id(), entry.name(), result.status()))
+                .flatMap(result -> {
+                    Mono<Void> statusUpdate = repository.updateStatus(entry.id(), result.status().name());
+                    return isValidJson(result.schema())
+                            ? statusUpdate.then(repository.updateDiscoveredSchema(entry.id(), result.schema()))
+                            : statusUpdate;
+                });
     }
 
-    private Mono<InventoryStatus> probeRestApiDocs(String baseUrl) {
+    private boolean isValidJson(String schema) {
+        if (schema == null || schema.isBlank()) {
+            return false;
+        }
+        try {
+            objectMapper.readTree(schema);
+            return true;
+        } catch (Exception ex) {
+            log.info("[ZTE-INVENTORY-DISCOVERY] captured body wasn't valid JSON, not persisting: {}", ex.toString());
+            return false;
+        }
+    }
+
+    private Mono<ProbeResult> probeRestApiDocs(String baseUrl) {
         return webClientBuilder.baseUrl(baseUrl).build()
                 .get()
                 .uri("/v3/api-docs")
                 .retrieve()
-                .toBodilessEntity()
-                .map(response -> InventoryStatus.ACTIVE);
+                .bodyToMono(String.class)
+                .defaultIfEmpty("")
+                .map(ProbeResult::active);
     }
 
-    private Mono<InventoryStatus> probeMcpToolsList(String baseUrl) {
+    private Mono<ProbeResult> probeMcpToolsList(String baseUrl) {
         Map<String, Object> toolsListRequest = Map.of(
                 "jsonrpc", "2.0",
                 "id", 1,
@@ -112,7 +152,24 @@ public class AutoDiscoveryWorker {
                 .contentType(MediaType.APPLICATION_JSON)
                 .bodyValue(toolsListRequest)
                 .retrieve()
-                .toBodilessEntity()
-                .map(response -> InventoryStatus.ACTIVE);
+                .bodyToMono(String.class)
+                .defaultIfEmpty("")
+                .map(ProbeResult::active);
+    }
+
+    /**
+     * A probe outcome — {@code status} always set (drives {@code
+     * discoverAndUpdateStatus}'s {@code repository.updateStatus} call
+     * regardless), {@code schema} the raw captured body, possibly blank
+     * (an empty 2xx response body, tolerated the same way this worker
+     * always has) or {@code null} ({@link #WARNING} — no probe response to
+     * capture at all).
+     */
+    private record ProbeResult(InventoryStatus status, String schema) {
+        private static final ProbeResult WARNING = new ProbeResult(InventoryStatus.WARNING, null);
+
+        private static ProbeResult active(String schema) {
+            return new ProbeResult(InventoryStatus.ACTIVE, schema);
+        }
     }
 }

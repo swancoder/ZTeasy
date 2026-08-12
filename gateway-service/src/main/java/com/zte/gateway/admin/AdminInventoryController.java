@@ -6,6 +6,7 @@ import com.zte.gateway.inventory.InventoryService;
 import com.zte.gateway.inventory.InventoryView;
 import com.zte.gateway.inventory.TargetType;
 import org.springframework.http.HttpStatus;
+import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
@@ -61,6 +62,23 @@ class AdminInventoryController {
     @DeleteMapping("/{id}")
     public Mono<ResponseEntity<Void>> delete(@PathVariable UUID id) {
         return inventoryService.delete(id).thenReturn(ResponseEntity.noContent().build());
+    }
+
+    /**
+     * The raw payload from {@code id}'s last successful discovery probe
+     * (ADR-016 amendment) — the OpenAPI document for {@code REST}, the
+     * JSON-RPC {@code tools/list} response for {@code MCP}. Returned
+     * verbatim as the response body (not re-wrapped/re-quoted as a JSON
+     * string field) so the frontend can {@code JSON.parse} it directly.
+     * {@code 404} if {@code id} doesn't exist or nothing has been captured
+     * yet — both collapse to an empty {@code Mono<String>} in {@link
+     * InventoryService#getDiscoveredSchema}.
+     */
+    @GetMapping("/{id}/schema")
+    public Mono<ResponseEntity<String>> schema(@PathVariable UUID id) {
+        return inventoryService.getDiscoveredSchema(id)
+                .map(schema -> ResponseEntity.ok().contentType(MediaType.APPLICATION_JSON).body(schema))
+                .defaultIfEmpty(ResponseEntity.notFound().build());
     }
 
     /**

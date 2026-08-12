@@ -21,6 +21,7 @@ import MenuItem from '@mui/material/MenuItem'
 import Stack from '@mui/material/Stack'
 import IconButton from '@mui/material/IconButton'
 import Tooltip from '@mui/material/Tooltip'
+import SchemaDrawer from './SchemaDrawer'
 import type { InventoryEntry } from './types'
 
 interface Props {
@@ -46,6 +47,8 @@ export default function Inventory({ accessToken }: Props) {
   const [formTargetType, setFormTargetType] = useState<'REST' | 'MCP'>('REST')
   const [formBaseUrl, setFormBaseUrl] = useState('')
   const [formManagementUrl, setFormManagementUrl] = useState('')
+
+  const [schemaTarget, setSchemaTarget] = useState<InventoryEntry | null>(null)
 
   const fetchServices = useCallback(async () => {
     setLoading(true)
@@ -185,6 +188,11 @@ export default function Inventory({ accessToken }: Props) {
                     {service.lastSuccessfulCall ? new Date(service.lastSuccessfulCall).toLocaleString() : '—'}
                   </TableCell>
                   <TableCell align="right">
+                    <Tooltip title="View discovered schema">
+                      <IconButton size="small" onClick={() => setSchemaTarget(service)}>
+                        📄
+                      </IconButton>
+                    </Tooltip>
                     <Tooltip title="Remove from registry">
                       <IconButton size="small" onClick={() => handleDelete(service)}>
                         🗑️
@@ -258,6 +266,8 @@ export default function Inventory({ accessToken }: Props) {
       >
         {snackbar ? <Alert severity={snackbar.severity}>{snackbar.message}</Alert> : undefined}
       </Snackbar>
+
+      <SchemaDrawer service={schemaTarget} accessToken={accessToken} onClose={() => setSchemaTarget(null)} />
     </Box>
   )
 }

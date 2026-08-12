@@ -77,6 +77,16 @@ public class InventoryService {
         return repository.deleteById(id);
     }
 
+    /**
+     * The raw payload {@link AutoDiscoveryWorker} captured on its last
+     * successful probe (ADR-016 amendment) — empty if {@code id} doesn't
+     * exist, or if nothing has been captured yet (never discovered, or
+     * every discovery attempt so far failed/returned nothing cast-able).
+     */
+    public Mono<String> getDiscoveredSchema(UUID id) {
+        return repository.findDiscoveredSchemaById(id);
+    }
+
     private void triggerDiscoveryAsync(InventoryEntry entry) {
         autoDiscoveryWorker.discoverAndUpdateStatus(entry)
                 .subscribe(

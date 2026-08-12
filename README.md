@@ -483,6 +483,15 @@ inventory entry (matched by name — must equal the path segment
 `RequestTargetResolver` derives, e.g. `service-a`). Never blocks the request thread; a
 target name with no matching registry row is a harmless no-op.
 
+**Discovered schema (API Catalog):** a successful discovery probe now captures the raw
+response body — the OpenAPI document for `REST`, the JSON-RPC `tools/list` response for
+`MCP` — into `inventory_services.discovered_schema`. Fetch it on demand via
+`GET /api/v1/admin/inventory/{id}/schema` (`404` if nothing's been captured yet), or
+click a row's "View Schema" (📄) button in the Admin Console: `REST` targets render in
+an embedded Swagger UI, `MCP` targets as a plain tool name/description list. Deliberately
+excluded from the main registry list/CRUD payload so viewing the registry table stays
+light regardless of how large a target's schema is (ADR-016 amendment, 2026-08-12).
+
 ```bash
 # Onboard a service
 curl -s -X POST -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/json" \
@@ -491,6 +500,9 @@ curl -s -X POST -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/
 
 # List the registry (includes current health snapshot)
 curl -s -H "Authorization: Bearer $TOKEN" http://localhost:8080/api/v1/admin/inventory | python3 -m json.tool
+
+# Fetch a service's captured schema (once discovery has succeeded at least once)
+curl -s -H "Authorization: Bearer $TOKEN" http://localhost:8080/api/v1/admin/inventory/<id>/schema | python3 -m json.tool
 ```
 
 See [ADR-016](docs/adr/ADR-016-inventory-and-health-registry.md) for the full design,

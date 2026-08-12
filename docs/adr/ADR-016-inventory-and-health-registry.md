@@ -303,6 +303,103 @@ management port and kept it `ACTIVE` (actuator `UP`) instead of flipping to
 
 ---
 
+## Amendment (2026-08-12): capturing discovery payloads — an API Catalog
+
+`AutoDiscoveryWorker` only ever checked reachability of `/v3/api-docs`/
+`tools/list` and discarded the response body. This amendment captures it —
+`inventory_services.discovered_schema JSONB` (`V10__add_discovered_schema.sql`)
+— and adds an on-demand Admin Console viewer (Swagger UI for REST, a plain
+tool list for MCP), evolving the registry from "is this reachable" into a
+minimal API catalog.
+
+**R2DBC ↔ `jsonb` mapping, investigated before writing any code** — this
+project has no prior JSONB column anywhere, so nothing to copy. Decompiled
+`r2dbc-postgresql:1.0.7.RELEASE`'s codec classes (`javap`) rather than
+assuming: `DefaultCodecs` registers a dedicated `JsonStringCodec` that
+decodes `json`/`jsonb` columns straight into `java.lang.String` — reads
+need no custom converter. Writes are the asymmetric half: the driver's
+default bind for a `String` parameter is `VARCHAR`, and Postgres rejects
+an implicit `varchar -> jsonb` assignment in a parameterized `UPDATE`, so
+`InventoryRepository.updateDiscoveredSchema` uses an explicit
+`CAST(:schema AS jsonb)` in a native `@Query` — the task's own
+Self-Criticism suggested exactly this mitigation; the bytecode inspection
+is what confirms *why* it's the read/write-asymmetric fix needed, not a
+blind copy of the suggestion.
+
+**Kept `discovered_schema` off `InventoryEntry`/`InventoryView`/`findAll()`
+entirely** — `InventoryRepository` gets two new methods
+(`updateDiscoveredSchema`, `findDiscoveredSchemaById`) as native,
+single-purpose queries independent of the entity mapping the list/CRUD
+path uses. This satisfies the task's explicit "don't degrade the list
+view" goal *by construction*: the registry list literally never selects
+this column, rather than relying on every future caller to remember not
+to over-fetch it. Net effect: zero changes to `InventoryEntry`,
+`InventoryView`, `AdminInventoryController.InventoryRequest`, or the
+frontend's `InventoryEntry` type — this amendment's blast radius on
+already-working code is `AutoDiscoveryWorker` (genuine logic change) plus
+one new endpoint/repository-method pair.
+
+**Two correctness gaps found and closed before they could bite, not
+after:**
+1. Switching `probeRestApiDocs`/`probeMcpToolsList` from
+   `.toBodilessEntity()` to `.retrieve().bodyToMono(String.class)` (needed
+   to actually read the body) changes behavior on a genuinely empty
+   response: `toBodilessEntity()` always emits exactly one element
+   regardless of body length; `bodyToMono(String.class)` on a 0-byte body
+   completes **empty** — no element at all. That would have silently
+   broken the existing "2xx with an empty body is still `ACTIVE`" case
+   (the CRUD test's onboard stub does exactly this). Fixed with
+   `.defaultIfEmpty("")` immediately after `bodyToMono`, restoring the
+   original always-one-element guarantee.
+2. A target returning `200` with a non-JSON body (an HTML error page at
+   `/v3/api-docs`, say) would make Postgres reject
+   `CAST(text AS jsonb)`. Guarded with `ObjectMapper#readTree` before ever
+   calling `updateDiscoveredSchema` — invalid or blank bodies (including
+   the empty-body case above) skip the schema write but still let the
+   `status` write through unaffected, rather than risking the whole
+   discovery outcome on a payload this gateway doesn't control the shape
+   of.
+
+**Testing:** `AutoDiscoveryWorker` still has no mocked-`WebClient` unit
+test (unchanged precedent — proven only via `InventoryRegistryIT`, same as
+`KeycloakIdpAdapter`/`McpBackendClient`). Four new IT cases added: REST
+capture round-trip, MCP capture round-trip, and `404` for both a
+`WARNING` service (nothing captured) and an unknown `id`. The two capture
+tests initially failed on their first real run — not a broken pipeline,
+but an over-strict assertion: Postgres's `jsonb` column canonicalizes on
+write (reorders keys, normalizes whitespace), so the round-tripped body is
+valid-but-reformatted JSON, not the original bytes. Found live, not
+anticipated; fixed by comparing parsed Jackson `JsonNode` trees
+(structural equality) instead of raw strings — which doubles as
+independent confirmation that the write(`CAST`)→read(`JsonStringCodec`)
+round trip is semantically correct, not merely exception-free.
+
+**Frontend:** `swagger-ui-react@5.32.13` + `@types/swagger-ui-react@5.18.0`,
+as specified. `npm install` surfaced a real detail worth recording: a
+transitive dependency (`react-inspector@6.0.2`) declares a React 16-18
+peer range, not 19 — npm resolved it anyway (a warning, not a hard
+failure), and both `tsc -b` and `vite build` succeeded cleanly, so left
+as-is rather than forcing an unrequested override. Also worth recording
+plainly: this dependency roughly **tripled the built bundle** (589 KB →
+1.88 MB raw, 177 KB → 538 KB gzipped) — a direct, known cost of the
+library choice the task specified; not mitigated here (e.g. via dynamic
+import/code-splitting) since that wasn't asked for and this codebase's
+established bias is against unrequested infrastructure — named explicitly
+below (Self-Criticism) instead of left as a silent surprise.
+
+New `SchemaDrawer.tsx` (kept out of `Inventory.tsx` to avoid growing that
+file past its existing CRUD-table-plus-dialog scope): fetches the schema
+only when a row's new "View Schema" button is clicked (on-demand,
+matching the backend), `JSON.parse`s it inside a `try`/`catch` — falling
+back to a raw-text `<pre>` block with an error `Alert` on parse failure,
+the task's own Self-Criticism ask — then branches on `targetType`:
+`<SwaggerUI spec={parsed}/>` for `REST`, a small defensive tree-walk
+extracting `result.tools[]` (guarded with `typeof`/`Array.isArray` checks
+throughout, since this is an external service's response shape, not
+something this codebase controls) into an MUI `List` for `MCP`.
+
+---
+
 ## Alternatives Considered
 
 ### On-demand schema re-fetch per Admin Console page load, instead of caching `status` (rejected)
@@ -326,7 +423,10 @@ management port and kept it `ACTIVE` (actuator `UP`) instead of flipping to
 | `AutoDiscoveryWorker`/`HealthPollingService`'s actual HTTP-calling code (the `WebClient` probes) has no dedicated mocked-`WebClient` unit test | Low | Consistent with this codebase's established precedent (`KeycloakIdpAdapter`, `McpBackendClient` — never unit-tested with mocked HTTP) — proven instead by `InventoryRegistryIT` against a real WireMock target. The one pure, extractable piece of decision logic (`HealthPollingService.statusTransition`) does have a direct unit test, same as `KeycloakIdpAdapter#isSystemClient`'s precedent. |
 | A service `name` collision between the inventory registry and `RequestTargetResolver`'s path-segment extraction is required for passive `last_successful_call` tracking to work at all — an inventory entry named anything other than the exact path segment (`"service-a"`, not `"Service A"` or `"svc-a"`) silently never receives telemetry | Medium | Named explicitly, not hidden — `HealthMetricRepository.upsertSuccessfulCallByServiceName`'s Javadoc states the no-op-on-mismatch behavior. No validation enforces the naming convention at onboarding time; an operator registering `service-a` under a different display name gets a registry entry that's otherwise fully functional (discovery, health polling) but never shows passive traffic data. |
 | Like every other `idp_identities`/sync-based cache in this codebase, `inventory_services`/`health_metrics` accumulate no reconciliation — a deleted service is only removed by an explicit `DELETE`, never automatically | Low | Consistent with this repo's established posture (identity sync has the same property, named in its own ADR) — not a new gap. |
-| `AutoDiscoveryWorker`/`HealthPollingService` use a plain `WebClient` with no ZTE mTLS client certificate — registering `service-a`/`service-b` by their mTLS API port (8081/8082) always discovers/polls as unreachable | Low | Found live testing this feature against the real running stack — not a bug, `MtlsHttpClientConfig`'s client cert is deliberately scoped to `GatewayRouteConfig`'s own routing `HttpClient`, not reused here. Documented in the README: register those two services via their plain-HTTP management port (9081/9082) instead, the same port `docker-compose.yml`'s own healthcheck already uses. |
+| ~~`AutoDiscoveryWorker`/`HealthPollingService` use a plain `WebClient` with no ZTE mTLS client certificate~~ | — | **Superseded, 2026-08-11** — investigated and found factually incorrect (see the mTLS/OpenAPI Amendment above): both already inherit the gateway's mTLS connector via Spring Boot's default `WebClient.Builder` wiring. The real, separate gap this row was reacting to (`service-a`/`service-b` lacking `/v3/api-docs`) was fixed the same day; the health-polling port mismatch it also touched on was fixed by the `management_url` amendment. Left struck through rather than deleted, so the correction is traceable. |
+| No size limit on the captured `discovered_schema` payload — a misbehaving or malicious target could return an enormous `/v3/api-docs`/`tools/list` body, stored verbatim | Low | Not enforced — `zte.inventory.discovery-timeout-ms` bounds how long a probe can run, but not response size. Onboarding is an operator (`ADMIN`-only) action against a URL the operator themselves typed in, not an untrusted/public input path, so this is a lower-severity gap than it would be on a public-facing endpoint; a `Content-Length`/streaming cap is a reasonable future hardening item (§9.2) if the registry is ever opened to less-trusted onboarding. |
+| Adding `swagger-ui-react` roughly tripled the Admin Console's built bundle (589 KB → 1.88 MB raw, 177 KB → 538 KB gzipped) | Low | Direct, known cost of the task's specified library choice — not mitigated here (no dynamic import/code-splitting), since that wasn't asked for; a natural follow-up if bundle size becomes a real problem (§9.2). |
+| `swagger-ui-react`'s transitive `react-inspector@6.0.2` declares a React 16-18 peer range, not this project's React 19 | Low | `npm install` resolved it anyway (a warning, not a hard failure); `tsc -b` and `vite build` both succeed cleanly and no runtime issue was observed in manual testing. Worth revisiting only if `swagger-ui-react` itself is upgraded and starts failing outright. |
 
 ---
 
