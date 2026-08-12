@@ -51,7 +51,7 @@ auditable — the opposite of a mesh's "hide it in the sidecar" approach. See
 | 14 | Machine identities — OIDC clients synced as `CLIENT` type, `client:<clientId>` URN unification for `service2service`/`agentMcpToolCalls`, orphaned-rule detection extended to all three categories | ✅ Complete | `f5a30b8` | [015](adr/ADR-015-machine-identities-and-urn-unification.md) |
 | 15 | Identities UI refactor (Actors vs. Access Containers accordions, quick search, relations Drawer), `idp_identity_relations` caching, Keycloak system-client filtering | ✅ Complete | `1198921` | [Identities UI + Relations](adr/identities-ui-actors-containers-and-relations-caching.md) |
 | 16 | APIM inventory registry (`inventory_services`/`health_metrics`), auto-discovery on onboarding, periodic health polling, passive `last_successful_call` telemetry, Admin Console "Registry" tab | ✅ Complete | `c3fd7de` | [016](adr/ADR-016-inventory-and-health-registry.md) |
-| 17 | Dynamic inventory-driven routing (`InventoryRouteDefinitionLocator`, replacing hardcoded routes), REST/MCP audit unification into `request_logs`, strict `service2service` policy scenario (`service-a`→`service-b`) | ✅ Complete | _pending_ | [017](adr/ADR-017-dynamic-routing-and-audit.md) |
+| 17 | Dynamic inventory-driven routing (`InventoryRouteDefinitionLocator`, replacing hardcoded routes), REST/MCP audit unification into `request_logs`, strict `service2service` policy scenario (`service-a`→`service-b`) | ✅ Complete | `87d9976` | [017](adr/ADR-017-dynamic-routing-and-audit.md) |
 | 18+ | Backlog (rate limiting, ABAC…) | ⬜ Planned | — | see §9.2 |
 
 **Test status:** all unit tests green (`./gradlew test`), including the
@@ -1383,6 +1383,6 @@ own, all are new capabilities.
 Registry, plus the mTLS/OpenAPI, management-URL health-polling, discovered-schema API
 Catalog, custom-docs-URL/synchronous-fetch, inline-edit/refetch, and known-issues/
 test-coverage amendments) plus Stage 17 (dynamic routing, audit unification, strict S2S
-rules — commit hash pending, see §2). Keep it in sync the same way as README/CLAUDE.md
-— per CLAUDE.md's mandatory workflow, update it alongside any task that completes a
-stage or changes the roadmap.*
+rules — `87d9976`, see §2). Keep it in sync the same way as README/CLAUDE.md — per
+CLAUDE.md's mandatory workflow, update it alongside any task that completes a stage or
+changes the roadmap.*

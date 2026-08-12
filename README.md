@@ -667,4 +667,4 @@ curl -s -H "Authorization: Bearer $TOKEN" http://localhost:8080/api/v1/service-a
 | 14 | Machine identities (OIDC clients synced as `CLIENT` type), `client:<clientId>` URN unification for `service2service`/`agentMcpToolCalls`, orphaned-rule detection extended to all three categories (ADR-015) | `f5a30b8` |
 | 15 | Identities UI refactor (Actors vs. Access Containers, MUI Accordions, quick search, relations Drawer), `idp_identity_relations` caching, Keycloak system-client filtering | `1198921` |
 | 16 | APIM inventory registry (`inventory_services`/`health_metrics`), auto-discovery on onboarding, periodic health polling, passive `last_successful_call` telemetry, Admin Console "Registry" tab | `c3fd7de` |
-| 17 | Dynamic inventory-driven routing (`InventoryRouteDefinitionLocator`, replacing hardcoded routes), REST/MCP audit unification into `request_logs`, strict `service2service` policy scenario (ADR-017) | _pending_ |
+| 17 | Dynamic inventory-driven routing (`InventoryRouteDefinitionLocator`, replacing hardcoded routes), REST/MCP audit unification into `request_logs`, strict `service2service` policy scenario (ADR-017) | `87d9976` |
