@@ -1,7 +1,6 @@
 package com.zte.gateway.admin;
 
 import com.zte.gateway.inventory.DuplicateServiceNameException;
-import com.zte.gateway.inventory.InventoryEntry;
 import com.zte.gateway.inventory.SchemaFetchException;
 import com.zte.gateway.inventory.ServiceNotFoundException;
 import com.zte.gateway.inventory.InventoryService;
@@ -58,9 +57,14 @@ class AdminInventoryController {
     }
 
     @PutMapping("/{id}")
-    public Mono<InventoryEntry> update(@PathVariable UUID id, @RequestBody InventoryRequest request) {
+    public Mono<ResponseEntity<Object>> update(@PathVariable UUID id, @RequestBody InventoryRequest request) {
         return inventoryService.update(id, request.name(), request.targetType(), request.baseUrl(), request.docsUrl(),
-                request.managementUrl());
+                        request.managementUrl())
+                .<ResponseEntity<Object>>map(ResponseEntity::ok)
+                .onErrorResume(DuplicateServiceNameException.class, ex -> Mono.just(
+                        ResponseEntity.status(HttpStatus.CONFLICT).body(Map.of("error", ex.getMessage()))))
+                .onErrorResume(ServiceNotFoundException.class, ex -> Mono.just(
+                        ResponseEntity.status(HttpStatus.NOT_FOUND).body(Map.of("error", ex.getMessage()))));
     }
 
     @DeleteMapping("/{id}")

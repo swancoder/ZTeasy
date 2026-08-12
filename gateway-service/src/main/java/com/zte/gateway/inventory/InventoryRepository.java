@@ -26,6 +26,15 @@ public interface InventoryRepository extends ReactiveCrudRepository<InventoryEnt
     Mono<Boolean> existsByName(String name);
 
     /**
+     * Same duplicate check {@code create()} uses, but excluding {@code id}
+     * itself — {@link InventoryService#update} needs "does some *other*
+     * row already have this name," not "does this row have this name"
+     * (which is trivially true whenever an edit leaves the name
+     * unchanged, and would otherwise 409 every no-rename update).
+     */
+    Mono<Boolean> existsByNameAndIdNot(String name, UUID id);
+
+    /**
      * Sets {@code status} directly, without a read-then-write {@code save()}
      * round trip — used by {@link AutoDiscoveryWorker} and {@link
      * HealthPollingService}, both of which only ever need to change this one

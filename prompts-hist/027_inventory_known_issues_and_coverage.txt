@@ -1,0 +1,99 @@
+Fix known issues, check test coverage — a plain, non-role-play prompt
+(no "Senior Solution Architect" framing, no explicit Chain of
+Thought/Self-Criticism/ADR instructions given directly), applied to this
+stage's own accumulated backlog per CLAUDE.md's still-mandatory execution
+protocols.
+
+Original prompt (verbatim): "Fix know issues, check test coverage, create
+tests if necessary."
+
+Scoping decision, made before touching any code: docs/SPECS.md §9.2's
+general backlog is mostly long-term roadmap (distributed tracing, rate
+limiting, ABAC extension, a second IdpClient implementation, etc.) —
+genuinely future feature work, not "known issues" in the bug sense. Tried
+fixing all of §9.2 would have been a huge, unfocused, low-value sprawl
+across unrelated subsystems. Scoped instead to the concrete, small,
+directly-actionable items this session's own recent work (the APIM
+inventory registry, ADR-016 and its four prior amendments) had named —
+the two genuinely fixable ones, not the several explicitly-deferred
+Self-Criticism entries (schema payload size limits, docs_url host
+validation, hasSchema's binary granularity, bundle code-splitting,
+service-a/b's management port staying plain HTTP) that were deliberate,
+already-justified trade-offs, not oversights.
+
+Fixed:
+
+1. `InventoryService.update` had no duplicate-name check the way
+   `create()` does — a real bug named while building the Edit UI two
+   tasks ago (026_registry_edit_and_refetch.txt) but not fixed then, since
+   that task's own backend instruction was narrowly "double-check field
+   application." Fixed now: `InventoryRepository.existsByNameAndIdNot`
+   (excludes the row being edited — the naive `existsByName` would
+   false-positive on every no-rename update, since a row's own name
+   always "exists"), wired through `update()` and the `PUT` controller
+   endpoint's error mapping identically to how `create()` already handles
+   `DuplicateServiceNameException`.
+
+   Auditing this method surfaced a second, related, previously-unnoticed
+   gap: `PUT` against an unknown `id` silently no-ops (`updateFields`
+   affects 0 rows, `findById` returns empty, nothing ever throws) and
+   returns a bare `200` with an empty body instead of `404` — inconsistent
+   with every other inventory endpoint (`GET .../schema`,
+   `POST .../schema/fetch`), which already all correctly 404 on an unknown
+   id. Closed with `switchIfEmpty(Mono.error(new ServiceNotFoundException(id)))`,
+   same exception/mapping `fetchSchemaNow` already established.
+
+   Verified against real Postgres (Testcontainers), not just a green
+   compile — Spring Data R2DBC's derived-query keyword parsing
+   (`existsBy...And...Not`) is validated at runtime, not compile time.
+   Three new IT cases: rename-to-existing-name -> 409,
+   same-name-unchanged-update -> 200 (the specific false-positive this
+   fix has to avoid), unknown-id -> 404.
+
+2. Investigated, not blindly re-implemented: "A 'Retry Discovery' action
+   for stuck WARNING entries" (docs/SPECS.md §9.2, tracked since the
+   original Stage 16 build). Before writing new UI/backend code for this,
+   checked whether the "Fetch" (sync discovery) feature built two
+   amendments ago already covers it — it does.
+   `AutoDiscoveryWorker.fetchSchemaNow`'s success path calls
+   `repository.updateStatus` unconditionally regardless of the entry's
+   prior status, and the Admin Console's "Fetch" button was never gated
+   on `status` (only disabled mid-request via `fetchingId`). So clicking
+   "Fetch" on a WARNING entry whose target has since become reachable
+   already correctly recovers it to ACTIVE — this was true the moment the
+   sync-fetch endpoint shipped, just never stated or tested explicitly, so
+   it was accidental correctness, not a documented guarantee. Rather than
+   building a second, redundant "Retry Discovery" button duplicating
+   "Fetch," closed the backlog item and added a new IT test
+   (fetchSchemaNow_onWarningService_recoversToActiveOnceReachable) to lock
+   the behavior in so a future refactor can't silently break it.
+
+Test coverage audited beyond the two fixes above, not just assumed
+sufficient: checked every class in the `inventory` package for an
+unclosed gap. `HealthTelemetryService` (the Sinks.Many-based passive
+telemetry writer) has no unit test — but this matches the established,
+deliberate precedent `RequestLogAuditService`/`LoggingMcpAuditService`
+already set in this codebase (fire-and-forget reactive sinks proven via
+IT, not unit tests, since deterministically unit-testing sink/backpressure
+timing is fragile relative to the value it adds) — already covered by the
+existing `routedTraffic_updatesLastSuccessfulCall` IT test. Not a new gap;
+didn't add a test that would just imitate an anti-pattern this codebase
+has consistently avoided elsewhere.
+
+Not touched, named as deliberately out of scope: the several Self-Criticism
+items already explicitly justified as accepted trade-offs in prior
+amendments (docs_url host validation, discovered_schema payload size cap,
+hasSchema's binary granularity, zt-admin-ui bundle code-splitting,
+service-a/b's management port staying plain HTTP by design) — none of
+those are "known issues" in the sense this prompt asked to fix; they're
+already-documented, already-justified decisions, and re-litigating them
+without new information would be churn, not a fix.
+
+ADR handling: amended ADR-016 again, in place — fourth amendment,
+continuing the established pattern; scoped narrowly to what actually
+changed (two bug fixes + one confirmation + a coverage audit), not
+padded out to look bigger than it is.
+
+Git: single commit, consistent with every prior amendment's convention in
+this session, followed by the usual `docs/SPECS.md` commit-hash-backfill
+follow-up commit.

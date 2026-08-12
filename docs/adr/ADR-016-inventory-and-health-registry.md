@@ -528,6 +528,70 @@ both times returns `200`.
 
 ---
 
+## Amendment (2026-08-12, fourth): closing two named backlog gaps, general audit
+
+A general "fix known issues, check test coverage" pass over this stage's
+own accumulated backlog (`docs/SPECS.md` §9.2), not tied to a new feature
+request. Scoped deliberately: most of §9.2 is long-term roadmap
+(distributed tracing, rate limiting, ABAC — genuinely future work, not
+bugs); this amendment only touches the two items that were concrete,
+small, and directly actionable.
+
+**Fixed: `InventoryService.update` had no duplicate-name check.** Added
+`InventoryRepository.existsByNameAndIdNot(name, id)` — deliberately
+*not* the plain `existsByName` `create()` uses, since that would
+false-positive on every no-rename update (a row's own name always
+"exists"). Wired the same way `create()` already handles
+`DuplicateServiceNameException`: `update()` checks first, the `PUT`
+controller endpoint maps it to `409`. Fixing this surfaced a second,
+related gap in the same method while auditing it: `PUT` against an
+unknown `id` previously returned a bare `200` with an empty body
+(`updateFields` no-ops and `findById` returns empty on a nonexistent
+row — no error was ever thrown) instead of `404`. Closed with a new
+`switchIfEmpty(Mono.error(new ServiceNotFoundException(id)))`, mapped the
+same way `fetchSchemaNow` already maps that exception. Both derived
+query correctness and the full error-mapping chain were verified against
+real Postgres via three new `InventoryRegistryIT` cases (rename-collision
+→ 409, no-rename update still succeeds → 200, unknown id → 404) — Spring
+Data's derived-query keyword parsing (`existsBy...And...Not`) is a
+runtime, not compile-time, concern, so this needed an actual DB round
+trip to trust, not just a green compile.
+
+**Confirmed, not fixed (already resolved as a side effect of an earlier
+amendment): "A 'Retry Discovery' action for stuck `WARNING` entries."**
+Investigated before writing any code, since this looked like it might
+need new work: `AutoDiscoveryWorker.fetchSchemaNow`'s success path calls
+`repository.updateStatus` unconditionally (via `persist`), and the
+Registry table's "Fetch" (🔄) button was never gated on `status` (only on
+`fetchingId === service.id`, to disable it mid-request). That means the
+"Fetch"/synchronous-fetch feature already built two amendments ago
+*is* the "Retry Discovery" action this backlog item asked for — clicking
+it on a `WARNING` entry whose target has since become reachable correctly
+recovers it to `ACTIVE`. This wasn't previously stated or tested
+explicitly, so it was pure luck it worked, not a documented guarantee;
+added a new IT test
+(`fetchSchemaNow_onWarningService_recoversToActiveOnceReachable`) to lock
+the behavior in, and closed the backlog item rather than leaving it open
+and duplicating work with a second, redundant "Retry" button.
+
+**Test coverage audited, not just the two fixes above.** Checked whether
+any other class in the `inventory` package had a real, closeable gap:
+`HealthTelemetryService` (the `Sinks.Many`-based passive-telemetry writer)
+has no unit test, but this matches the established, deliberate precedent
+`RequestLogAuditService`/`LoggingMcpAuditService` already set — this
+class of fire-and-forget sink is proven via IT (`routedTraffic_updatesLastSuccessfulCall`,
+already existing) rather than unit-tested, since deterministically
+unit-testing sink/backpressure behavior is fragile relative to the value
+it'd add. Not a new gap; didn't add a test that would only mimic the
+codebase's own established anti-pattern-avoidance.
+
+**Verified live**, against the real running gateway/Postgres: `PUT`ed a
+real registered service to rename it to another existing entry's name —
+`409`. `PUT`ed an unknown id — `404`. `PUT`ed the same entry back with its
+original name unchanged — `200`, no false-positive conflict.
+
+---
+
 ## Alternatives Considered
 
 ### On-demand schema re-fetch per Admin Console page load, instead of caching `status` (rejected)

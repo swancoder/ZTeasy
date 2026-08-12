@@ -74,7 +74,15 @@ public class InventoryService {
     }
 
     /**
-     * Updates the registration fields. Always resets {@code status} to
+     * Updates the registration fields — fails with {@link
+     * DuplicateServiceNameException} if {@code name} collides with a
+     * <em>different</em> row ({@link InventoryRepository#existsByNameAndIdNot}
+     * excludes {@code id} itself, so a no-rename update never false-positives),
+     * or {@link ServiceNotFoundException} if {@code id} doesn't exist (found
+     * missing while auditing this class's error handling: {@code
+     * updateFields} on an unknown {@code id} silently no-ops, so without this
+     * check the endpoint previously returned a bare {@code 200} with an
+     * empty body instead of a {@code 404}). Always resets {@code status} to
      * {@code PENDING} and re-triggers discovery — a simplification (the
      * task didn't specify conditional re-discovery only-if-the-URL-changed)
      * chosen because an unconditional reset can never leave a stale
@@ -82,8 +90,13 @@ public class InventoryService {
      */
     public Mono<InventoryEntry> update(UUID id, String name, TargetType targetType, String baseUrl, String docsUrl,
                                         String managementUrl) {
-        return repository.updateFields(id, name, targetType.name(), baseUrl, docsUrl, managementUrl, InventoryStatus.PENDING.name())
-                .then(repository.findById(id))
+        return repository.existsByNameAndIdNot(name, id)
+                .flatMap(exists -> exists
+                        ? Mono.<InventoryEntry>error(new DuplicateServiceNameException(name))
+                        : repository.updateFields(id, name, targetType.name(), baseUrl, docsUrl, managementUrl,
+                                        InventoryStatus.PENDING.name())
+                                .then(repository.findById(id))
+                                .switchIfEmpty(Mono.error(new ServiceNotFoundException(id))))
                 .doOnNext(this::triggerDiscoveryAsync);
     }
 

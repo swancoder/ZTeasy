@@ -182,6 +182,26 @@ class InventoryRegistryIT extends BaseZteIntegrationTest {
     }
 
     @Test
+    @DisplayName("Synchronous fetch acts as a 'Retry Discovery' — a WARNING service recovers to ACTIVE " +
+            "once its target becomes reachable, with no separate retry mechanism needed")
+    void fetchSchemaNow_onWarningService_recoversToActiveOnceReachable() {
+        String name = "warning-recovery-" + UUID.randomUUID();
+        // No /v3/api-docs stub yet — discovery fails, lands on WARNING.
+        String adminToken = getAdminToken();
+        String id = onboard(adminToken, name, "REST", "http://localhost:" + WIREMOCK.port());
+        assertStatusEventually(adminToken, id, "WARNING");
+
+        // The target becomes reachable later (e.g. the operator fixed a config issue) —
+        // clicking "Fetch" (not a dedicated "Retry" action) is the UI's only recovery path.
+        String body = "{\"openapi\":\"3.0.0\"}";
+        WIREMOCK.stubFor(get(urlPathEqualTo("/v3/api-docs")).willReturn(aResponse().withStatus(200).withBody(body)));
+
+        fetchSchemaSync(adminToken, id).then().statusCode(200);
+        assertStatusEventually(adminToken, id, "ACTIVE");
+        assertHasSchemaEventually(adminToken, id, true);
+    }
+
+    @Test
     @DisplayName("Schema endpoint 404s for a service with nothing captured yet, and for an unknown id")
     void schema_notCaptured_returns404() {
         String name = "rest-no-schema-" + UUID.randomUUID();
@@ -274,6 +294,65 @@ class InventoryRegistryIT extends BaseZteIntegrationTest {
             .post("/api/v1/admin/inventory")
         .then()
             .statusCode(409);
+    }
+
+    @Test
+    @DisplayName("Renaming a service via PUT to collide with another existing name is rejected with 409")
+    void update_renameToExistingName_returns409() {
+        WIREMOCK.stubFor(get(urlPathEqualTo("/v3/api-docs")).willReturn(aResponse().withStatus(200)));
+        String adminToken = getAdminToken();
+
+        String existingName = "rename-target-" + UUID.randomUUID();
+        onboard(adminToken, existingName, "REST", "http://localhost:" + WIREMOCK.port());
+        String idToRename = onboard(adminToken, "rename-source-" + UUID.randomUUID(), "REST",
+                "http://localhost:" + WIREMOCK.port());
+
+        given()
+            .baseUri("http://localhost:" + gatewayPort)
+            .header("Authorization", "Bearer " + adminToken)
+            .contentType("application/json")
+            .body(Map.of("name", existingName, "targetType", "REST", "baseUrl", "http://localhost:" + WIREMOCK.port()))
+        .when()
+            .put("/api/v1/admin/inventory/" + idToRename)
+        .then()
+            .statusCode(409);
+    }
+
+    @Test
+    @DisplayName("Updating without renaming (name unchanged) succeeds — no false-positive 409 against itself")
+    void update_sameNameUnchanged_succeeds() {
+        WIREMOCK.stubFor(get(urlPathEqualTo("/v3/api-docs")).willReturn(aResponse().withStatus(200)));
+        String adminToken = getAdminToken();
+        String name = "update-self-" + UUID.randomUUID();
+        String id = onboard(adminToken, name, "REST", "http://localhost:" + WIREMOCK.port());
+
+        given()
+            .baseUri("http://localhost:" + gatewayPort)
+            .header("Authorization", "Bearer " + adminToken)
+            .contentType("application/json")
+            .body(Map.of("name", name, "targetType", "REST", "baseUrl", "http://localhost:" + WIREMOCK.port() + "/v2"))
+        .when()
+            .put("/api/v1/admin/inventory/" + id)
+        .then()
+            .statusCode(200)
+            .body("baseUrl", equalTo("http://localhost:" + WIREMOCK.port() + "/v2"));
+    }
+
+    @Test
+    @DisplayName("Updating an unknown id returns 404")
+    void update_unknownId_returns404() {
+        String adminToken = getAdminToken();
+
+        given()
+            .baseUri("http://localhost:" + gatewayPort)
+            .header("Authorization", "Bearer " + adminToken)
+            .contentType("application/json")
+            .body(Map.of("name", "ghost-" + UUID.randomUUID(), "targetType", "REST",
+                    "baseUrl", "http://localhost:" + WIREMOCK.port()))
+        .when()
+            .put("/api/v1/admin/inventory/" + UUID.randomUUID())
+        .then()
+            .statusCode(404);
     }
 
     @Test

@@ -74,6 +74,7 @@ class InventoryServiceTest {
         InventoryEntry updated = new InventoryEntry(id, "service-a", TargetType.REST, "https://new-host",
                 "https://new-host/openapi.json", "http://new-host:9081", InventoryStatus.PENDING, Instant.now());
 
+        when(repository.existsByNameAndIdNot("service-a", id)).thenReturn(Mono.just(false));
         when(repository.updateFields(eq(id), eq("service-a"), eq("REST"), eq("https://new-host"),
                 eq("https://new-host/openapi.json"), eq("http://new-host:9081"), eq("PENDING")))
                 .thenReturn(Mono.empty());
@@ -88,6 +89,35 @@ class InventoryServiceTest {
         verify(repository).updateFields(id, "service-a", "REST", "https://new-host",
                 "https://new-host/openapi.json", "http://new-host:9081", "PENDING");
         verify(autoDiscoveryWorker).discoverAndUpdateStatus(updated);
+    }
+
+    @Test
+    void update_duplicateName_errorsWithoutUpdating() {
+        service = newService();
+        UUID id = UUID.randomUUID();
+        when(repository.existsByNameAndIdNot("service-b", id)).thenReturn(Mono.just(true));
+
+        StepVerifier.create(service.update(id, "service-b", TargetType.REST, "https://new-host", null, null))
+                .expectError(DuplicateServiceNameException.class)
+                .verify();
+
+        verify(repository, never()).updateFields(any(), any(), any(), any(), any(), any(), any());
+    }
+
+    @Test
+    void update_unknownId_errorsWithServiceNotFound() {
+        service = newService();
+        UUID id = UUID.randomUUID();
+        when(repository.existsByNameAndIdNot("service-a", id)).thenReturn(Mono.just(false));
+        when(repository.updateFields(eq(id), eq("service-a"), eq("REST"), eq("https://new-host"),
+                any(), any(), eq("PENDING"))).thenReturn(Mono.empty());
+        when(repository.findById(id)).thenReturn(Mono.empty());
+
+        StepVerifier.create(service.update(id, "service-a", TargetType.REST, "https://new-host", null, null))
+                .expectError(ServiceNotFoundException.class)
+                .verify();
+
+        verify(autoDiscoveryWorker, never()).discoverAndUpdateStatus(any());
     }
 
     @Test

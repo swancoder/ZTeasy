@@ -964,7 +964,7 @@ application code, not a native query).
 | `/api/v1/admin/identities/search` | GET | JWT + `ADMIN` YAML rule | gateway | Search/list the `idp_identities` cache, `?type=&q=` (ADR-014) |
 | `/api/v1/admin/identities/{id}/relations` | GET | JWT + `ADMIN` YAML rule | gateway | Roles/groups related to an Actor identity, local-cache-only (Stage 15) |
 | `/api/v1/admin/inventory` | GET, POST | JWT + `ADMIN` YAML rule | gateway | List / onboard APIM registry entries (ADR-016) |
-| `/api/v1/admin/inventory/{id}` | PUT, DELETE | JWT + `ADMIN` YAML rule | gateway | Update / remove a registry entry (ADR-016) |
+| `/api/v1/admin/inventory/{id}` | PUT, DELETE | JWT + `ADMIN` YAML rule | gateway | Update / remove a registry entry; `PUT` returns `409` on a name collision with another entry, `404` if `id` doesn't exist (ADR-016 + amendment) |
 | `/api/v1/admin/inventory/{id}/schema` | GET | JWT + `ADMIN` YAML rule | gateway | Fetch the last successfully captured discovery payload, raw; `404` if none (ADR-016 amendment) |
 | `/api/v1/admin/inventory/{id}/schema/fetch` | POST | JWT + `ADMIN` YAML rule | gateway | Synchronous, UI-triggered discovery; `200` on success, `404` unknown `id`, `502` unreachable/timed out/invalid JSON (ADR-016 amendment) |
 | `/admin/**` | GET | none (SPA handles its own login) | gateway | Admin Console static bundle (ADR-012) |
@@ -1083,8 +1083,16 @@ own, all are new capabilities.
 
 ### 9.2 Backlog — general (from `CLAUDE.md` Stage 17+)
 
-- [ ] A "Retry Discovery" Admin Console action, to clear a stuck `WARNING`
-      inventory entry without deleting and re-onboarding it (ADR-016).
+- [x] ~~A "Retry Discovery" Admin Console action, to clear a stuck
+      `WARNING` inventory entry without deleting and re-onboarding it~~ —
+      already covered: the Registry table's "Fetch" (🔄) button (ADR-016
+      amendment, 2026-08-12 second) isn't `status`-gated, and
+      `AutoDiscoveryWorker.fetchSchemaNow`'s success path unconditionally
+      calls `updateStatus`, so clicking it on a `WARNING` entry whose
+      target has since become reachable correctly recovers it to `ACTIVE`
+      — no dedicated "Retry" action was needed. Verified live and via a
+      new IT test (`fetchSchemaNow_onWarningService_recoversToActiveOnceReachable`,
+      ADR-016 amendment, 2026-08-12 fourth).
 - [ ] A `health_metrics` history table (ping latency over time), if
       operators need trend visibility rather than just current state (ADR-016).
 - [ ] Validate `AutoDiscoveryWorker`'s MCP stateless-discovery assumption
@@ -1131,12 +1139,18 @@ own, all are new capabilities.
       but worth tightening if inventory onboarding is ever opened to a
       less-trusted role than `ADMIN` (ADR-016 amendment, 2026-08-12
       second, Self-Criticism).
-- [ ] `InventoryService.update` has no duplicate-name check the way
-      `create()` does (`existsByName` is only called from `create`) —
-      renaming a service via `PUT` to collide with another existing
-      entry's name surfaces as a raw constraint-violation error instead
-      of a clean `409` (found while verifying the Admin Console's new
-      Edit action; ADR-016 amendment, 2026-08-12 third).
+- [x] ~~`InventoryService.update` has no duplicate-name check the way
+      `create()` does~~ — fixed with `InventoryRepository.existsByNameAndIdNot`
+      (excludes the row being edited, so a no-rename update never
+      false-positives against itself), wired through `update()` and the
+      `PUT` controller endpoint's error mapping the same way `create()`
+      already handles `DuplicateServiceNameException`. Fixing this also
+      surfaced and closed a second latent gap in the same method: `PUT`
+      against an unknown `id` previously returned a bare `200` with an
+      empty body (`updateFields`/`findById` both silently no-op/empty on
+      a nonexistent row) instead of `404` — now raises
+      `ServiceNotFoundException`, mapped consistently with every other
+      inventory endpoint (ADR-016 amendment, 2026-08-12 fourth).
 - [ ] Reduce `fetchRelations()`'s per-user/per-client HTTP call count if
       sync duration becomes a problem at larger realm scale — no known
       Keycloak Admin API batch endpoint for this today (Stage 15 ADR
