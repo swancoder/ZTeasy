@@ -1282,8 +1282,8 @@ own, all are new capabilities.
 
 ---
 
-*This document reflects repo state at commit `9831719` (Stage 16, APIM Inventory
+*This document reflects repo state at commit `ec03e41` (Stage 16, APIM Inventory
 Registry, plus the mTLS/OpenAPI, management-URL health-polling, discovered-schema API
-Catalog, and custom-docs-URL/synchronous-fetch amendments). Keep it in sync the same
-way as README/CLAUDE.md — per CLAUDE.md's mandatory workflow, update it alongside any
-task that completes a stage or changes the roadmap.*
+Catalog, custom-docs-URL/synchronous-fetch, and inline-edit/refetch amendments). Keep
+it in sync the same way as README/CLAUDE.md — per CLAUDE.md's mandatory workflow,
+update it alongside any task that completes a stage or changes the roadmap.*
