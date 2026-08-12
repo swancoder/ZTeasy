@@ -484,6 +484,50 @@ registered with `docs_url` explicitly set round-tripped correctly through
 
 ---
 
+## Amendment (2026-08-12, third): inline Edit + confirmed refetch-overwrite
+
+Frontend-only — the backend already fully supported everything this
+needed. Verified, not assumed, before touching any UI code:
+`InventoryService.update`/`InventoryRepository.updateFields` already
+threaded `docsUrl`/`managementUrl` through (added by the prior amendment),
+and `updateDiscoveredSchema` is a plain, unconditional
+`UPDATE ... SET discovered_schema = CAST(:schema AS jsonb) WHERE id = :id`
+— there's no uniqueness constraint or prior-value check on that column at
+all, so "does refetch overwrite without conflict" was already
+unconditionally true. Confirmed live: fetched a real entry's schema twice
+in a row and the second call still genuinely re-probes and returns `200`.
+
+**Admin Console:** a new "Edit" (✏️) row action opens the existing
+onboarding `Dialog` pre-filled from the row (`editingService` state, one
+`InventoryEntry | null`) and submits via `PUT` instead of `POST`; title,
+button label, and success message all branch on whether an entry is being
+edited. Closed a real, if previously harmless, gap the task's own
+Self-Criticism flagged: the dialog only ever reset its form state on a
+*successful* submit — Cancel and backdrop-dismiss left old values sitting
+in the form. With only one dialog mode that was invisible (an abandoned
+onboarding attempt's leftovers, gone the next time you actually opened
+it); with an Edit mode added, the same gap would let a cancelled edit's
+values leak into a subsequent fresh "Onboard Service" attempt. Fixed with
+one shared `closeDialog()` wired to both `Dialog`'s `onClose` and the
+Cancel button (previously two separate, inconsistent handlers).
+
+**Not fixed, named instead:** `InventoryService.update` still has no
+duplicate-name check the way `create()` does (`existsByName` is only
+called from `create`) — renaming a service via `PUT` to collide with an
+existing name would surface as a raw constraint-violation error, not a
+clean `409`. Out of this task's literal scope ("double-check field
+application," not "add missing validation"), and pre-existing, not
+introduced here — added to the `docs/SPECS.md` §9.2 backlog alongside
+this codebase's other named-but-deferred gaps.
+
+**Verified live:** `PUT`-edited a real registered service's
+`managementUrl` via the API, confirmed the change persisted and discovery
+re-ran (status briefly `PENDING`, then `ACTIVE` again). Confirmed
+`schema/fetch` called twice against an already-`hasSchema: true` entry
+both times returns `200`.
+
+---
+
 ## Alternatives Considered
 
 ### On-demand schema re-fetch per Admin Console page load, instead of caching `status` (rejected)

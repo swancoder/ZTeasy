@@ -51,6 +51,7 @@ export default function Inventory({ accessToken }: Props) {
 
   const [schemaTarget, setSchemaTarget] = useState<InventoryEntry | null>(null)
   const [fetchingId, setFetchingId] = useState<string | null>(null)
+  const [editingService, setEditingService] = useState<InventoryEntry | null>(null)
 
   const fetchServices = useCallback(async () => {
     setLoading(true)
@@ -82,28 +83,68 @@ export default function Inventory({ accessToken }: Props) {
     setFormManagementUrl('')
   }
 
-  const handleOnboard = async () => {
+  // Single close path for the dialog (Cancel, backdrop click, and Escape all
+  // route here via Dialog's onClose) — form state and editingService must be
+  // cleared every time, or opening "Onboard Service" after editing a row
+  // would carry that row's stale values into what looks like a fresh form.
+  const closeDialog = () => {
+    setDialogOpen(false)
+    setEditingService(null)
+    resetForm()
+  }
+
+  const openCreateDialog = () => {
+    resetForm()
+    setEditingService(null)
+    setDialogOpen(true)
+  }
+
+  const openEditDialog = (service: InventoryEntry) => {
+    setFormName(service.name)
+    setFormTargetType(service.targetType)
+    setFormBaseUrl(service.baseUrl)
+    setFormDocsUrl(service.docsUrl ?? '')
+    setFormManagementUrl(service.managementUrl ?? '')
+    setEditingService(service)
+    setDialogOpen(true)
+  }
+
+  const handleSubmit = async () => {
     setSubmitting(true)
     try {
-      const res = await fetch('/api/v1/admin/inventory', {
-        method: 'POST',
-        headers: { Authorization: `Bearer ${accessToken}`, 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          name: formName,
-          targetType: formTargetType,
-          baseUrl: formBaseUrl,
-          docsUrl: formDocsUrl || null,
-          managementUrl: formManagementUrl || null,
-        }),
-      })
+      const body = {
+        name: formName,
+        targetType: formTargetType,
+        baseUrl: formBaseUrl,
+        docsUrl: formDocsUrl || null,
+        managementUrl: formManagementUrl || null,
+      }
+      const res = editingService
+        ? await fetch(`/api/v1/admin/inventory/${editingService.id}`, {
+            method: 'PUT',
+            headers: { Authorization: `Bearer ${accessToken}`, 'Content-Type': 'application/json' },
+            body: JSON.stringify(body),
+          })
+        : await fetch('/api/v1/admin/inventory', {
+            method: 'POST',
+            headers: { Authorization: `Bearer ${accessToken}`, 'Content-Type': 'application/json' },
+            body: JSON.stringify(body),
+          })
       if (res.ok) {
-        setSnackbar({ message: `${formName} onboarded — discovery running in the background`, severity: 'success' })
-        setDialogOpen(false)
-        resetForm()
+        setSnackbar({
+          message: editingService
+            ? `${formName} updated — discovery re-running in the background`
+            : `${formName} onboarded — discovery running in the background`,
+          severity: 'success',
+        })
+        closeDialog()
         await fetchServices()
       } else {
-        const body = await res.json().catch(() => ({}))
-        setSnackbar({ message: `Onboarding failed: ${body.error ?? res.status}`, severity: 'error' })
+        const responseBody = await res.json().catch(() => ({}))
+        setSnackbar({
+          message: `${editingService ? 'Update' : 'Onboarding'} failed: ${responseBody.error ?? res.status}`,
+          severity: 'error',
+        })
       }
     } catch (e) {
       setSnackbar({ message: e instanceof Error ? e.message : String(e), severity: 'error' })
@@ -170,7 +211,7 @@ export default function Inventory({ accessToken }: Props) {
     <Box sx={{ p: 3 }}>
       <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 3 }}>
         <Typography variant="h5">APIM Registry ({services.length})</Typography>
-        <Button variant="contained" onClick={() => setDialogOpen(true)}>
+        <Button variant="contained" onClick={openCreateDialog}>
           Onboard Service
         </Button>
       </Box>
@@ -215,6 +256,11 @@ export default function Inventory({ accessToken }: Props) {
                     {service.lastSuccessfulCall ? new Date(service.lastSuccessfulCall).toLocaleString() : '—'}
                   </TableCell>
                   <TableCell align="right">
+                    <Tooltip title="Edit service">
+                      <IconButton size="small" onClick={() => openEditDialog(service)}>
+                        ✏️
+                      </IconButton>
+                    </Tooltip>
                     <Tooltip title="Fetch schema now">
                       <span>
                         <IconButton
@@ -246,8 +292,8 @@ export default function Inventory({ accessToken }: Props) {
         </TableContainer>
       )}
 
-      <Dialog open={dialogOpen} onClose={() => setDialogOpen(false)} fullWidth maxWidth="sm">
-        <DialogTitle>Onboard Service</DialogTitle>
+      <Dialog open={dialogOpen} onClose={closeDialog} fullWidth maxWidth="sm">
+        <DialogTitle>{editingService ? 'Edit Service' : 'Onboard Service'}</DialogTitle>
         <DialogContent>
           <Stack spacing={2} sx={{ mt: 1 }}>
             <TextField
@@ -293,15 +339,15 @@ export default function Inventory({ accessToken }: Props) {
           </Stack>
         </DialogContent>
         <DialogActions>
-          <Button onClick={() => setDialogOpen(false)} disabled={submitting}>
+          <Button onClick={closeDialog} disabled={submitting}>
             Cancel
           </Button>
           <Button
             variant="contained"
-            onClick={handleOnboard}
+            onClick={handleSubmit}
             disabled={submitting || !formName || !formBaseUrl}
           >
-            {submitting ? 'Onboarding…' : 'Onboard'}
+            {submitting ? (editingService ? 'Saving…' : 'Onboarding…') : editingService ? 'Save' : 'Onboard'}
           </Button>
         </DialogActions>
       </Dialog>

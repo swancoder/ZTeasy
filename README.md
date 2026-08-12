@@ -504,7 +504,16 @@ of the passive background trigger onboarding uses. `200` on success; `404` if `i
 doesn't exist; `502 Bad Gateway` if the target was unreachable, timed out, or returned no
 valid JSON — deliberately *stricter* here than the background worker's `ACTIVE`-on-any-2xx
 tolerance, since a human just clicked "Fetch" and needs a real yes/no answer, with an
-error message the UI shows directly (ADR-016 amendment, 2026-08-12, second).
+error message the UI shows directly (ADR-016 amendment, 2026-08-12, second). It's a true
+*re*fetch — clicking it on a service that already has a captured schema overwrites the
+old one unconditionally, no special handling needed.
+
+**Editing a registration:** the "Edit" (✏️) button on a Registry row opens the same
+onboarding dialog pre-filled with that row's data and saves via `PUT
+/api/v1/admin/inventory/{id}` instead of `POST` — every onboarding field (`base_url`,
+`docs_url`, `management_url`) is editable this way. Like onboarding, saving an edit
+always resets `status` to `PENDING` and re-triggers discovery (ADR-016 amendment,
+2026-08-12, third).
 
 ```bash
 # Onboard a service

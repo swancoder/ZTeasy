@@ -725,6 +725,20 @@ for an unknown `id`. Frontend: optional "Docs URL" field, a "Fetch" (🔄)
 button per row (Snackbar feedback, table refresh on success), "View
 Schema" now disabled via `hasSchema` rather than `status`.
 
+**ADR-016 amendment, 2026-08-12 (third) — inline Edit + confirmed
+refetch-overwrite.** Frontend-only: an "Edit" (✏️) row action opens the
+onboarding `Dialog` pre-filled and submits `PUT` instead of `POST`
+(`editingService` state); a shared `closeDialog()` now resets form state
+on every close path (Cancel, backdrop, and post-submit), not just after a
+successful submit as before — closes a real gap the previous single-mode
+dialog never surfaced. Backend needed no changes: `InventoryService.update`/
+`updateFields` already threaded `docsUrl`/`managementUrl` (prior
+amendment), and `updateDiscoveredSchema` is an unconditional `UPDATE` with
+no conflict path — verified live by fetching an already-captured schema
+twice and confirming both calls genuinely re-probe and return `200`.
+Named, not fixed: `InventoryService.update` still has no duplicate-name
+check the way `create()` does (§9.2).
+
 ### 5.3 `service-a` / `service-b`
 
 - **`service-a/HelloController`** — `GET /api/v1/service-a/hello`; calls
@@ -1117,6 +1131,12 @@ own, all are new capabilities.
       but worth tightening if inventory onboarding is ever opened to a
       less-trusted role than `ADMIN` (ADR-016 amendment, 2026-08-12
       second, Self-Criticism).
+- [ ] `InventoryService.update` has no duplicate-name check the way
+      `create()` does (`existsByName` is only called from `create`) —
+      renaming a service via `PUT` to collide with another existing
+      entry's name surfaces as a raw constraint-violation error instead
+      of a clean `409` (found while verifying the Admin Console's new
+      Edit action; ADR-016 amendment, 2026-08-12 third).
 - [ ] Reduce `fetchRelations()`'s per-user/per-client HTTP call count if
       sync duration becomes a problem at larger realm scale — no known
       Keycloak Admin API batch endpoint for this today (Stage 15 ADR
