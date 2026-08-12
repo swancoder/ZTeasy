@@ -513,7 +513,9 @@ onboarding dialog pre-filled with that row's data and saves via `PUT
 /api/v1/admin/inventory/{id}` instead of `POST` — every onboarding field (`base_url`,
 `docs_url`, `management_url`) is editable this way. Like onboarding, saving an edit
 always resets `status` to `PENDING` and re-triggers discovery (ADR-016 amendment,
-2026-08-12, third).
+2026-08-12, third). `PUT` returns `409` if the new name collides with a *different*
+existing entry (renaming without changing the name never false-positives against
+itself), and `404` if `id` doesn't exist (ADR-016 amendment, 2026-08-12, fourth).
 
 ```bash
 # Onboard a service
