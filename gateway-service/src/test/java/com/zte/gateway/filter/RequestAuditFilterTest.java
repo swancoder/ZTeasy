@@ -298,6 +298,51 @@ class RequestAuditFilterTest {
         verifyNoInteractions(healthTelemetryService);
     }
 
+    /** ADR-017: targetService/httpMethod/decisionEffect are derived and persisted. */
+    @Test
+    void auditRecord_populatesTargetServiceHttpMethodAndDecisionEffect() {
+        when(chain.filter(any())).thenAnswer(invocation -> {
+            ((ServerWebExchange) invocation.getArgument(0)).getResponse().setStatusCode(HttpStatus.FORBIDDEN);
+            return Mono.empty();
+        });
+        MockServerWebExchange ex = exchangeWithPathAndHeaders("/api/v1/service-a/hello", Map.of());
+
+        StepVerifier.create(
+                filter.filter(ex, chain)
+                      .contextWrite(ReactiveSecurityContextHolder.withSecurityContext(Mono.just(new SecurityContextImpl()))))
+                .verifyComplete();
+
+        ArgumentCaptor<RequestLog> logCaptor = ArgumentCaptor.forClass(RequestLog.class);
+        verify(auditService).record(logCaptor.capture());
+        RequestLog logged = logCaptor.getValue();
+        assertThat(logged.targetService()).isEqualTo("service-a");
+        assertThat(logged.httpMethod()).isEqualTo("GET");
+        assertThat(logged.decisionEffect()).isEqualTo("DENY");
+    }
+
+    /** ADR-017: initiatorClient comes from the azp claim, originalUserObo from the subject. */
+    @Test
+    void auditRecord_populatesInitiatorClientAndOriginalUserObo() {
+        when(chain.filter(any())).thenAnswer(invocation -> {
+            ((ServerWebExchange) invocation.getArgument(0)).getResponse().setStatusCode(HttpStatus.OK);
+            return Mono.empty();
+        });
+        MockServerWebExchange ex = exchangeWithHeaders(Map.of());
+        JwtAuthenticationToken auth = jwtAuth("real-subject-uuid");
+
+        StepVerifier.create(
+                filter.filter(ex, chain)
+                      .contextWrite(ReactiveSecurityContextHolder.withAuthentication(auth)))
+                .verifyComplete();
+
+        ArgumentCaptor<RequestLog> logCaptor = ArgumentCaptor.forClass(RequestLog.class);
+        verify(auditService).record(logCaptor.capture());
+        RequestLog logged = logCaptor.getValue();
+        assertThat(logged.initiatorClient()).isEqualTo("zte-gateway"); // azp claim set by jwtAuth()
+        assertThat(logged.originalUserObo()).isEqualTo("real-subject-uuid");
+        assertThat(logged.decisionEffect()).isEqualTo("ALLOW");
+    }
+
     @Test
     void noStatusCodeSet_doesNotRecordHealthTelemetry() {
         // Every other test in this class leaves the mock response status unset

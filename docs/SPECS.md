@@ -51,7 +51,8 @@ auditable — the opposite of a mesh's "hide it in the sidecar" approach. See
 | 14 | Machine identities — OIDC clients synced as `CLIENT` type, `client:<clientId>` URN unification for `service2service`/`agentMcpToolCalls`, orphaned-rule detection extended to all three categories | ✅ Complete | `f5a30b8` | [015](adr/ADR-015-machine-identities-and-urn-unification.md) |
 | 15 | Identities UI refactor (Actors vs. Access Containers accordions, quick search, relations Drawer), `idp_identity_relations` caching, Keycloak system-client filtering | ✅ Complete | `1198921` | [Identities UI + Relations](adr/identities-ui-actors-containers-and-relations-caching.md) |
 | 16 | APIM inventory registry (`inventory_services`/`health_metrics`), auto-discovery on onboarding, periodic health polling, passive `last_successful_call` telemetry, Admin Console "Registry" tab | ✅ Complete | `c3fd7de` | [016](adr/ADR-016-inventory-and-health-registry.md) |
-| 17+ | Backlog (rate limiting, ABAC, MCP-audit unification…) | ⬜ Planned | — | see §9.2 |
+| 17 | Dynamic inventory-driven routing (`InventoryRouteDefinitionLocator`, replacing hardcoded routes), REST/MCP audit unification into `request_logs`, strict `service2service` policy scenario (`service-a`→`service-b`) | ✅ Complete | _pending_ | [017](adr/ADR-017-dynamic-routing-and-audit.md) |
+| 18+ | Backlog (rate limiting, ABAC…) | ⬜ Planned | — | see §9.2 |
 
 **Test status:** all unit tests green (`./gradlew test`), including the
 `policy.def` package (`PolicyValidatorTest`, `PolicyMatcherTest`,
@@ -98,7 +99,26 @@ extended for the new health-telemetry hook. New IT `InventoryRegistryIT`
 WireMock), full CRUD, duplicate-name rejection, and — the literal task
 verification — that real routed traffic through `/api/v1/service-a/hello`
 asynchronously updates `last_successful_call` (polled via Awaitility, same
-pattern as `RequestAuditIT`).
+pattern as `RequestAuditIT`). Stage 17 adds `LoggingMcpAuditServiceTest`
+(new — verifies MCP allow/deny events now also persist a `request_logs`
+row via a mocked `RequestLogAuditService`); extends
+`RequestLogAuditServiceTest`/`RequestAuditFilterTest` for the five new
+`request_logs` columns; adds `ZteAuthorizationFilterTest`'s
+`servicePrincipalToken_withDefaultKeycloakRoles_stillPassesThrough`
+regression guard (the roles-emptiness bug, see §10); extends
+`InventoryServiceTest` for the new `ApplicationEventPublisher`/
+`RefreshRoutesEvent` publication on create/update/delete. New IT
+`ServiceToServiceIT` (2 scenarios) is the literal task verification:
+`service-a` (new Keycloak machine client) calling service-b's `/context`
+succeeds (200), routes via the dynamic locator, and produces a
+`request_logs` row with `decisionEffect=ALLOW` and a non-null
+`originalUserObo`; calling `/restricted` is denied (403) before ever
+reaching the downstream WireMock stub (`verify(0, ...)`), with a
+`decisionEffect=DENY` row. `InventoryRegistryIT`/`RequestAuditIT` updated
+for the base class's new inventory-seeding `@BeforeEach` and ADR-017
+audit fields respectively. Full suite (`./gradlew test integrationTest`)
+confirmed green after two real, previously-latent bugs this stage was the
+first to exercise were found and fixed — see §10.
 
 ---
 
@@ -262,22 +282,48 @@ Reusable security config imported by every service (`ZteSecurityAutoConfiguratio
 
 ### 5.2 `gateway-service` — REST path
 
-- **`GatewayRouteConfig`** — declarative routes: `/api/v1/service-a/**`,
-  `/api/v1/service-b/**` → `https://localhost:8081` / `:8082`.
+- **`InventoryRouteDefinitionLocator`** (`inventory` package, ADR-017,
+  replacing `GatewayRouteConfig`) — a `RouteDefinitionLocator` bean that
+  queries `InventoryRepository.findAll()`, filtered to `target_type=REST`
+  and `status IN (ACTIVE, WARNING)` (§5.2d's registry), and emits one
+  `RouteDefinition` per entry: `Path` predicate `/api/v1/{name}/**` →
+  `base_url`, `AddRequestHeader X-Gateway-Source=zte-gateway`. Routing is
+  now 100% `inventory_services`-driven — onboarding a service via the
+  Admin Console makes it immediately routable, no code change or redeploy.
+  Spring Cloud Gateway's `CachingRouteLocator` only re-fetches on a
+  `RefreshRoutesEvent`: `InventoryService.create`/`update`/`delete` each
+  publish one immediately (§5.2d); `InventoryRouteRefreshScheduler`
+  (`@Scheduled(fixedDelayString = "${zte.routing.refresh-interval-ms:30000}")`)
+  is the periodic catch-all for status changes written directly by
+  `AutoDiscoveryWorker`/`HealthPollingService` (which don't go through
+  `InventoryService` and so publish no event of their own).
+  **`InventoryBootstrapSeeder`** (`ApplicationRunner`) seeds `service-a`/
+  `service-b` into the registry at startup from the `service-a.uri`/
+  `service-b.uri` properties (repurposed from ADR-004's original static
+  routes), only if not already registered — preserves zero-config
+  `docker compose up` onboarding now that routing has no hardcoded
+  fallback. See ADR-017.
 - **`ZteAuthorizationFilter`** (`GlobalFilter`, order `HIGHEST_PRECEDENCE+100`)
-  — users2service enforcement: extracts `realm_access.roles`, builds an
-  enriched sources list via `IdentitySources.enrich(roles, jwtAuth)` (bare
-  role names plus `role:`/`user:`/`group:` URN forms, ADR-014 — see §5.2c),
-  consults the YAML `users2service` rules against that enriched list
+  — users2service enforcement: a JWT whose `azp` is not the interactive
+  user client (`zte.policy.user-client-id`) is service2service traffic and
+  passes through untouched regardless of `realm_access.roles` — see next
+  bullet (ADR-017: this used to also require `roles.isEmpty()`, but every
+  Keycloak client is granted default composite/scope roles automatically,
+  so that condition was never actually true for a real client-credentials
+  token — a previously-latent bug, unexercised until this stage's `service-a`
+  machine client became the first service credential to ever reach this
+  Gateway-routed filter; see §10). Otherwise extracts `realm_access.roles`,
+  builds an enriched sources list via `IdentitySources.enrich(roles, jwtAuth)`
+  (bare role names plus `role:`/`user:`/`group:` URN forms, ADR-014 — see
+  §5.2c), consults the YAML `users2service` rules against that enriched list
   (explicit ALLOW/DENY short-circuits; no match →
   deny as of ADR-012, the DB-backed fallback was retired); 403 +
-  `GATEWAY_ALREADY_ROUTED_ATTR` on deny (blocks `NettyRoutingFilter`). A JWT
-  with no realm roles and an `azp` other than the interactive user client
-  (`zte.policy.user-client-id`) is service2service traffic and passes through
-  untouched — see next bullet. **Only runs for Gateway-routed requests** —
-  `GlobalFilter` is invoked by `FilteringWebHandler`, which only handles
-  requests `RoutePredicateHandlerMapping` matches to a `GatewayRouteConfig`
-  route; a local `@RestController` with no route entry never reaches it (see
+  `GATEWAY_ALREADY_ROUTED_ATTR` on deny (blocks `NettyRoutingFilter`).
+  **Only runs for Gateway-routed requests** — `GlobalFilter` is invoked by
+  `FilteringWebHandler`, which only handles requests
+  `RoutePredicateHandlerMapping` matches to an
+  `InventoryRouteDefinitionLocator`-sourced route; a local
+  `@RestController` with no route entry never reaches it (see
   `AdminAuthorizationFilter` below, and ADR-012's Self-Critique for how this
   was found — empirically, via a USER-role JWT getting `200` from the new
   admin API before the fix).
@@ -331,7 +377,13 @@ Reusable security config imported by every service (`ZteSecurityAutoConfiguratio
   ADR-016 (§5.2d) — from the same `doFinally`, on any 2xx status regardless
   of the exclusion list (a separate concern with its own no-op-if-unregistered
   safety net) — fires `HealthTelemetryService.recordSuccessfulCall(...)`
-  with the `RequestTargetResolver`-derived target name.
+  with the `RequestTargetResolver`-derived target name. Since ADR-017, the
+  persisted `RequestLog` (via `RequestLog.forRest(...)`) also carries
+  `initiatorClient` (JWT `azp`), `originalUserObo` (JWT `sub`),
+  `targetService` (the same `RequestTargetResolver` name used for health
+  telemetry), `httpMethod`, and `decisionEffect` (`ALLOW`/`DENY`/`ERROR`,
+  derived from the final status code — a coarse signal, not per-filter
+  provenance; see §10).
 - **`InternalPolicyController`** — `GET /api/v1/internal/policies`, permitAll
   via `InternalSecurityConfig` (`@Order(-100)`), Docker-network-only exposure.
   Returns `PolicyDefinitionStore.current().users2service()` (YAML-backed as
@@ -393,7 +445,10 @@ ADR-011 for why this was chosen over three parallel rule subclasses.
 - **`RequestLog`** — R2DBC record (`@Table("request_logs")`); `id` left
   `null` on construction, DB-generated (`gen_random_uuid()`, built into
   Postgres core since v13). Mirrors the pre-ADR-012 `AccessPolicy` record's
-  DB-generated-PK convention.
+  DB-generated-PK convention. Two factories as of ADR-017:
+  `forRest(...)` (REST traffic, `agentId`/`toolName` always `null`) and
+  `forMcp(...)` (MCP traffic — `traceId` is the MCP session id, `httpMethod`
+  hardcoded `POST`, `clientIp`/`userAgent`/`originalUserObo` always `null`).
 - **`RequestLogRepository`** — `ReactiveCrudRepository<RequestLog, UUID>`,
   one derived query, `findTop100ByOrderByTimestampDesc()`.
 - **`RequestLogAuditService`** — directly mirrors
@@ -403,10 +458,20 @@ ADR-011 for why this was chosen over three parallel rule subclasses.
   of propagating or being lost — the literal "keep SLF4J as fallback"
   requirement.
 
-`agentId`/`toolName` on `RequestLog` are always `null` from this path — the
-given schema has no subject/user-id column, and this integration point is
-REST-gateway-only (not `LoggingMcpAuditService`/MCP); reserved for a future
-unification (§9.4).
+**Audit unification (ADR-017).** `agentId`/`toolName` were reserved but
+always `null` from this path prior to ADR-017 — REST and MCP traffic had
+two disconnected audit mechanisms (this one, and MCP's own in-memory-only
+`McpAuditEvent`/`LoggingMcpAuditService`, §8.3), a gap ADR-009 itself
+flagged as future work. As of ADR-017, `LoggingMcpAuditService.persist(...)`
+also calls `RequestLogAuditService.record(RequestLog.forMcp(...))` — one
+unified `request_logs` table for both traffic types, reusing the same
+async, non-blocking write path rather than adding a second one.
+`request_logs` also gained five columns in `V12__extend_request_logs.sql`:
+`initiator_client`, `original_user_obo`, `target_service`, `http_method`,
+`decision_effect` (see §5.2 `RequestAuditFilter` and §6). `decisionEffect`
+is derived from the final HTTP status code (2xx→`ALLOW`, 401/403→`DENY`,
+else→`ERROR`) — a coarse, post-hoc signal, not per-filter provenance of
+*which* policy layer decided (§10).
 
 **`AuditExclusionProperties`** (`filter` package, `@ConfigurationProperties(prefix
 = "zte.audit")`, same shape as `PolicyDefaultsProperties`) — `zte.audit.excluded-path-prefixes`
@@ -858,26 +923,33 @@ shape (`PolicyRule`):
 
 Full schema/precedence/validation reference: `docs/policy-schema.md`.
 
-`request_logs` (PostgreSQL, Flyway `V4__create_request_logs_table.sql`,
-ADR-013) — the async request audit trail. Replaces `gateway_audit_log` (`V1`,
-dropped in the same migration — never read or written by any code since
+`request_logs` (PostgreSQL, Flyway `V4__create_request_logs_table.sql` +
+`V12__extend_request_logs.sql`, ADR-013 + ADR-017) — the async, unified
+REST+MCP request audit trail. Replaces `gateway_audit_log` (`V1`, dropped
+in the same `V4` migration — never read or written by any code since
 Stage 1):
 
 | Column | Type | Notes |
 |---|---|---|
 | `id` | `UUID` | PK, `DEFAULT gen_random_uuid()` |
 | `timestamp` | `TIMESTAMPTZ` | `DEFAULT NOW()`, indexed descending for the "latest 100" query |
-| `trace_id` | `VARCHAR(64)` | The request's `X-Request-Id` (caller-supplied or gateway-generated); indexed |
-| `client_ip` | `VARCHAR(64)`, nullable | `X-Forwarded-For` first hop, else the raw connection address |
-| `user_agent` | `TEXT`, nullable | |
+| `trace_id` | `VARCHAR(64)` | REST: the request's `X-Request-Id` (caller-supplied or gateway-generated). MCP: the session id. Indexed |
+| `client_ip` | `VARCHAR(64)`, nullable | `X-Forwarded-For` first hop, else the raw connection address; always `null` for MCP rows |
+| `user_agent` | `TEXT`, nullable | Always `null` for MCP rows |
 | `process_id` | `VARCHAR(32)`, nullable | OS PID of the gateway JVM instance that handled the request — distinct from `trace_id`, which travels across services |
-| `agent_id` | `VARCHAR(128)`, nullable | Always `null` from the REST path today — reserved for a future MCP-audit unification (§9.4) |
-| `tool_name` | `VARCHAR(128)`, nullable | Same as `agent_id` |
-| `path` | `TEXT` | |
+| `agent_id` | `VARCHAR(128)`, nullable | MCP only (ADR-017) — the calling agent's id; always `null` for REST rows |
+| `tool_name` | `VARCHAR(128)`, nullable | MCP only (ADR-017) — the requested JSON-RPC tool name; always `null` for REST rows |
+| `path` | `TEXT` | REST: the request path. MCP: always `/message` |
 | `status_code` | `INTEGER`, nullable | |
-| `message` | `TEXT`, nullable | Currently unused by the REST write path |
+| `message` | `TEXT`, nullable | MCP only (ADR-017) — the deny reason on a `DENIED` policy decision; unused by the REST write path |
+| `initiator_client` | `VARCHAR(128)`, nullable | ADR-017. JWT `azp` (REST) / agent id (MCP) — the calling service/agent identity, `null` for a plain interactive user |
+| `original_user_obo` | `VARCHAR(128)`, nullable | ADR-017, REST only. JWT `sub` — the identity the gateway's OBO token was minted for |
+| `target_service` | `VARCHAR(255)`, nullable | ADR-017. `RequestTargetResolver`-derived service name, same convention as `health_metrics` |
+| `http_method` | `VARCHAR(10)`, nullable | ADR-017. REST: the actual verb. MCP: hardcoded `POST` |
+| `decision_effect` | `VARCHAR(10)`, nullable | ADR-017. `ALLOW`/`DENY`/`ERROR`, derived from `status_code` (2xx/401,403/else) — a coarse, post-hoc signal, not per-filter provenance |
 
-Written by `RequestLogAuditService` (§5.2b), read via `GET
+Written by `RequestLogAuditService` (§5.2b, both `RequestAuditFilter` REST
+rows and `LoggingMcpAuditService` MCP rows as of ADR-017), read via `GET
 /api/v1/admin/audit-logs` (§7) — `findTop100ByOrderByTimestampDesc()`.
 
 `idp_identities` (PostgreSQL, Flyway `V5__create_idp_identities.sql` +
@@ -953,8 +1025,8 @@ application code, not a native query).
 
 | Endpoint | Method | Auth | Service | Purpose |
 |---|---|---|---|---|
-| `/api/v1/service-a/**` | any | JWT + YAML policy | gateway → service-a | Proxied REST call |
-| `/api/v1/service-b/**` | any | JWT + YAML policy | gateway → service-b | Proxied REST call |
+| `/api/v1/{name}/**` | any | JWT + YAML policy | gateway → any `REST`-type `inventory_services` entry | Dynamically routed by `InventoryRouteDefinitionLocator` (ADR-017) — `service-a`/`service-b` below are the two entries `InventoryBootstrapSeeder` seeds by default, not hardcoded routes |
+| `/api/v1/service-b/restricted` | GET | JWT + YAML `service2service` policy | gateway → service-b | ADR-017 — deliberately has no `service2service` rule, exercises default-deny |
 | `/api/v1/internal/policies` | GET | none (network perimeter only) | gateway | Feeds `zt-agents` (ADR-007), YAML-backed |
 | `/api/v1/internal/policies/reload` | POST | none (network perimeter only) | gateway | No-downtime YAML policy reload (ADR-011) |
 | `/api/v1/admin/policies` | GET | JWT + `ADMIN` YAML rule | gateway | Full policy document for the Admin Console (ADR-012) |
@@ -1014,7 +1086,10 @@ coexisting with Gateway routing on non-overlapping paths.
    `Schedulers.boundedElastic()`. Logs today; swapping `persist()` for an
    InfluxDB line-protocol write is the only change needed for a real TSDB.
    Also logged synchronously via `ZteAuditLogger.policyDecision(...)`
-   (ADR-011), the same call used by the REST-path filters.
+   (ADR-011), the same call used by the REST-path filters. As of ADR-017,
+   the same `persist()` call also writes a `RequestLog.forMcp(...)` row into
+   `request_logs` via `RequestLogAuditService` — REST and MCP traffic share
+   one audit table (§5.2b).
 6. `POST /message` always returns `202 Accepted` — the real answer only ever
    arrives over SSE.
 
@@ -1199,11 +1274,14 @@ own, all are new capabilities.
 - [ ] True-`401` (no token at all) coverage in `request_logs` — currently
       invisible since Spring Security's own filter rejects before
       `RequestAuditFilter` runs (see ADR-013 Self-Critique).
-- [ ] MCP-audit unification: have `LoggingMcpAuditService` write into
-      `request_logs` too, populating the currently-always-null
-      `agent_id`/`tool_name` columns (see ADR-013 Future Migration Path).
+- [x] MCP-audit unification: `LoggingMcpAuditService` now also writes into
+      `request_logs`, populating `agent_id`/`tool_name` — ADR-017.
 - [ ] Bounded buffer + overflow policy for `RequestLogAuditService` — same
       known gap `LoggingMcpAuditService` already has (§9.3).
+- [ ] Per-filter `decision_effect` provenance — currently derived from the
+      final HTTP status code alone, so it can't distinguish a ZTE-layer
+      `DENY` from a downstream service's own error status (ADR-017
+      Self-Criticism).
 
 ### 9.3 Backlog — MCP proxy hardening (from §8.5)
 
@@ -1244,7 +1322,11 @@ own, all are new capabilities.
 |---|---|---|---|
 | High | Gateway could become a "God Service" if business logic creeps in | ADR-001 | Convention only — no enforcement mechanism yet |
 | High (prod) | Keycloak client secret (`zte-gateway-secret`) hardcoded in `realm-export.json` | ADR-002 | Dev-only; must be env/secret-manager-injected before staging |
-| High | `GlobalFilter`s (Spring Cloud Gateway's type) silently don't run for any gateway-local `@RestController` (no `GatewayRouteConfig` route) or for requests denied before reaching them — found empirically twice now: `AdminAuthorizationFilter` (ADR-012, a USER-role JWT got `200` from the admin API) and `RequestAuditFilter` (ADR-013, denied/admin/internal requests weren't being logged) | ADR-012, ADR-013 | Both fixed by converting to plain `WebFilter`s; documented in both classes' Javadoc and both ADRs. Still no *generic* guard against a third instance of this mistake — real gap, backlog item §9.2 |
+| High | `GlobalFilter`s (Spring Cloud Gateway's type) silently don't run for any gateway-local `@RestController` (no `InventoryRouteDefinitionLocator`-sourced route) or for requests denied before reaching them — found empirically twice now: `AdminAuthorizationFilter` (ADR-012, a USER-role JWT got `200` from the admin API) and `RequestAuditFilter` (ADR-013, denied/admin/internal requests weren't being logged) | ADR-012, ADR-013 | Both fixed by converting to plain `WebFilter`s; documented in both classes' Javadoc and both ADRs. Still no *generic* guard against a third instance of this mistake — real gap, backlog item §9.2 |
+| ~~Medium~~ Resolved | ~~`@EnableScheduling` declared on `MtlsHttpClientConfig`, a `@ConditionalOnProperty`-gated config class that never activates when `zte.mtls.enabled=false` (true for every integration test) — no `@Scheduled` method anywhere in the app, including the pre-existing `HealthPollingService`, had ever actually fired during an IT test~~ | ADR-017 | Resolved — `@EnableScheduling` moved to `GatewayApplication` (always active, unconditional). Found live while debugging `InventoryRouteRefreshScheduler` never firing in integration tests |
+| ~~Medium~~ Resolved | ~~`ZteAuthorizationFilter`'s service-principal detection required `realm_access.roles` to be completely empty (`roles.isEmpty() && isServicePrincipal(...)`), which is never true for a real Keycloak client-credentials token (every client gets default composite/scope roles automatically) — silently unexercised because MCP agents, the only prior service-credential callers, never reach this Gateway `GlobalFilter`~~ | ADR-017 | Resolved — dropped the `roles.isEmpty()` requirement; `isServicePrincipal(jwtAuth)` alone is sufficient. Found live via the new `service-a` machine client, the first service credential to ever exercise this exact Gateway-routed filter |
+| Low | `decision_effect` in `request_logs` is derived purely from the final HTTP status code, not from which policy layer actually made the decision — can't distinguish a ZTE-layer `DENY` from a downstream service's own error status | ADR-017 | Named explicitly, not hidden; a per-filter `exchange` attribute would fix this properly but isn't needed at this MVP's scale — backlog item §9.2 |
+| Low | MCP traffic produces two `request_logs` rows per interaction — `RequestAuditFilter`'s own generic REST audit of the raw `/sse`/`/message` HTTP requests, plus `LoggingMcpAuditService`'s MCP-specific row (agent/tool populated). Found live, not by any IT test | ADR-017 | Arguably correct (transport-level vs. semantic audit, same two-layer structure ADR-013 already established for REST); not silently discovered — named explicitly, no fix applied since suppressing it would also lose `X-Request-Id` visibility for that traffic |
 | Medium | `switchIfEmpty` on a `Mono<Void>`-typed reactive chain can't distinguish "upstream had a value" from "upstream was empty" (a `Mono<Void>` never emits either way) — double-invokes the fallback. Found and fixed twice: `AdminAuthorizationFilter` (ADR-012) and (pre-existing, found empirically before this stage's rewrite) `RequestAuditFilter` (ADR-013) | ADR-012, ADR-013 | Both use `doFinally`/`defaultIfEmpty`+`instanceof` instead now. No static-analysis rule exists to catch a third occurrence automatically. |
 | Medium | Shared HMAC secret for OBO tokens | ADR-004 | `ZTE_OBO_SECRET` env var; RS256 upgrade deferred (§9.4) |
 | Medium | Server-side TLS cert rotation requires a restart (no hot-reload API) | ADR-004 | 1-year dev certs; production needs cert-manager + rolling restart |
@@ -1254,7 +1336,7 @@ own, all are new capabilities.
 | Low | `client_ip` trusts `X-Forwarded-For` at face value, no validation the immediate hop is a trusted proxy | ADR-013 | Acceptable for this MVP's single-hop Docker-network deployment; a real LB-fronted deployment would need edge-level header stripping/validation |
 | Low | `POST /api/v1/internal/policies/reload` has no auth beyond network-perimeter isolation, same posture as `InternalPolicyController` | ADR-011 | Acceptable for MVP (Docker-bridge only, not proxied externally); ADR-012 adds an ADMIN-JWT-gated counterpart for the human operator without removing this one |
 | Low | `LoggingMcpAuditService` and `RequestLogAuditService` buffers are both unbounded | §8.5, ADR-013 | Backlog item §9.2/§9.3 |
-| Low | `agent_id`/`tool_name` in `request_logs` are always `null` from the REST path — the given schema has no subject/user-id column | ADR-013 | Admin Console's "Agent/User ID" column shows blank for today's REST traffic; reserved for a future MCP-audit unification (§9.2) |
+| ~~Low~~ Resolved | ~~`agent_id`/`tool_name` in `request_logs` are always `null` from the REST path~~ | ADR-013 | Resolved by ADR-017 — `LoggingMcpAuditService` now writes MCP rows into the same table, populating both columns; always `null` for REST rows by design (not applicable to that traffic) |
 | ~~Medium~~ Resolved | ~~5-minute policy cache window / two sources of truth for users2service~~ | ADR-003 / ADR-011 | Resolved by ADR-012 — `PolicyService`'s DB cache is deleted entirely; YAML is the sole source, no staleness window |
 | Low | `PolicyMatcher` is a full linear scan per category per request | ADR-011 | Same `<100 rules` MVP scale ceiling as `access_policies`; negligible at that scale |
 | Medium | `idp_identities` can be stale for up to `zte.idp.sync-interval-ms` (15 min default) — a Keycloak identity created/renamed after the last sync isn't URN-addressable until the next sync | ADR-014 | Deliberate tradeoff to keep `PolicyMatcher.evaluate()` zero-I/O (ADR-009 §8.2); `POST /api/v1/admin/identities/sync` gives an immediate manual override |
@@ -1293,12 +1375,14 @@ own, all are new capabilities.
 | [015](adr/ADR-015-machine-identities-and-urn-unification.md) | Machine Identities (OIDC Clients) and URN Unification |
 | [Identities UI + Relations](adr/identities-ui-actors-containers-and-relations-caching.md) | Identities UI Refactor (Actors vs. Access Containers) and Relational Caching — deliberately unnumbered filename, see the ADR's own note |
 | [016](adr/ADR-016-inventory-and-health-registry.md) | APIM Inventory Registry — Auto-Discovery and Health Telemetry |
+| [017](adr/ADR-017-dynamic-routing-and-audit.md) | Dynamic Inventory-Driven Routing, Unified Audit Logging, and Strict S2S Rules |
 
 ---
 
 *This document reflects repo state at commit `8a85f75` (Stage 16, APIM Inventory
 Registry, plus the mTLS/OpenAPI, management-URL health-polling, discovered-schema API
 Catalog, custom-docs-URL/synchronous-fetch, inline-edit/refetch, and known-issues/
-test-coverage amendments). Keep it in sync the same way as README/CLAUDE.md — per
-CLAUDE.md's mandatory workflow, update it alongside any task that completes a stage or
-changes the roadmap.*
+test-coverage amendments) plus Stage 17 (dynamic routing, audit unification, strict S2S
+rules — commit hash pending, see §2). Keep it in sync the same way as README/CLAUDE.md
+— per CLAUDE.md's mandatory workflow, update it alongside any task that completes a
+stage or changes the roadmap.*

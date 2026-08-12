@@ -366,9 +366,11 @@ class InventoryRegistryIT extends BaseZteIntegrationTest {
 
         String adminToken = getAdminToken();
         // Name must match RequestTargetResolver.targetService("/api/v1/service-a/hello") -> "service-a"
-        // for the passive telemetry hook (a plain string match) to find this row.
-        String id = onboard(adminToken, "service-a", "REST", "http://localhost:" + WIREMOCK.port());
-        assertStatusEventually(adminToken, id, "ACTIVE");
+        // for the passive telemetry hook (a plain string match) to find this row. "service-a" is
+        // seeded once for the whole IT suite by BaseZteIntegrationTest, already pointed at this
+        // same WIREMOCK instance and already settled/routable since suite startup (ADR-017) — no
+        // re-discovery needed here, this test is about passive telemetry, not discovery itself.
+        String id = findIdByName(adminToken, "service-a");
 
         given()
             .baseUri("http://localhost:" + gatewayPort)
@@ -407,6 +409,25 @@ class InventoryRegistryIT extends BaseZteIntegrationTest {
             .then()
                 .statusCode(201)
                 .extract().path("id");
+    }
+
+    /** For entries seeded once for the whole suite by {@code BaseZteIntegrationTest} (ADR-017). */
+    private String findIdByName(String adminToken, String name) {
+        Response res = given()
+                .baseUri("http://localhost:" + gatewayPort)
+                .header("Authorization", "Bearer " + adminToken)
+            .when()
+                .get("/api/v1/admin/inventory")
+            .then()
+                .statusCode(200)
+                .extract().response();
+
+        List<Map<String, Object>> entries = res.jsonPath().getList("");
+        return entries.stream()
+                .filter(e -> name.equals(e.get("name")))
+                .findFirst()
+                .map(e -> (String) e.get("id"))
+                .orElseThrow(() -> new IllegalStateException("No inventory entry named '" + name + "' — expected it to be seeded by BaseZteIntegrationTest"));
     }
 
     private String onboard(String adminToken, String name, String targetType, String baseUrl, String docsUrl) {

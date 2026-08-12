@@ -73,26 +73,60 @@ class RequestAuditIT extends BaseZteIntegrationTest {
         assertAuditRowEventuallyExists(adminToken, traceId, 403);
     }
 
+    @Test
+    @DisplayName("ADR-017: allowed request's audit row carries targetService/httpMethod/decisionEffect/originalUserObo")
+    void allowedRequest_auditRowPopulatesAdr017Fields() {
+        WIREMOCK.stubFor(get(urlPathEqualTo("/api/v1/service-a/hello"))
+                .willReturn(aResponse()
+                        .withStatus(200)
+                        .withHeader("Content-Type", "application/json")
+                        .withBody(STUB_RESPONSE)));
+
+        String traceId = "it-adr017-" + UUID.randomUUID();
+        String adminToken = getAdminToken();
+
+        given()
+            .baseUri("http://localhost:" + gatewayPort)
+            .header("Authorization", "Bearer " + adminToken)
+            .header("X-Request-Id", traceId)
+        .when()
+            .get("/api/v1/service-a/hello")
+        .then()
+            .statusCode(200);
+
+        await().atMost(Duration.ofSeconds(5)).untilAsserted(() -> {
+            Map<String, Object> row = findAuditRow(adminToken, traceId);
+            assertThat(row.get("targetService")).isEqualTo("service-a");
+            assertThat(row.get("httpMethod")).isEqualTo("GET");
+            assertThat(row.get("decisionEffect")).isEqualTo("ALLOW");
+            assertThat(row.get("originalUserObo")).isNotNull();
+        });
+    }
+
     private void assertAuditRowEventuallyExists(String adminToken, String traceId, int expectedStatus) {
         await().atMost(Duration.ofSeconds(5)).untilAsserted(() -> {
-            Response res = given()
-                    .baseUri("http://localhost:" + gatewayPort)
-                    .header("Authorization", "Bearer " + adminToken)
-                .when()
-                    .get("/api/v1/admin/audit-logs")
-                .then()
-                    .statusCode(200)
-                    .extract().response();
-
-            List<Map<String, Object>> allLogs = res.jsonPath().getList("");
-            List<Map<String, Object>> matching = allLogs.stream()
-                    .filter(row -> traceId.equals(row.get("traceId")))
-                    .toList();
-
-            assertThat(matching).hasSize(1);
-            Map<String, Object> row = matching.get(0);
+            Map<String, Object> row = findAuditRow(adminToken, traceId);
             assertThat(row.get("clientIp")).isNotNull();
             assertThat(((Number) row.get("statusCode")).intValue()).isEqualTo(expectedStatus);
         });
+    }
+
+    private Map<String, Object> findAuditRow(String adminToken, String traceId) {
+        Response res = given()
+                .baseUri("http://localhost:" + gatewayPort)
+                .header("Authorization", "Bearer " + adminToken)
+            .when()
+                .get("/api/v1/admin/audit-logs")
+            .then()
+                .statusCode(200)
+                .extract().response();
+
+        List<Map<String, Object>> allLogs = res.jsonPath().getList("");
+        List<Map<String, Object>> matching = allLogs.stream()
+                .filter(row -> traceId.equals(row.get("traceId")))
+                .toList();
+
+        assertThat(matching).hasSize(1);
+        return matching.get(0);
     }
 }

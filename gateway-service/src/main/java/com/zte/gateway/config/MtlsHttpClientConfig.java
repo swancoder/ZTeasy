@@ -8,7 +8,6 @@ import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.http.client.reactive.ReactorClientHttpConnector;
-import org.springframework.scheduling.annotation.EnableScheduling;
 import org.springframework.scheduling.annotation.Scheduled;
 import reactor.netty.http.client.HttpClient;
 
@@ -31,9 +30,15 @@ import java.time.Duration;
  * <p><strong>No circular dependency:</strong> {@code sslContextFactory} is set as an
  * instance field inside the {@code @Bean} factory method (before the scheduler starts),
  * avoiding the {@code @Autowired}-self-reference cycle.
+ *
+ * <p><strong>{@code @EnableScheduling} moved to {@code GatewayApplication}
+ * (ADR-017)</strong> — it used to live on this class, but this class is
+ * {@code @ConditionalOnProperty}-gated and the {@code it} test profile sets
+ * {@code zte.mtls.enabled=false}, which meant {@code @EnableScheduling} never
+ * activated in any integration test at all. See {@code GatewayApplication}'s
+ * Javadoc for the full explanation.
  */
 @Configuration
-@EnableScheduling
 @ConditionalOnProperty(name = "zte.mtls.enabled", havingValue = "true", matchIfMissing = true)
 public class MtlsHttpClientConfig {
 

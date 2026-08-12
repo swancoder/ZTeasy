@@ -22,8 +22,8 @@ class RequestLogAuditServiceTest {
     @Mock RequestLogRepository repository;
 
     private RequestLog sampleEntry() {
-        return RequestLog.of("trace-1", "127.0.0.1", "curl/8.0", "1234",
-                "/api/v1/service-a/hello", 200, null);
+        return RequestLog.forRest("trace-1", "127.0.0.1", "curl/8.0", "1234",
+                "/api/v1/service-a/hello", 200, null, null, "user-sub-1", "service-a", "GET", "ALLOW");
     }
 
     @Test

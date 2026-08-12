@@ -14,9 +14,13 @@ import org.testcontainers.containers.PostgreSQLContainer;
 import org.keycloak.admin.client.Keycloak;
 import org.keycloak.representations.idm.CredentialRepresentation;
 
+import java.time.Duration;
 import java.util.List;
+import java.util.Map;
 
 import static com.github.tomakehurst.wiremock.core.WireMockConfiguration.wireMockConfig;
+import static org.assertj.core.api.Assertions.assertThat;
+import static org.awaitility.Awaitility.await;
 
 /**
  * Shared base for all ZTE integration tests.
@@ -108,12 +112,17 @@ abstract class BaseZteIntegrationTest {
         registry.add("spring.security.oauth2.resourceserver.jwt.jwk-set-uri",
                 () -> KEYCLOAK.getAuthServerUrl() + "/realms/zte-realm/protocol/openid-connect/certs");
 
-        // Downstream services → WireMock (HTTP, no mTLS needed in test)
-        registry.add("service-a.uri", () -> "http://localhost:" + WIREMOCK.port());
-        registry.add("service-b.uri", () -> "http://localhost:" + WIREMOCK.port());
-
         // MCP backend (McpBackendClient) → WireMock as well; see McpProxyIT
         registry.add("mcp-backend.uri", () -> "http://localhost:" + WIREMOCK.port());
+
+        // Blank out application.yml's default service-a.uri/service-b.uri (ADR-017) —
+        // otherwise InventoryBootstrapSeeder would seed both at their real
+        // https://localhost:8081/8082 defaults during context startup, before
+        // seedRoutingRegistryOnce() (below) gets a chance to seed the WireMock-pointed
+        // entries these tests actually need, 409-conflicting on the name. Tests seed
+        // their own routing registry entries explicitly instead.
+        registry.add("service-a.uri", () -> "");
+        registry.add("service-b.uri", () -> "");
 
         // IdP identity sync (ADR-014) — KeycloakIdpAdapter calls the real Testcontainers
         // Keycloak's Admin REST API using zte-gateway's service account (realm-export.json
@@ -121,6 +130,15 @@ abstract class BaseZteIntegrationTest {
         // via POST /api/v1/admin/identities/sync, not the @Scheduled job.
         registry.add("zte.idp.keycloak.base-uri", KEYCLOAK::getAuthServerUrl);
         registry.add("zte.idp.sync-interval-ms", () -> "3600000");
+
+        // Dynamic routing (ADR-017) — InventoryRouteRefreshScheduler's periodic
+        // RefreshRoutesEvent is the only thing that picks up a status change
+        // AutoDiscoveryWorker/HealthPollingService make directly via InventoryRepository
+        // (InventoryService.create/update/delete publish their own immediate refresh, but
+        // that fires while a freshly seeded entry is still PENDING — excluded from routing
+        // — not yet ACTIVE/WARNING). The production default (30s) would make every IT test
+        // that routes through a freshly seeded service wait up to 30s; short-circuited here.
+        registry.add("zte.routing.refresh-interval-ms", () -> "500");
     }
 
     // ── Dynamic port injection ────────────────────────────────────────────────
@@ -133,6 +151,74 @@ abstract class BaseZteIntegrationTest {
     @BeforeEach
     void resetStubs() {
         WIREMOCK.resetAll();
+    }
+
+    // ── Seed the dynamic-routing registry (ADR-017) ───────────────────────────
+
+    /**
+     * The old hardcoded {@code service-a}/{@code service-b} Gateway routes were
+     * replaced with {@code InventoryRouteDefinitionLocator} (ADR-017), which
+     * sources routes from {@code inventory_services} — so
+     * {@code /api/v1/service-a/**}/{@code /api/v1/service-b/**} only route
+     * anywhere if those two names are actually registered. Every IT class that
+     * routes through the gateway to either name (nearly all of them) needs this;
+     * seeding it here once, rather than per-class, matches this base class's own
+     * "one shared context for the whole suite" design.
+     *
+     * <p>Guarded by a static flag, not a tolerate-409-and-move-on POST, since
+     * {@link #configure} wires the same {@code WIREMOCK} instance/port for
+     * every subclass in this single, shared {@code ApplicationContext} — there
+     * is only ever one seeding to do, not one per test class. Not thread-safe
+     * against parallel test execution, but this suite doesn't run one (JUnit5's
+     * default sequential execution, unmodified here) — no lock needed for a
+     * flag only ever read/written from one thread at a time.
+     */
+    private static boolean routingRegistrySeeded = false;
+
+    @BeforeEach
+    void seedRoutingRegistryOnce() {
+        if (routingRegistrySeeded) {
+            return;
+        }
+        String adminToken = getAdminToken();
+        String wireMockUri = "http://localhost:" + WIREMOCK.port();
+        seedInventoryEntry(adminToken, "service-a", wireMockUri);
+        seedInventoryEntry(adminToken, "service-b", wireMockUri);
+        routingRegistrySeeded = true;
+    }
+
+    private void seedInventoryEntry(String adminToken, String name, String baseUri) {
+        RestAssured.given()
+                .baseUri("http://localhost:" + gatewayPort)
+                .header("Authorization", "Bearer " + adminToken)
+                .contentType(ContentType.JSON)
+                .body(Map.of("name", name, "targetType", "REST", "baseUrl", baseUri))
+            .when()
+                .post("/api/v1/admin/inventory")
+            .then()
+                .statusCode(201);
+
+        // Freshly created, this row is PENDING — excluded from routing — until
+        // AutoDiscoveryWorker's async probe settles it to ACTIVE/WARNING (both
+        // routable). That probe writes status via InventoryRepository directly, not
+        // through InventoryService, so it never publishes its own RefreshRoutesEvent
+        // — only the periodic scheduler (configure()'s shortened 500ms interval in
+        // this profile) picks the change up. Wait for status to settle, then for one
+        // more scheduler cycle, so routing is actually live before any test runs.
+        await().atMost(Duration.ofSeconds(10)).untilAsserted(() -> {
+            String status = RestAssured.given()
+                    .baseUri("http://localhost:" + gatewayPort)
+                    .header("Authorization", "Bearer " + adminToken)
+                .when()
+                    .get("/api/v1/admin/inventory")
+                .then()
+                    .statusCode(200)
+                    .extract().response()
+                    .jsonPath().getString("find { it.name == '" + name + "' }.status");
+            assertThat(status).isIn("ACTIVE", "WARNING");
+        });
+        // >= one more 500ms scheduler cycle, so the route reflects the now-settled status.
+        await().pollDelay(Duration.ofMillis(750)).atMost(Duration.ofMillis(1500)).until(() -> true);
     }
 
     // ── Token helpers ─────────────────────────────────────────────────────────

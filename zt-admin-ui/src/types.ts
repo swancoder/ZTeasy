@@ -23,9 +23,9 @@ export interface ReloadResult {
   errors?: string[]
 }
 
-// Mirrors gateway-service's com.zte.gateway.audit.RequestLog (ADR-013).
-// agentId/toolName are always null for today's REST traffic — reserved for
-// a future MCP-audit unification.
+// Mirrors gateway-service's com.zte.gateway.audit.RequestLog (ADR-013, extended ADR-017).
+// agentId/toolName are populated for MCP tool calls, null for plain REST traffic
+// (a row has one or the other, never both) — see RequestLog.forRest/forMcp.
 export interface RequestLogEntry {
   id: string
   timestamp: string
@@ -38,6 +38,12 @@ export interface RequestLogEntry {
   path: string
   statusCode: number | null
   message: string | null
+  // ADR-017 additions:
+  initiatorClient: string | null
+  originalUserObo: string | null
+  targetService: string | null
+  httpMethod: string | null
+  decisionEffect: 'ALLOW' | 'DENY' | 'ERROR' | null
 }
 
 // Mirrors gateway-service's com.zte.gateway.identity.IdpIdentity (ADR-014,

@@ -24,7 +24,7 @@ import java.util.Map;
  * {@code users2service} rule in {@code zte-policies.yaml}, enforced by
  * {@link AdminAuthorizationFilter} — a plain {@code WebFilter}, not
  * {@code ZteAuthorizationFilter}'s Gateway {@code GlobalFilter}, since this
- * controller has no {@code GatewayRouteConfig} route and {@code GlobalFilter}s
+ * controller has no {@code InventoryRouteDefinitionLocator} route and {@code GlobalFilter}s
  * only run for routed requests (see that class's Javadoc for why).
  *
  * <p>Intentionally coexists with {@code InternalPolicyController}/

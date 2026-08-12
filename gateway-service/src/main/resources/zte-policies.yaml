@@ -31,11 +31,24 @@ users2service:
     pathPattern: /api/v1/admin/**
     methods: "*"
 
-# Empty by default (fail-closed via zte.policy.default-effect). When adding a
-# rule, prefer the client:<clientId> URN form for source (ADR-015) — matches
-# an OIDC client id synced into idp_identities, same as the bare form still
-# does for backward compatibility.
-service2service: []
+# When adding a rule, prefer the client:<clientId> URN form for source
+# (ADR-015) — matches an OIDC client id synced into idp_identities, same as
+# the bare form still does for backward compatibility.
+service2service:
+  # ADR-017 — the 'service-a' Keycloak client (a machine identity for
+  # exercising this filter specifically; NOT the real service-a app's own
+  # internal direct-mTLS call to service-b, which never goes through the
+  # gateway) may call service-b's normal /context endpoint...
+  - id: s2s-service-a-service-b-context
+    effect: ALLOW
+    source: "client:service-a"
+    target: service-b
+    pathPattern: /api/v1/service-b/context
+    methods: GET
+  # ...but /restricted has no matching rule — deliberately omitted, not an
+  # explicit DENY rule, so it falls through to zte.policy.default-effect
+  # (deny-by-default) — proves the "no rule = no access" posture, not just
+  # an explicit-DENY-rule posture.
 
 agentMcpToolCalls:
   # Destructive/bulk-export shaped tool names are denied for every agent,

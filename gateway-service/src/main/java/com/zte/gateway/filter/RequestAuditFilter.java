@@ -21,6 +21,7 @@ import reactor.core.publisher.Mono;
 
 import java.net.InetSocketAddress;
 import java.util.UUID;
+import java.util.concurrent.atomic.AtomicReference;
 
 /**
  * Injects trusted identity/tracing headers for downstream services, and logs
@@ -37,7 +38,7 @@ import java.util.UUID;
  * (this class used to be one) — for the same reason {@code AdminAuthorizationFilter}
  * is (see its Javadoc, ADR-012): {@code GlobalFilter}s only run for requests
  * {@code RoutePredicateHandlerMapping} matches to a configured
- * {@code GatewayRouteConfig} route, so as a {@code GlobalFilter} this never saw
+ * {@code InventoryRouteDefinitionLocator} route, so as a {@code GlobalFilter} this never saw
  * {@code /api/v1/admin/**}/{@code /api/v1/internal/**} traffic, and never saw a
  * request denied by an earlier filter (which short-circuits without calling
  * {@code chain.filter()}). A {@link WebFilter} wraps the <em>entire</em>
@@ -83,21 +84,33 @@ public class RequestAuditFilter implements WebFilter, Ordered {
 
     @Override
     public Mono<Void> filter(ServerWebExchange exchange, WebFilterChain chain) {
-        String traceId   = resolveTraceId(exchange);
-        String clientIp  = resolveClientIp(exchange);
-        String userAgent = exchange.getRequest().getHeaders().getFirst(HttpHeaders.USER_AGENT);
-        String path      = exchange.getRequest().getPath().value();
+        String traceId       = resolveTraceId(exchange);
+        String clientIp      = resolveClientIp(exchange);
+        String userAgent     = exchange.getRequest().getHeaders().getFirst(HttpHeaders.USER_AGENT);
+        String path          = exchange.getRequest().getPath().value();
+        String httpMethod    = exchange.getRequest().getMethod().name();
+        String targetService = RequestTargetResolver.targetService(path);
+
+        // Captured inside the flatMap below (synchronously, before chain.filter() is
+        // invoked) and read back in doFinally — a plain reference, not Reactor Context,
+        // since doFinally's Consumer<SignalType> callback doesn't participate in context
+        // propagation the way an operator further up the same chain would.
+        AtomicReference<String> subjectRef = new AtomicReference<>();
+        AtomicReference<String> initiatorClientRef = new AtomicReference<>();
 
         return ReactiveSecurityContextHolder.getContext()
                 .defaultIfEmpty(new SecurityContextImpl()) // no context → empty ctx → treated as anonymous
                 .flatMap(ctx -> {
                     Authentication auth = ctx.getAuthentication();
                     String subject = null;
+                    String initiatorClient = null;
                     if (auth instanceof JwtAuthenticationToken jwtAuth) {
                         subject = jwtAuth.getToken().getSubject();
-                        String clientId = jwtAuth.getToken().getClaimAsString("azp");
-                        log.info("ZT-AUDIT sub={} azp={} path={} traceId={}", subject, clientId, path, traceId);
+                        initiatorClient = jwtAuth.getToken().getClaimAsString("azp");
+                        log.info("ZT-AUDIT sub={} azp={} path={} traceId={}", subject, initiatorClient, path, traceId);
                     }
+                    subjectRef.set(subject);
+                    initiatorClientRef.set(initiatorClient);
 
                     String finalSubject = subject;
                     ServerWebExchange mutated = exchange.mutate()
@@ -124,23 +137,46 @@ public class RequestAuditFilter implements WebFilter, Ordered {
                     // safety net (HealthTelemetryService/upsertSuccessfulCallByServiceName),
                     // so it doesn't need — or want — the same exclusion list.
                     if (statusCode != null && statusCode >= 200 && statusCode < 300) {
-                        healthTelemetryService.recordSuccessfulCall(RequestTargetResolver.targetService(path));
+                        healthTelemetryService.recordSuccessfulCall(targetService);
                     }
 
                     if (!isAuditScoped(path)) {
                         return;
                     }
                     ZteAuditLogger.requestLog(traceId, path, statusCode);
-                    auditService.record(RequestLog.of(
-                            traceId, clientIp, userAgent, PROCESS_ID, path, statusCode, null));
+                    auditService.record(RequestLog.forRest(
+                            traceId, clientIp, userAgent, PROCESS_ID, path, statusCode, null,
+                            initiatorClientRef.get(), subjectRef.get(), targetService, httpMethod,
+                            decisionEffect(statusCode)));
                 });
+    }
+
+    /**
+     * A coarse, status-code-derived signal, not per-policy-rule provenance
+     * (ADR-017 Self-Criticism) — this filter observes the final response
+     * after the whole {@code GlobalFilter} chain (and possibly the
+     * downstream service itself) has run, so it cannot distinguish "ZTE's
+     * own policy layer denied this" from "the downstream service returned
+     * this status on its own."
+     */
+    private static String decisionEffect(Integer statusCode) {
+        if (statusCode == null) {
+            return null;
+        }
+        if (statusCode >= 200 && statusCode < 300) {
+            return "ALLOW";
+        }
+        if (statusCode == 401 || statusCode == 403) {
+            return "DENY";
+        }
+        return "ERROR";
     }
 
     /**
      * {@code false} for paths under {@code zte.audit.excluded-path-prefixes}
      * (Admin Console self-traffic, internal endpoints, health checks) — an
      * exclude-list rather than enumerating proxied routes individually, so a
-     * future route added to {@code GatewayRouteConfig} is audited automatically.
+     * future route added to {@code InventoryRouteDefinitionLocator} is audited automatically.
      */
     private boolean isAuditScoped(String path) {
         return exclusions.getExcludedPathPrefixes().stream().noneMatch(path::startsWith);

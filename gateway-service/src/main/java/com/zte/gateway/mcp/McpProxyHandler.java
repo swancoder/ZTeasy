@@ -113,7 +113,8 @@ public class McpProxyHandler {
         if (!decision.allowed()) {
             log.warn("MCP DENY sessionId={} agentId={} tool={} reason={}",
                     sessionId, agentId, toolName, decision.reason());
-            auditService.record(new McpAuditEvent(PROCESS_ID, agentId, toolName, "DENIED", Instant.now()));
+            auditService.record(new McpAuditEvent(PROCESS_ID, agentId, toolName, "DENIED", Instant.now(),
+                    sessionId, decision.reason()));
             return emit(sessionId, JsonRpcResponse.denied(rpc.id(), decision.reason()));
         }
 
@@ -121,7 +122,7 @@ public class McpProxyHandler {
         return backendClient.forward(rpc)
                 .map(dataMaskingFilter::mask)
                 .doOnNext(resp -> auditService.record(
-                        new McpAuditEvent(PROCESS_ID, agentId, toolName, "ALLOWED", Instant.now())))
+                        new McpAuditEvent(PROCESS_ID, agentId, toolName, "ALLOWED", Instant.now(), sessionId, null)))
                 .flatMap(resp -> emit(sessionId, resp));
     }
 

@@ -80,8 +80,13 @@ export default function AuditTrail({ accessToken }: Props) {
                 <TableCell>Trace ID</TableCell>
                 <TableCell>Client IP</TableCell>
                 <TableCell>Agent/User ID</TableCell>
+                <TableCell>Initiator / OBO User</TableCell>
+                <TableCell>Method</TableCell>
                 <TableCell>Path</TableCell>
+                <TableCell>Target</TableCell>
+                <TableCell>Tool</TableCell>
                 <TableCell>Status</TableCell>
+                <TableCell>Decision</TableCell>
               </TableRow>
             </TableHead>
             <TableBody>
@@ -91,13 +96,36 @@ export default function AuditTrail({ accessToken }: Props) {
                   <TableCell sx={{ fontFamily: 'monospace', fontSize: '0.8rem' }}>{entry.traceId}</TableCell>
                   <TableCell>{entry.clientIp ?? '—'}</TableCell>
                   <TableCell>{entry.agentId ?? '—'}</TableCell>
+                  <TableCell sx={{ fontSize: '0.75rem' }}>
+                    {entry.initiatorClient ?? '—'} / {entry.originalUserObo ?? '—'}
+                  </TableCell>
+                  <TableCell>{entry.httpMethod ?? '—'}</TableCell>
                   <TableCell>{entry.path}</TableCell>
+                  <TableCell>{entry.targetService ?? '—'}</TableCell>
+                  <TableCell>{entry.toolName ?? '—'}</TableCell>
                   <TableCell>
                     <Chip
                       label={entry.statusCode ?? '—'}
                       color={entry.statusCode != null && entry.statusCode < 400 ? 'success' : 'error'}
                       size="small"
                     />
+                  </TableCell>
+                  <TableCell>
+                    {entry.decisionEffect ? (
+                      <Chip
+                        label={entry.decisionEffect}
+                        size="small"
+                        color={
+                          entry.decisionEffect === 'ALLOW'
+                            ? 'success'
+                            : entry.decisionEffect === 'DENY'
+                              ? 'error'
+                              : 'warning'
+                        }
+                      />
+                    ) : (
+                      '—'
+                    )}
                   </TableCell>
                 </TableRow>
               ))}

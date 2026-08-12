@@ -1,0 +1,155 @@
+Original prompt (verbatim, role-play framing — "Senior Solution Architect /
+Java Developer"):
+
+"We are replacing hardcoded gateway routes with dynamic routing backed by
+our `inventory_services` DB. Simultaneously, we are upgrading
+`RequestAuditFilter` to persist detailed audit logs to PostgreSQL,
+including extracting requested MCP tools from the request body and
+tracking On-Behalf-Of (OBO) user propagation.
+
+Chain of Thought: Design a `RouteDefinitionLocator` bean dynamically
+generating routes from `InventoryRepository`; design the `request_logs`
+PostgreSQL table via Flyway; refactor `RequestAuditFilter` to persist logs
+asynchronously via R2DBC; analyze how to safely read the request body in
+Spring Cloud Gateway for MCP targets (extract JSON-RPC tool name) without
+consuming the Flux/breaking the downstream request; design the S2S policy
+test scenario for service-a calling service-b.
+
+Self-Criticism: warn that reading request body in a GlobalFilter is
+dangerous, must use ServerWebExchangeUtils.cacheRequestBody or a
+specialized filter; async DB logging must not block the reactive event
+loop.
+
+ADR Protocol: create a new ADR, placeholder
+ADR-[ADR_NUMBER]-dynamic-routing-and-audit.md, do not use hardcoded
+numbers.
+
+History: save prompt to
+./prompts-hist/[STAGE_NUMBER]_dynamic_routing_and_audit.txt.
+
+Task 1 (Dynamic Routing): custom RouteDefinitionLocator fetching
+ACTIVE/WARNING services from InventoryRepository, map /api/v1/{name}/**
+to the service's base_url, remove static service-a/service-b routes from
+application.yml.
+
+Task 2 (Audit DB Schema): Flyway migration
+V[DB_VERSION]__create_request_logs.sql, table request_logs: id (UUID),
+timestamp, trace_id, initiator_client (mTLS cert subject or azp),
+original_user_obo (from OBO token), target_service, target_path,
+http_method, mcp_tools (extracted tool names), decision_effect
+(ALLOW/DENY/ERROR).
+
+Task 3 (Audit Logging & MCP Body Inspection): update RequestAuditFilter
+(or a dedicated DB logging service) to write to request_logs async via
+R2DBC; if target is MCP, safely inspect the JSON-RPC body to extract
+method/name of the requested tool, log into mcp_tools; ensure OBO context
+(original user ID) is parsed and saved to original_user_obo.
+
+Task 4 (S2S Policy Enforcement & Tests): add GET
+/api/v1/service-b/restricted; update zte-policies.yaml to explicitly
+ALLOW service-a to call the normal /hello endpoint but explicitly DENY
+(or omit) /restricted; update ZeroTrustBreachIT (or create a new S2S IT)
+verifying (a) service-a calling service-b/hello succeeds and logs the OBO
+user, (b) service-a calling service-b/restricted returns 403.
+
+Verification: tests pass including new S2S scenarios; hardcoded routes
+removed but traffic still correctly flows to service-a/service-b via
+DB-driven routing; request_logs populates with HTTP method, OBO context,
+decision effect, and (for MCP) requested tool name.
+
+Git: commit message 'feat: implement dynamic inventory routing, db audit
+logging, and strict S2S rules'."
+
+---
+
+Deviations from the literal instructions, and why (full reasoning in
+ADR-017):
+
+1. **No new `request_logs` table.** The literal instruction
+   ("V[DB_VERSION]__create_request_logs.sql ... CREATE TABLE") assumed
+   this table didn't exist yet. It does — V4, ADR-013 — complete with
+   `agent_id`/`tool_name` columns already reserved, unused, and explicitly
+   commented for exactly this future unification. A literal CREATE would
+   have failed with a duplicate-table SQL error the first time the
+   migration ran. `V12__extend_request_logs.sql` ALTERs the existing
+   table with the five genuinely-new columns instead
+   (`initiator_client`, `original_user_obo`, `target_service`,
+   `http_method`, `decision_effect`) and reuses `path`/`agent_id`/
+   `tool_name` for `target_path`/`mcp_tools` rather than duplicating them
+   under new names.
+
+2. **No `ServerWebExchangeUtils.cacheRequestBody` machinery.** The
+   Self-Criticism's core warning doesn't apply: the MCP proxy
+   (`POST /message`) isn't a Spring Cloud Gateway `GlobalFilter`/routed
+   path at all — it's a separate WebFlux `RouterFunction` handler
+   (`McpProxyHandler`) that already parses the JSON-RPC body exactly once
+   and builds an outbound request itself, rather than proxying the
+   original byte stream. `agentId`/`toolName` were already extracted
+   there; the actual gap was that nothing persisted them anywhere durable
+   — fixed by having `LoggingMcpAuditService` also call into
+   `RequestLogAuditService`, not by adding new body-caching filter
+   machinery that this codebase's MCP path doesn't need.
+
+3. **This is really ADR-009's own flagged "future work."** Rather than
+   building a second, MCP-only persistence path, `LoggingMcpAuditService`
+   now writes into the same `request_logs` table REST traffic already
+   uses, via a new `RequestLog.forMcp(...)` factory alongside
+   `RequestLog.forRest(...)` — one unified audit trail, not two parallel
+   ones.
+
+4. **`application.yml` had no static routes to remove** — the two
+   hardcoded routes were a Java `RouteLocator` bean
+   (`GatewayRouteConfig`, deleted entirely), not YAML. `service-a.uri`/
+   `service-b.uri` properties were kept, but repurposed: from "the route
+   target" to "the bootstrap seed value" consumed by a new
+   `InventoryBootstrapSeeder`, so a fresh `docker compose up` still routes
+   service-a/service-b out of the box without manual Admin Console
+   onboarding.
+
+5. **service-a/service-b are not Keycloak clients calling the gateway as
+   themselves** — their real inter-service call is a direct mTLS hop
+   (ADR-004), off-gateway, using the OBO token already minted for the
+   user's own request. There is no pre-existing "service-a authenticates
+   to the gateway" flow to attach a test to. Exercising
+   `ServiceToServiceAuthorizationFilter` for real required adding a new,
+   clearly-documented `service-a` Keycloak machine client (mirroring
+   `agent-a`/`agent-b`'s shape) representing a distinct identity — not a
+   stand-in for the real service's own internal call — used only by the
+   new `ServiceToServiceIT` test.
+
+6. **`GET /api/v1/service-b/restricted`, not `/hello`** — `service-b` has
+   no `/hello` endpoint (that's service-a's greeting endpoint); the
+   existing analogous service-b endpoint is `/context`
+   (`UserContextController`). Used `/context` as the ALLOW target and
+   added `/restricted` (same OBO-validation logic, different policy
+   exposure) as the endpoint with no matching rule, to prove default-deny
+   rather than requiring an explicit DENY rule.
+
+Two real, previously-latent bugs found and fixed while building and
+testing this (full root-cause detail in ADR-017, both discovered via live
+debugging with actual evidence, not guessed):
+
+- `@EnableScheduling` was declared on a `@ConditionalOnProperty`-gated
+  config class (`MtlsHttpClientConfig`) that never activates when
+  `zte.mtls.enabled=false` — true for every integration test. No
+  `@Scheduled` method in the entire application, including the
+  pre-existing `HealthPollingService`, had ever actually fired during an
+  IT test before this. Moved to `GatewayApplication` (always active).
+- `ZteAuthorizationFilter`'s service-principal detection required
+  `realm_access.roles` to be completely empty, which is never true for a
+  real Keycloak client-credentials token (Keycloak grants every client
+  default composite/scope roles automatically). Never caught before
+  because MCP agents — the only prior service-credential callers — never
+  reach this Gateway `GlobalFilter` at all. Fixed by dropping the
+  roles-emptiness requirement.
+
+Verification performed: full unit + integration suite green
+(./gradlew test integrationTest); live route-matching verified via a
+throwaway "dyntest" inventory entry before removing the static routes;
+new ServiceToServiceIT proves both the 200/ALLOW and 403/DENY paths, with
+their request_logs rows asserted directly via the admin audit-logs
+endpoint.
+
+Commit message used: as specified, "feat: implement dynamic inventory
+routing, db audit logging, and strict S2S rules" (plus the customary
+follow-up SPECS.md commit-hash-backfill commit).

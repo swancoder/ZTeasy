@@ -18,7 +18,7 @@ import org.springframework.security.web.server.util.matcher.ServerWebExchangeMat
  * <p><strong>Why no JWT?</strong> The gateway runs on HTTP (port 8080), making
  * transport-layer mTLS infeasible without a second HTTPS listener. The internal
  * endpoint is protected at the network level (Docker bridge; not proxied externally
- * via {@code GatewayRouteConfig}).
+ * via {@code InventoryRouteDefinitionLocator}).
  *
  * <p>The {@link ZteAuthorizationFilter} passes unauthenticated requests through
  * automatically (its {@code defaultIfEmpty} path skips the DB policy check when

@@ -5,6 +5,8 @@ import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.ArgumentCaptor;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
+import org.springframework.cloud.gateway.event.RefreshRoutesEvent;
+import org.springframework.context.ApplicationEventPublisher;
 import reactor.core.publisher.Flux;
 import reactor.core.publisher.Mono;
 import reactor.test.StepVerifier;
@@ -28,11 +30,12 @@ class InventoryServiceTest {
     @Mock InventoryRepository repository;
     @Mock HealthMetricRepository healthMetricRepository;
     @Mock AutoDiscoveryWorker autoDiscoveryWorker;
+    @Mock ApplicationEventPublisher eventPublisher;
 
     InventoryService service;
 
     private InventoryService newService() {
-        return new InventoryService(repository, healthMetricRepository, autoDiscoveryWorker);
+        return new InventoryService(repository, healthMetricRepository, autoDiscoveryWorker, eventPublisher);
     }
 
     @Test
@@ -53,6 +56,9 @@ class InventoryServiceTest {
         verify(repository).save(captor.capture());
         assertThat(captor.getValue().status()).isEqualTo(InventoryStatus.PENDING);
         verify(autoDiscoveryWorker).discoverAndUpdateStatus(saved);
+        // ADR-017: routes must refresh immediately so a freshly onboarded REST
+        // service is routable without waiting for the periodic scheduler.
+        verify(eventPublisher).publishEvent(any(RefreshRoutesEvent.class));
     }
 
     @Test
@@ -65,6 +71,7 @@ class InventoryServiceTest {
                 .verify();
 
         verify(repository, never()).save(any());
+        verify(eventPublisher, never()).publishEvent(any());
     }
 
     @Test
@@ -89,6 +96,7 @@ class InventoryServiceTest {
         verify(repository).updateFields(id, "service-a", "REST", "https://new-host",
                 "https://new-host/openapi.json", "http://new-host:9081", "PENDING");
         verify(autoDiscoveryWorker).discoverAndUpdateStatus(updated);
+        verify(eventPublisher).publishEvent(any(RefreshRoutesEvent.class));
     }
 
     @Test
@@ -102,6 +110,7 @@ class InventoryServiceTest {
                 .verify();
 
         verify(repository, never()).updateFields(any(), any(), any(), any(), any(), any(), any());
+        verify(eventPublisher, never()).publishEvent(any());
     }
 
     @Test
@@ -118,6 +127,7 @@ class InventoryServiceTest {
                 .verify();
 
         verify(autoDiscoveryWorker, never()).discoverAndUpdateStatus(any());
+        verify(eventPublisher, never()).publishEvent(any());
     }
 
     @Test
@@ -129,6 +139,7 @@ class InventoryServiceTest {
         StepVerifier.create(service.delete(id)).verifyComplete();
 
         verify(repository).deleteById(id);
+        verify(eventPublisher).publishEvent(any(RefreshRoutesEvent.class));
     }
 
     @Test

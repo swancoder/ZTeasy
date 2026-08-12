@@ -227,4 +227,40 @@ class ZteAuthorizationFilterTest {
 
         verify(chain).filter(ex);
     }
+
+    /**
+     * ADR-017 regression guard — found live: every Keycloak client (interactive
+     * or service) gets default composite/scope roles ({@code offline_access},
+     * {@code uma_authorization}, {@code default-roles-<realm>}) automatically,
+     * so a service-credential token's {@code realm_access.roles} is essentially
+     * never truly empty. Before this fix, this filter's "am I a service
+     * principal" check also required {@code roles.isEmpty()}, so a real
+     * service-credential token like this would fall through to
+     * users2service evaluation instead of passing through to {@code
+     * ServiceToServiceAuthorizationFilter}, denying it with "no yaml rule"
+     * even when a valid service2service ALLOW rule existed for it.
+     */
+    @Test
+    void servicePrincipalToken_withDefaultKeycloakRoles_stillPassesThrough() {
+        when(chain.filter(any())).thenReturn(Mono.empty());
+
+        MockServerWebExchange  ex = exchange();
+        Jwt jwt = Jwt.withTokenValue("mock-token")
+                .header("alg", "RS256")
+                .subject("service-account-service-a")
+                .claim("azp", "service-a")
+                .claim("realm_access", Map.of("roles",
+                        List.of("offline_access", "uma_authorization", "default-roles-zte-realm")))
+                .issuedAt(Instant.now())
+                .expiresAt(Instant.now().plusSeconds(300))
+                .build();
+        JwtAuthenticationToken auth = new JwtAuthenticationToken(jwt);
+
+        StepVerifier.create(
+                filter.filter(ex, chain)
+                      .contextWrite(ReactiveSecurityContextHolder.withAuthentication(auth)))
+                .verifyComplete();
+
+        verify(chain).filter(ex);
+    }
 }

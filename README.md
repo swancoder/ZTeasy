@@ -167,6 +167,7 @@ zte-lightweight/
 | [ADR-015](docs/adr/ADR-015-machine-identities-and-urn-unification.md) | Machine Identities (OIDC Clients) and URN Unification | Accepted |
 | [Identities UI + Relational Caching](docs/adr/identities-ui-actors-containers-and-relations-caching.md) | Identities UI Refactor (Actors vs. Access Containers) and Relational Caching (deliberately unnumbered filename — see the ADR's own note) | Accepted |
 | [ADR-016](docs/adr/ADR-016-inventory-and-health-registry.md) | APIM Inventory Registry — Auto-Discovery and Health Telemetry | Accepted |
+| [ADR-017](docs/adr/ADR-017-dynamic-routing-and-audit.md) | Dynamic Inventory-Driven Routing, Unified Audit Logging, and Strict S2S Rules | Accepted |
 
 ---
 
@@ -377,8 +378,16 @@ docker exec zte-postgres psql -U zte_user -d zte_db \
 ```
 
 Also visible in the Admin Console's "Audit Trail" tab (Timestamp, Trace ID, Client IP,
-Agent/User ID, Path, Status) — `agent_id`/`tool_name` are always blank for REST traffic
-today, reserved for a future MCP-audit unification (see ADR-013 Future Migration Path).
+Initiator/OBO User, Method, Target, Tool, Path, Status, Decision).
+
+**Unified with MCP audit (ADR-017).** REST and MCP traffic now share this one table —
+`LoggingMcpAuditService` (see [MCP Proxy](#mcp-proxy) below) also writes a row per tool
+call, populating `agent_id`/`tool_name` (always blank for REST rows, and vice versa).
+Every row also carries `initiator_client` (the calling service/agent's JWT `azp`, blank
+for a plain interactive user), `original_user_obo` (the JWT `sub` the OBO token was
+minted for), `target_service`, `http_method`, and `decision_effect`
+(`ALLOW`/`DENY`/`ERROR`, derived from the final status code — see
+[ADR-017](docs/adr/ADR-017-dynamic-routing-and-audit.md)).
 
 ---
 
@@ -445,6 +454,16 @@ A central registry (`inventory_services`/`health_metrics`) of REST services and 
 agents this gateway fronts — onboarded manually via the Admin Console's "Registry" tab,
 auto-discovered, and health-monitored, both actively (periodic ping) and passively (real
 routed traffic).
+
+**Routing is 100% driven by this registry (ADR-017).** There are no hardcoded Gateway
+routes — `InventoryRouteDefinitionLocator` builds `/api/v1/{name}/**` → `base_url` for
+every `ACTIVE`/`WARNING` `REST`-type entry, refreshed immediately on any onboard/edit/
+delete and periodically otherwise (`zte.routing.refresh-interval-ms`, 30s default) to
+pick up status changes from discovery/health-polling. Onboarding a new REST service via
+the Admin Console makes it reachable at `/api/v1/<name>/**` immediately — no redeploy.
+`service-a`/`service-b` are seeded into the registry automatically at gateway startup
+(`InventoryBootstrapSeeder`, from the `service-a.uri`/`service-b.uri` properties) so a
+fresh `docker compose up` still routes them out of the box.
 
 **Onboarding → auto-discovery:** `POST /api/v1/admin/inventory` persists a `PENDING` row
 and returns immediately — `AutoDiscoveryWorker` probes the service in the background
@@ -648,3 +667,4 @@ curl -s -H "Authorization: Bearer $TOKEN" http://localhost:8080/api/v1/service-a
 | 14 | Machine identities (OIDC clients synced as `CLIENT` type), `client:<clientId>` URN unification for `service2service`/`agentMcpToolCalls`, orphaned-rule detection extended to all three categories (ADR-015) | `f5a30b8` |
 | 15 | Identities UI refactor (Actors vs. Access Containers, MUI Accordions, quick search, relations Drawer), `idp_identity_relations` caching, Keycloak system-client filtering | `1198921` |
 | 16 | APIM inventory registry (`inventory_services`/`health_metrics`), auto-discovery on onboarding, periodic health polling, passive `last_successful_call` telemetry, Admin Console "Registry" tab | `c3fd7de` |
+| 17 | Dynamic inventory-driven routing (`InventoryRouteDefinitionLocator`, replacing hardcoded routes), REST/MCP audit unification into `request_logs`, strict `service2service` policy scenario (ADR-017) | _pending_ |

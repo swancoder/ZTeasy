@@ -70,7 +70,12 @@ spring.cloud.gateway:
 server:
   port: ${SERVER_PORT:8080}
 
-# ── Downstream services ──
+# ── Downstream services — bootstrap seed values only (ADR-017): routing itself
+#    is 100% inventory_services-driven (InventoryRouteDefinitionLocator); these
+#    just save an operator from manually onboarding service-a/b via the Admin
+#    Console on every fresh deploy (InventoryBootstrapSeeder, startup, once,
+#    only if the name isn't already registered — never overwrites an existing,
+#    possibly operator-edited entry) ──
 service-a:
   uri: ${SERVICE_A_URI:https://localhost:8081}
 service-b:

@@ -37,10 +37,20 @@ import java.util.List;
  * <ol>
  *   <li>No security context → pass through (public path already permitted by Spring Security).</li>
  *   <li>Authentication is not a {@link JwtAuthenticationToken} → pass through (anonymous/permit-all).</li>
- *   <li>Extract {@code realm_access.roles} from the JWT. If empty and the JWT's {@code azp}
- *       identifies a service principal (not {@code zte.policy.user-client-id}), this is
- *       service2service traffic, not users2service — pass through and let
- *       {@link ServiceToServiceAuthorizationFilter} decide instead.</li>
+ *   <li>If the JWT's {@code azp} identifies a service principal (not {@code
+ *       zte.policy.user-client-id}), this is service2service traffic, not
+ *       users2service — pass through and let {@link ServiceToServiceAuthorizationFilter}
+ *       decide instead, regardless of {@code realm_access.roles} (ADR-017: this
+ *       used to also require roles to be empty, but every Keycloak client —
+ *       interactive or service — gets default composite/scope roles like
+ *       {@code offline_access}/{@code uma_authorization}/{@code default-roles-<realm>}
+ *       automatically, so that check was never actually true for a real
+ *       client-credentials token; found live via a new machine client that,
+ *       unlike the existing MCP agent clients, is the first service credential
+ *       to ever reach this Gateway-routed filter at all — agents only ever hit
+ *       the separate MCP proxy path, which never runs this filter).</li>
+ *   <li>Otherwise, extract {@code realm_access.roles} from the JWT for the
+ *       {@code users2service} evaluation below.</li>
  *   <li>Consult the YAML {@code users2service} rules (ADR-011/ADR-012) via {@link PolicyMatcher}:
  *       an explicit DENY or ALLOW match short-circuits the decision (deny always wins).</li>
  *   <li>No YAML rule matches → deny. YAML is the sole source of truth for users2service
@@ -92,16 +102,18 @@ public class ZteAuthorizationFilter implements GlobalFilter, Ordered {
                         return chain.filter(exchange);
                     }
 
-                    List<String> roles = RealmRoles.extract(jwtAuth);
                     String path   = exchange.getRequest().getPath().value();
                     String method = exchange.getRequest().getMethod().name();
 
-                    if (roles.isEmpty() && isServicePrincipal(jwtAuth)) {
-                        // No realm roles + a non-user azp: this is service2service traffic,
-                        // not a user request — ServiceToServiceAuthorizationFilter decides.
+                    if (isServicePrincipal(jwtAuth)) {
+                        // A non-user azp: this is service2service traffic, not a user
+                        // request — ServiceToServiceAuthorizationFilter decides, regardless
+                        // of realm_access.roles (see class Javadoc for why roles alone was
+                        // never a reliable signal here).
                         return chain.filter(exchange);
                     }
 
+                    List<String> roles = RealmRoles.extract(jwtAuth);
                     String targetService = RequestTargetResolver.targetService(path);
                     List<String> sources = IdentitySources.enrich(roles, jwtAuth);
                     PolicyEvaluation yamlEval = policyMatcher.evaluate(

@@ -34,7 +34,7 @@ import java.util.List;
  * <p><strong>Why this can't just be {@code ZteAuthorizationFilter}:</strong>
  * that class implements Spring Cloud Gateway's {@code GlobalFilter}, which
  * only runs for requests {@code RoutePredicateHandlerMapping} matches to a
- * configured {@code GatewayRouteConfig} route — verified empirically while
+ * configured {@code InventoryRouteDefinitionLocator} route — verified empirically while
  * building this feature (a USER-role JWT got {@code 200} from
  * {@code AdminPolicyController} because {@code ZteAuthorizationFilter} never
  * ran for it at all; only Spring Security's JWT-required check, itself a

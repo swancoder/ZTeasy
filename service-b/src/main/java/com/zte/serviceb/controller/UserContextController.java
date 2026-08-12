@@ -87,4 +87,47 @@ public class UserContextController {
                     .body(Map.of("error", "Invalid or expired X-ZTE-User-Context: " + e.getMessage())));
         }
     }
+
+    /**
+     * A second, more sensitive endpoint (ADR-017) — same mTLS + OBO trust
+     * basis as {@link #userContext}, deliberately <em>not</em> granted to
+     * {@code service-a} in {@code zte-policies.yaml}'s {@code
+     * service2service} rules, so the gateway's {@code
+     * ServiceToServiceAuthorizationFilter} denies it with {@code 403}
+     * before the request ever reaches this method — service-b's own
+     * validation logic here is identical to {@link #userContext}'s and
+     * exists only so the two endpoints have comparable trust posture, not
+     * because this method itself implements the access restriction.
+     */
+    @GetMapping("/api/v1/service-b/restricted")
+    public Mono<ResponseEntity<Map<String, Object>>> restricted(
+            @RequestHeader(value = "X-ZTE-User-Context", required = false) String userContext,
+            @RequestHeader(value = "X-User-Id",          required = false) String callerId) {
+
+        if (userContext == null || userContext.isBlank()) {
+            log.warn("Missing X-ZTE-User-Context header (restricted)");
+            return Mono.just(ResponseEntity.status(HttpStatus.UNAUTHORIZED)
+                    .body(Map.of("error", "Missing X-ZTE-User-Context header")));
+        }
+
+        try {
+            UserContextClaims claims = tokenService.validateAndParse(userContext);
+            log.debug("OBO token validated for /restricted: sub={} roles={}", claims.sub(), claims.roles());
+            ZteAuditLogger.oboValidated("service-b", claims.sub(), claims.roles().toString());
+
+            Map<String, Object> body = new LinkedHashMap<>();
+            body.put("service", "service-b");
+            body.put("resource", "restricted");
+            body.put("sub", claims.sub());
+            body.put("message", "If you can see this, ServiceToServiceAuthorizationFilter let you through.");
+
+            return Mono.just(ResponseEntity.ok(body));
+
+        } catch (JwtException e) {
+            log.warn("Invalid X-ZTE-User-Context from caller={} (restricted): {}", callerId, e.getMessage());
+            ZteAuditLogger.oboRejected("service-b", e.getMessage());
+            return Mono.just(ResponseEntity.status(HttpStatus.UNAUTHORIZED)
+                    .body(Map.of("error", "Invalid or expired X-ZTE-User-Context: " + e.getMessage())));
+        }
+    }
 }

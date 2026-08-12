@@ -2,6 +2,8 @@ package com.zte.gateway.inventory;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.cloud.gateway.event.RefreshRoutesEvent;
+import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.stereotype.Service;
 import reactor.core.publisher.Mono;
 
@@ -21,6 +23,13 @@ import java.util.stream.Collectors;
  * fired independently (an isolated {@code .subscribe()}, not part of the
  * returned {@code Mono} chain) so onboarding an unreachable or slow service
  * never delays the HTTP response the Admin Console is waiting on.
+ *
+ * <p>{@code create}/{@code update}/{@code delete} each publish a {@link
+ * RefreshRoutesEvent} (ADR-017) so {@link InventoryRouteDefinitionLocator}'s
+ * dynamic routes reflect the change immediately, without waiting for {@link
+ * InventoryRouteRefreshScheduler}'s periodic catch-all — the operator-facing
+ * "onboard/edit/remove a service" actions are exactly the ones worth not
+ * making wait.
  */
 @Service
 public class InventoryService {
@@ -30,12 +39,14 @@ public class InventoryService {
     private final InventoryRepository repository;
     private final HealthMetricRepository healthMetricRepository;
     private final AutoDiscoveryWorker autoDiscoveryWorker;
+    private final ApplicationEventPublisher eventPublisher;
 
     public InventoryService(InventoryRepository repository, HealthMetricRepository healthMetricRepository,
-                             AutoDiscoveryWorker autoDiscoveryWorker) {
+                             AutoDiscoveryWorker autoDiscoveryWorker, ApplicationEventPublisher eventPublisher) {
         this.repository = repository;
         this.healthMetricRepository = healthMetricRepository;
         this.autoDiscoveryWorker = autoDiscoveryWorker;
+        this.eventPublisher = eventPublisher;
     }
 
     /**
@@ -70,7 +81,8 @@ public class InventoryService {
                 .flatMap(exists -> exists
                         ? Mono.<InventoryEntry>error(new DuplicateServiceNameException(name))
                         : repository.save(InventoryEntry.pending(name, targetType, baseUrl, docsUrl, managementUrl)))
-                .doOnNext(this::triggerDiscoveryAsync);
+                .doOnNext(this::triggerDiscoveryAsync)
+                .doOnNext(entry -> refreshRoutes());
     }
 
     /**
@@ -97,12 +109,17 @@ public class InventoryService {
                                         InventoryStatus.PENDING.name())
                                 .then(repository.findById(id))
                                 .switchIfEmpty(Mono.error(new ServiceNotFoundException(id))))
-                .doOnNext(this::triggerDiscoveryAsync);
+                .doOnNext(this::triggerDiscoveryAsync)
+                .doOnNext(entry -> refreshRoutes());
     }
 
     /** Cascades to {@code health_metrics} via {@code ON DELETE CASCADE} — no separate cleanup needed. */
     public Mono<Void> delete(UUID id) {
-        return repository.deleteById(id);
+        return repository.deleteById(id).doOnSuccess(v -> refreshRoutes());
+    }
+
+    private void refreshRoutes() {
+        eventPublisher.publishEvent(new RefreshRoutesEvent(this));
     }
 
     /**

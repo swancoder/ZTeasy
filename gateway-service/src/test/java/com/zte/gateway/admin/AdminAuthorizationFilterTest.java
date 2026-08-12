@@ -33,7 +33,7 @@ import static org.mockito.Mockito.*;
  *
  * <p>This exists because {@code ZteAuthorizationFilter} (a Gateway {@code GlobalFilter})
  * does <em>not</em> run for {@code /api/v1/admin/**} — that path has no
- * {@code GatewayRouteConfig} route, and {@code GlobalFilter}s only fire for routed
+ * {@code InventoryRouteDefinitionLocator} route, and {@code GlobalFilter}s only fire for routed
  * requests. Found empirically while building ADR-012: a USER-role JWT initially got
  * {@code 200} from the admin API because no authorization check ran at all. These
  * tests pin down the fix so it can't silently regress.
