@@ -6,8 +6,11 @@ import org.springframework.stereotype.Service;
 import reactor.core.publisher.Mono;
 
 import java.util.List;
+import java.util.Map;
+import java.util.Set;
 import java.util.UUID;
 import java.util.function.Function;
+import java.util.stream.Collectors;
 
 /**
  * Business layer for the APIM inventory registry (ADR-016): onboard, list,
@@ -35,14 +38,25 @@ public class InventoryService {
         this.autoDiscoveryWorker = autoDiscoveryWorker;
     }
 
-    /** All registered services, left-joined with their current health snapshot (§ADR-016 — joined in memory, not via a native query). */
+    /**
+     * All registered services, left-joined with their current health
+     * snapshot and {@code hasSchema} flag (§ADR-016 — both joined in
+     * memory, not via a native query, same as the health join already
+     * was).
+     */
     public Mono<List<InventoryView>> list() {
         return repository.findAll().collectList()
-                .flatMap(entries -> healthMetricRepository.findByServiceIdIn(entries.stream().map(InventoryEntry::id).toList())
-                        .collectMap(HealthMetric::serviceId, Function.identity())
-                        .map(healthByServiceId -> entries.stream()
-                                .map(entry -> toView(entry, healthByServiceId.get(entry.id())))
-                                .toList()));
+                .flatMap(entries -> {
+                    List<UUID> ids = entries.stream().map(InventoryEntry::id).toList();
+                    Mono<Map<UUID, HealthMetric>> health = healthMetricRepository.findByServiceIdIn(ids)
+                            .collectMap(HealthMetric::serviceId, Function.identity());
+                    Mono<Set<UUID>> idsWithSchema = repository.findIdsWithDiscoveredSchema().collect(Collectors.toSet());
+
+                    return Mono.zip(health, idsWithSchema)
+                            .map(tuple -> entries.stream()
+                                    .map(entry -> toView(entry, tuple.getT1().get(entry.id()), tuple.getT2().contains(entry.id())))
+                                    .toList());
+                });
     }
 
     /**
@@ -51,11 +65,11 @@ public class InventoryService {
      * is also DB-{@code UNIQUE}, but checking first gives a clean 409 instead
      * of a raw constraint-violation error).
      */
-    public Mono<InventoryEntry> create(String name, TargetType targetType, String baseUrl, String managementUrl) {
+    public Mono<InventoryEntry> create(String name, TargetType targetType, String baseUrl, String docsUrl, String managementUrl) {
         return repository.existsByName(name)
                 .flatMap(exists -> exists
                         ? Mono.<InventoryEntry>error(new DuplicateServiceNameException(name))
-                        : repository.save(InventoryEntry.pending(name, targetType, baseUrl, managementUrl)))
+                        : repository.save(InventoryEntry.pending(name, targetType, baseUrl, docsUrl, managementUrl)))
                 .doOnNext(this::triggerDiscoveryAsync);
     }
 
@@ -66,8 +80,9 @@ public class InventoryService {
      * chosen because an unconditional reset can never leave a stale
      * {@code ACTIVE} status pointing at a since-changed {@code base_url}.
      */
-    public Mono<InventoryEntry> update(UUID id, String name, TargetType targetType, String baseUrl, String managementUrl) {
-        return repository.updateFields(id, name, targetType.name(), baseUrl, managementUrl, InventoryStatus.PENDING.name())
+    public Mono<InventoryEntry> update(UUID id, String name, TargetType targetType, String baseUrl, String docsUrl,
+                                        String managementUrl) {
+        return repository.updateFields(id, name, targetType.name(), baseUrl, docsUrl, managementUrl, InventoryStatus.PENDING.name())
                 .then(repository.findById(id))
                 .doOnNext(this::triggerDiscoveryAsync);
     }
@@ -87,6 +102,21 @@ public class InventoryService {
         return repository.findDiscoveredSchemaById(id);
     }
 
+    /**
+     * Synchronous, UI-triggered discovery (ADR-016 amendment, behind
+     * {@code POST .../inventory/{id}/schema/fetch}) — unlike the
+     * fire-and-forget {@link #triggerDiscoveryAsync}, the caller gets a
+     * real success/failure signal: completes normally on success, errors
+     * with {@link ServiceNotFoundException} ({@code id} doesn't exist) or
+     * {@link SchemaFetchException} (target unreachable, timed out, or
+     * returned no valid JSON — see {@link AutoDiscoveryWorker#fetchSchemaNow}).
+     */
+    public Mono<Void> fetchSchemaNow(UUID id) {
+        return repository.findById(id)
+                .switchIfEmpty(Mono.error(new ServiceNotFoundException(id)))
+                .flatMap(autoDiscoveryWorker::fetchSchemaNow);
+    }
+
     private void triggerDiscoveryAsync(InventoryEntry entry) {
         autoDiscoveryWorker.discoverAndUpdateStatus(entry)
                 .subscribe(
@@ -95,12 +125,13 @@ public class InventoryService {
                                 entry.id(), entry.name(), ex));
     }
 
-    private InventoryView toView(InventoryEntry entry, HealthMetric health) {
+    private InventoryView toView(InventoryEntry entry, HealthMetric health, boolean hasSchema) {
         return new InventoryView(
-                entry.id(), entry.name(), entry.targetType(), entry.baseUrl(), entry.managementUrl(),
+                entry.id(), entry.name(), entry.targetType(), entry.baseUrl(), entry.docsUrl(), entry.managementUrl(),
                 entry.status(), entry.createdAt(),
                 health != null ? health.lastPingMs() : null,
                 health != null ? health.actuatorStatus() : null,
-                health != null ? health.lastSuccessfulCall() : null);
+                health != null ? health.lastSuccessfulCall() : null,
+                hasSchema);
     }
 }

@@ -4,6 +4,7 @@ import org.springframework.data.r2dbc.repository.Modifying;
 import org.springframework.data.r2dbc.repository.Query;
 import org.springframework.data.repository.query.Param;
 import org.springframework.data.repository.reactive.ReactiveCrudRepository;
+import reactor.core.publisher.Flux;
 import reactor.core.publisher.Mono;
 
 import java.util.UUID;
@@ -47,13 +48,13 @@ public interface InventoryRepository extends ReactiveCrudRepository<InventoryEnt
     @Modifying
     @Query("""
             UPDATE inventory_services
-            SET name = :name, target_type = :targetType, base_url = :baseUrl,
+            SET name = :name, target_type = :targetType, base_url = :baseUrl, docs_url = :docsUrl,
                 management_url = :managementUrl, status = :status
             WHERE id = :id
             """)
     Mono<Void> updateFields(@Param("id") UUID id, @Param("name") String name, @Param("targetType") String targetType,
-                             @Param("baseUrl") String baseUrl, @Param("managementUrl") String managementUrl,
-                             @Param("status") String status);
+                             @Param("baseUrl") String baseUrl, @Param("docsUrl") String docsUrl,
+                             @Param("managementUrl") String managementUrl, @Param("status") String status);
 
     /**
      * Persists a successful discovery probe's raw response body (ADR-016
@@ -81,4 +82,20 @@ public interface InventoryRepository extends ReactiveCrudRepository<InventoryEnt
      */
     @Query("SELECT discovered_schema FROM inventory_services WHERE id = :id")
     Mono<String> findDiscoveredSchemaById(@Param("id") UUID id);
+
+    /**
+     * IDs with a non-{@code NULL} {@code discovered_schema} — the cheap
+     * flag {@link InventoryService#list()} joins in memory (same pattern
+     * as {@code HealthMetric}) to compute {@link InventoryView#hasSchema()},
+     * without ever selecting the payload itself. Introduced because {@code
+     * status == ACTIVE} does <em>not</em> reliably imply a schema was
+     * captured — see {@link AutoDiscoveryWorker}'s Javadoc: a target
+     * returning a 2xx with an empty or non-JSON body still lands on
+     * {@code ACTIVE} (2xx is 2xx), but writes nothing to {@code
+     * discovered_schema}. A custom {@code docs_url} pointing at the wrong
+     * thing (an operator typo landing on an HTML page, say) makes this a
+     * realistic, not just theoretical, case.
+     */
+    @Query("SELECT id FROM inventory_services WHERE discovered_schema IS NOT NULL")
+    Flux<UUID> findIdsWithDiscoveredSchema();
 }

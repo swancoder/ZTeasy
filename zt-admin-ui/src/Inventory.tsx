@@ -46,9 +46,11 @@ export default function Inventory({ accessToken }: Props) {
   const [formName, setFormName] = useState('')
   const [formTargetType, setFormTargetType] = useState<'REST' | 'MCP'>('REST')
   const [formBaseUrl, setFormBaseUrl] = useState('')
+  const [formDocsUrl, setFormDocsUrl] = useState('')
   const [formManagementUrl, setFormManagementUrl] = useState('')
 
   const [schemaTarget, setSchemaTarget] = useState<InventoryEntry | null>(null)
+  const [fetchingId, setFetchingId] = useState<string | null>(null)
 
   const fetchServices = useCallback(async () => {
     setLoading(true)
@@ -76,6 +78,7 @@ export default function Inventory({ accessToken }: Props) {
     setFormName('')
     setFormTargetType('REST')
     setFormBaseUrl('')
+    setFormDocsUrl('')
     setFormManagementUrl('')
   }
 
@@ -89,6 +92,7 @@ export default function Inventory({ accessToken }: Props) {
           name: formName,
           targetType: formTargetType,
           baseUrl: formBaseUrl,
+          docsUrl: formDocsUrl || null,
           managementUrl: formManagementUrl || null,
         }),
       })
@@ -105,6 +109,27 @@ export default function Inventory({ accessToken }: Props) {
       setSnackbar({ message: e instanceof Error ? e.message : String(e), severity: 'error' })
     } finally {
       setSubmitting(false)
+    }
+  }
+
+  const handleFetch = async (service: InventoryEntry) => {
+    setFetchingId(service.id)
+    try {
+      const res = await fetch(`/api/v1/admin/inventory/${service.id}/schema/fetch`, {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${accessToken}` },
+      })
+      if (res.ok) {
+        setSnackbar({ message: `${service.name}: schema fetched successfully`, severity: 'success' })
+        await fetchServices()
+      } else {
+        const body = await res.json().catch(() => ({}))
+        setSnackbar({ message: `${service.name}: fetch failed — ${body.error ?? res.status}`, severity: 'error' })
+      }
+    } catch (e) {
+      setSnackbar({ message: e instanceof Error ? e.message : String(e), severity: 'error' })
+    } finally {
+      setFetchingId(null)
     }
   }
 
@@ -162,6 +187,7 @@ export default function Inventory({ accessToken }: Props) {
                 <TableCell>Name</TableCell>
                 <TableCell>Type</TableCell>
                 <TableCell>Base URL</TableCell>
+                <TableCell>Docs URL</TableCell>
                 <TableCell>Management URL</TableCell>
                 <TableCell>Status</TableCell>
                 <TableCell>Ping (ms)</TableCell>
@@ -177,6 +203,7 @@ export default function Inventory({ accessToken }: Props) {
                     <Chip label={service.targetType} size="small" />
                   </TableCell>
                   <TableCell sx={{ fontFamily: 'monospace', fontSize: '0.8rem' }}>{service.baseUrl}</TableCell>
+                  <TableCell sx={{ fontFamily: 'monospace', fontSize: '0.8rem' }}>{service.docsUrl ?? '—'}</TableCell>
                   <TableCell sx={{ fontFamily: 'monospace', fontSize: '0.8rem' }}>
                     {service.managementUrl ?? '—'}
                   </TableCell>
@@ -188,10 +215,23 @@ export default function Inventory({ accessToken }: Props) {
                     {service.lastSuccessfulCall ? new Date(service.lastSuccessfulCall).toLocaleString() : '—'}
                   </TableCell>
                   <TableCell align="right">
-                    <Tooltip title="View discovered schema">
-                      <IconButton size="small" onClick={() => setSchemaTarget(service)}>
-                        📄
-                      </IconButton>
+                    <Tooltip title="Fetch schema now">
+                      <span>
+                        <IconButton
+                          size="small"
+                          disabled={fetchingId === service.id}
+                          onClick={() => handleFetch(service)}
+                        >
+                          {fetchingId === service.id ? <CircularProgress size={16} /> : '🔄'}
+                        </IconButton>
+                      </span>
+                    </Tooltip>
+                    <Tooltip title={service.hasSchema ? 'View discovered schema' : 'No schema captured yet — try Fetch'}>
+                      <span>
+                        <IconButton size="small" disabled={!service.hasSchema} onClick={() => setSchemaTarget(service)}>
+                          📄
+                        </IconButton>
+                      </span>
                     </Tooltip>
                     <Tooltip title="Remove from registry">
                       <IconButton size="small" onClick={() => handleDelete(service)}>
@@ -233,6 +273,14 @@ export default function Inventory({ accessToken }: Props) {
               fullWidth
               value={formBaseUrl}
               onChange={(e) => setFormBaseUrl(e.target.value)}
+            />
+            <TextField
+              label="Docs URL (optional, REST only)"
+              placeholder="e.g. https://example.com/openapi.json — only if OpenAPI docs aren't at /v3/api-docs"
+              helperText="Leave blank to probe {Base URL}/v3/api-docs by default"
+              fullWidth
+              value={formDocsUrl}
+              onChange={(e) => setFormDocsUrl(e.target.value)}
             />
             <TextField
               label="Management URL (optional)"

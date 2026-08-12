@@ -696,6 +696,35 @@ Console's built bundle (589 KB → 1.88 MB raw, 538 KB gzipped) — a known,
 accepted cost of the specified library, not mitigated (no code-splitting)
 since that wasn't asked for.
 
+**ADR-016 amendment, 2026-08-12 (second) — custom `docs_url` + synchronous
+fetch.** Adds `inventory_services.docs_url` (`V11__add_docs_url.sql`,
+nullable, `VARCHAR(512)`) — a full absolute URL `AutoDiscoveryWorker`
+probes instead of `{base_url}/v3/api-docs` for `REST` targets when set —
+and `POST /api/v1/admin/inventory/{id}/schema/fetch`, a synchronous,
+UI-triggered discovery trigger. The task's own suggested simplification —
+gate the Admin Console's "View Schema" button on `status === 'ACTIVE'` —
+was investigated and found incorrect before implementing: `ACTIVE` is set
+on any 2xx regardless of body validity, but `discovered_schema` is only
+written when the body is valid JSON (a prior, deliberate decision), so a
+2xx-with-empty-or-invalid-body reaches `ACTIVE` while capturing nothing —
+already exercised by the pre-existing `crud_updateAndDelete` IT test's
+empty-body stub, and made more likely by this amendment's own `docs_url`
+(an operator typo can easily land on a non-JSON page). Implemented the
+task's own named alternative instead: `InventoryView.hasSchema`, backed
+by a new, cheap `InventoryRepository.findIdsWithDiscoveredSchema()` query
+(`id`-only, never the payload) joined in memory the same way
+`HealthMetric` already is. The extracted fetch logic is intentionally
+*not* identical between the background and synchronous paths: the
+background `discoverAndUpdateStatus` stays lenient (2xx is `ACTIVE`
+regardless of body), while the new `fetchSchemaNow` is stricter — an
+empty/non-JSON 2xx is a failure (`SchemaFetchException`, mapped to `502
+Bad Gateway`, not the task's literal "400/500" — `502` is the correct
+code for "this gateway couldn't get a valid response from an upstream it
+proxies to," which is exactly what happened). `404` (`ServiceNotFoundException`)
+for an unknown `id`. Frontend: optional "Docs URL" field, a "Fetch" (🔄)
+button per row (Snackbar feedback, table refresh on success), "View
+Schema" now disabled via `hasSchema` rather than `status`.
+
 ### 5.3 `service-a` / `service-b`
 
 - **`service-a/HelloController`** — `GET /api/v1/service-a/hello`; calls
@@ -875,7 +904,7 @@ detail view.
 
 `inventory_services` (PostgreSQL, Flyway `V8__create_inventory_and_health.sql`,
 `V9__add_inventory_management_url.sql`, `V10__add_discovered_schema.sql`,
-ADR-016 + amendments) — the APIM registry:
+`V11__add_docs_url.sql`, ADR-016 + amendments) — the APIM registry:
 
 | Column | Type | Notes |
 |---|---|---|
@@ -883,6 +912,7 @@ ADR-016 + amendments) — the APIM registry:
 | `name` | `VARCHAR(255)` | `UNIQUE` — also the name `RequestTargetResolver`'s path-segment extraction must match for passive telemetry (§5.2d) to find this row |
 | `target_type` | `VARCHAR(10)` + `CHECK (target_type IN ('REST','MCP'))` | Not a native Postgres enum — same reasoning as `idp_identities.type` |
 | `base_url` | `VARCHAR(512)` | |
+| `docs_url` | `VARCHAR(512)`, nullable | `V11` amendment — full absolute URL `AutoDiscoveryWorker` probes instead of `{base_url}/v3/api-docs` for `REST` targets when set; ignored for `MCP` (§5.2d) |
 | `management_url` | `VARCHAR(512)`, nullable | `V9` amendment — `HealthPollingService` pings this instead of `base_url` when set; `NULL` falls back to `base_url` unchanged (§5.2d) |
 | `status` | `VARCHAR(10)` + `CHECK (status IN ('ACTIVE','WARNING','DOWN','PENDING'))`, `DEFAULT 'PENDING'` | See `InventoryStatus`'s transition rules, §5.2d |
 | `discovered_schema` | `JSONB`, nullable | `V10` amendment — raw response body from the last successful `AutoDiscoveryWorker` probe; deliberately excluded from `findAll()`/the list view (§5.2d) |
@@ -922,6 +952,7 @@ application code, not a native query).
 | `/api/v1/admin/inventory` | GET, POST | JWT + `ADMIN` YAML rule | gateway | List / onboard APIM registry entries (ADR-016) |
 | `/api/v1/admin/inventory/{id}` | PUT, DELETE | JWT + `ADMIN` YAML rule | gateway | Update / remove a registry entry (ADR-016) |
 | `/api/v1/admin/inventory/{id}/schema` | GET | JWT + `ADMIN` YAML rule | gateway | Fetch the last successfully captured discovery payload, raw; `404` if none (ADR-016 amendment) |
+| `/api/v1/admin/inventory/{id}/schema/fetch` | POST | JWT + `ADMIN` YAML rule | gateway | Synchronous, UI-triggered discovery; `200` on success, `404` unknown `id`, `502` unreachable/timed out/invalid JSON (ADR-016 amendment) |
 | `/admin/**` | GET | none (SPA handles its own login) | gateway | Admin Console static bundle (ADR-012) |
 | `/sse` | GET | JWT | gateway (MCP proxy) | Opens an MCP session; SSE stream |
 | `/message?sessionId=<id>` | POST | JWT | gateway (MCP proxy) | JSON-RPC `tools/call`; result via SSE, not the response body |
@@ -1075,6 +1106,17 @@ own, all are new capabilities.
       tripled it (589 KB → 1.88 MB raw); a natural candidate for a dynamic
       `import()` behind the "View Schema" action if bundle size becomes a
       real problem (ADR-016 amendment, 2026-08-12, Self-Criticism).
+- [ ] A "Retry Discovery"-adjacent affordance distinguishing *why*
+      `hasSchema` is `false` (never attempted / unreachable / reached but
+      invalid) — today it's a single boolean by design, sufficient only
+      for gating "View Schema" (ADR-016 amendment, 2026-08-12 second,
+      Self-Criticism).
+- [ ] `docs_url` has no validation that it points at the same
+      host/service being registered — same operator-trusted-input
+      posture as `base_url`/`management_url`, not a new trust boundary,
+      but worth tightening if inventory onboarding is ever opened to a
+      less-trusted role than `ADMIN` (ADR-016 amendment, 2026-08-12
+      second, Self-Criticism).
 - [ ] Reduce `fetchRelations()`'s per-user/per-client HTTP call count if
       sync duration becomes a problem at larger realm scale — no known
       Keycloak Admin API batch endpoint for this today (Stage 15 ADR

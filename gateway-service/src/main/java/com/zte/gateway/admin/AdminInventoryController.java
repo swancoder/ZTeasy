@@ -2,6 +2,8 @@ package com.zte.gateway.admin;
 
 import com.zte.gateway.inventory.DuplicateServiceNameException;
 import com.zte.gateway.inventory.InventoryEntry;
+import com.zte.gateway.inventory.SchemaFetchException;
+import com.zte.gateway.inventory.ServiceNotFoundException;
 import com.zte.gateway.inventory.InventoryService;
 import com.zte.gateway.inventory.InventoryView;
 import com.zte.gateway.inventory.TargetType;
@@ -48,7 +50,8 @@ class AdminInventoryController {
 
     @PostMapping
     public Mono<ResponseEntity<Object>> create(@RequestBody InventoryRequest request) {
-        return inventoryService.create(request.name(), request.targetType(), request.baseUrl(), request.managementUrl())
+        return inventoryService.create(request.name(), request.targetType(), request.baseUrl(), request.docsUrl(),
+                        request.managementUrl())
                 .<ResponseEntity<Object>>map(entry -> ResponseEntity.status(HttpStatus.CREATED).body(entry))
                 .onErrorResume(DuplicateServiceNameException.class, ex -> Mono.just(
                         ResponseEntity.status(HttpStatus.CONFLICT).body(Map.of("error", ex.getMessage()))));
@@ -56,7 +59,8 @@ class AdminInventoryController {
 
     @PutMapping("/{id}")
     public Mono<InventoryEntry> update(@PathVariable UUID id, @RequestBody InventoryRequest request) {
-        return inventoryService.update(id, request.name(), request.targetType(), request.baseUrl(), request.managementUrl());
+        return inventoryService.update(id, request.name(), request.targetType(), request.baseUrl(), request.docsUrl(),
+                request.managementUrl());
     }
 
     @DeleteMapping("/{id}")
@@ -82,12 +86,37 @@ class AdminInventoryController {
     }
 
     /**
+     * Synchronous, UI-triggered discovery (ADR-016 amendment) — unlike
+     * onboarding's background {@code AutoDiscoveryWorker} trigger, this
+     * call doesn't return until the probe (and, on success, the {@code
+     * discovered_schema} write) has actually completed, so the Admin
+     * Console's "Fetch" button can show a real result. {@code 200} (no
+     * body) on success; {@code 404} if {@code id} doesn't exist; {@code
+     * 502 Bad Gateway} — not the task's literal "400/500" — if the target
+     * was unreachable, timed out, or returned no valid JSON, since that's
+     * the semantically correct code for "this gateway couldn't get a valid
+     * response from an upstream it proxies to," and this service already
+     * is exactly that kind of gateway.
+     */
+    @PostMapping("/{id}/schema/fetch")
+    public Mono<ResponseEntity<Object>> fetchSchema(@PathVariable UUID id) {
+        return inventoryService.fetchSchemaNow(id)
+                .<ResponseEntity<Object>>thenReturn(ResponseEntity.ok().build())
+                .onErrorResume(ServiceNotFoundException.class, ex -> Mono.just(
+                        ResponseEntity.status(HttpStatus.NOT_FOUND).body(Map.of("error", ex.getMessage()))))
+                .onErrorResume(SchemaFetchException.class, ex -> Mono.just(
+                        ResponseEntity.status(HttpStatus.BAD_GATEWAY).body(Map.of("error", ex.getMessage()))));
+    }
+
+    /**
      * Onboarding/update form body — {@code name}, {@code target_type}
      * (dropdown), {@code base_url}. {@code managementUrl} (ADR-016
      * amendment) is optional — {@code null}/omitted means "health polling
      * uses {@code base_url}, same as before"; set it only when a target's
-     * {@code /actuator/health} lives at a different host:port.
+     * {@code /actuator/health} lives at a different host:port. {@code
+     * docsUrl} (ADR-016 amendment) is optional and {@code REST}-only —
+     * {@code null}/omitted keeps probing {@code {baseUrl}/v3/api-docs}.
      */
-    record InventoryRequest(String name, TargetType targetType, String baseUrl, String managementUrl) {
+    record InventoryRequest(String name, TargetType targetType, String baseUrl, String docsUrl, String managementUrl) {
     }
 }

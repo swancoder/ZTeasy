@@ -39,13 +39,13 @@ class InventoryServiceTest {
     void create_newName_savesPendingAndTriggersDiscovery() {
         service = newService();
         UUID id = UUID.randomUUID();
-        InventoryEntry saved = new InventoryEntry(id, "agent-x", TargetType.MCP, "http://agent-x", null, InventoryStatus.PENDING, Instant.now());
+        InventoryEntry saved = new InventoryEntry(id, "agent-x", TargetType.MCP, "http://agent-x", null, null, InventoryStatus.PENDING, Instant.now());
 
         when(repository.existsByName("agent-x")).thenReturn(Mono.just(false));
         when(repository.save(any())).thenReturn(Mono.just(saved));
         when(autoDiscoveryWorker.discoverAndUpdateStatus(saved)).thenReturn(Mono.empty());
 
-        StepVerifier.create(service.create("agent-x", TargetType.MCP, "http://agent-x", null))
+        StepVerifier.create(service.create("agent-x", TargetType.MCP, "http://agent-x", null, null))
                 .expectNext(saved)
                 .verifyComplete();
 
@@ -60,7 +60,7 @@ class InventoryServiceTest {
         service = newService();
         when(repository.existsByName("agent-x")).thenReturn(Mono.just(true));
 
-        StepVerifier.create(service.create("agent-x", TargetType.MCP, "http://agent-x", null))
+        StepVerifier.create(service.create("agent-x", TargetType.MCP, "http://agent-x", null, null))
                 .expectError(DuplicateServiceNameException.class)
                 .verify();
 
@@ -71,18 +71,22 @@ class InventoryServiceTest {
     void update_alwaysResetsToPendingAndTriggersDiscovery() {
         service = newService();
         UUID id = UUID.randomUUID();
-        InventoryEntry updated = new InventoryEntry(id, "service-a", TargetType.REST, "https://new-host", "http://new-host:9081", InventoryStatus.PENDING, Instant.now());
+        InventoryEntry updated = new InventoryEntry(id, "service-a", TargetType.REST, "https://new-host",
+                "https://new-host/openapi.json", "http://new-host:9081", InventoryStatus.PENDING, Instant.now());
 
-        when(repository.updateFields(eq(id), eq("service-a"), eq("REST"), eq("https://new-host"), eq("http://new-host:9081"), eq("PENDING")))
+        when(repository.updateFields(eq(id), eq("service-a"), eq("REST"), eq("https://new-host"),
+                eq("https://new-host/openapi.json"), eq("http://new-host:9081"), eq("PENDING")))
                 .thenReturn(Mono.empty());
         when(repository.findById(id)).thenReturn(Mono.just(updated));
         when(autoDiscoveryWorker.discoverAndUpdateStatus(updated)).thenReturn(Mono.empty());
 
-        StepVerifier.create(service.update(id, "service-a", TargetType.REST, "https://new-host", "http://new-host:9081"))
+        StepVerifier.create(service.update(id, "service-a", TargetType.REST, "https://new-host",
+                        "https://new-host/openapi.json", "http://new-host:9081"))
                 .expectNext(updated)
                 .verifyComplete();
 
-        verify(repository).updateFields(id, "service-a", "REST", "https://new-host", "http://new-host:9081", "PENDING");
+        verify(repository).updateFields(id, "service-a", "REST", "https://new-host",
+                "https://new-host/openapi.json", "http://new-host:9081", "PENDING");
         verify(autoDiscoveryWorker).discoverAndUpdateStatus(updated);
     }
 
@@ -98,18 +102,21 @@ class InventoryServiceTest {
     }
 
     @Test
-    void list_joinsHealthByServiceIdWithNullsForMissingHealth() {
+    void list_joinsHealthAndSchemaFlagByServiceId() {
         service = newService();
         UUID withHealthId = UUID.randomUUID();
         UUID withoutHealthId = UUID.randomUUID();
 
-        InventoryEntry withHealth = new InventoryEntry(withHealthId, "service-a", TargetType.REST, "https://a", null, InventoryStatus.ACTIVE, Instant.now());
-        InventoryEntry withoutHealth = new InventoryEntry(withoutHealthId, "agent-b", TargetType.MCP, "http://b", null, InventoryStatus.PENDING, Instant.now());
+        InventoryEntry withHealth = new InventoryEntry(withHealthId, "service-a", TargetType.REST, "https://a", null, null, InventoryStatus.ACTIVE, Instant.now());
+        InventoryEntry withoutHealth = new InventoryEntry(withoutHealthId, "agent-b", TargetType.MCP, "http://b", null, null, InventoryStatus.PENDING, Instant.now());
         Instant lastCall = Instant.now();
         HealthMetric health = new HealthMetric(UUID.randomUUID(), withHealthId, 42, "UP", lastCall, Instant.now());
 
         when(repository.findAll()).thenReturn(Flux.just(withHealth, withoutHealth));
         when(healthMetricRepository.findByServiceIdIn(any())).thenReturn(Flux.just(health));
+        // Only withHealthId has a captured schema — withoutHealthId does not, even though
+        // list() is asked about both (ADR-016 amendment: status alone can't answer this).
+        when(repository.findIdsWithDiscoveredSchema()).thenReturn(Flux.just(withHealthId));
 
         StepVerifier.create(service.list())
                 .assertNext(views -> {
@@ -120,11 +127,39 @@ class InventoryServiceTest {
                     assertThat(viewWithHealth.lastPingMs()).isEqualTo(42);
                     assertThat(viewWithHealth.actuatorStatus()).isEqualTo("UP");
                     assertThat(viewWithHealth.lastSuccessfulCall()).isEqualTo(lastCall);
+                    assertThat(viewWithHealth.hasSchema()).isTrue();
 
                     assertThat(viewWithoutHealth.lastPingMs()).isNull();
                     assertThat(viewWithoutHealth.actuatorStatus()).isNull();
                     assertThat(viewWithoutHealth.lastSuccessfulCall()).isNull();
+                    assertThat(viewWithoutHealth.hasSchema()).isFalse();
                 })
                 .verifyComplete();
+    }
+
+    @Test
+    void fetchSchemaNow_unknownId_errorsWithoutCallingWorker() {
+        service = newService();
+        UUID id = UUID.randomUUID();
+        when(repository.findById(id)).thenReturn(Mono.empty());
+
+        StepVerifier.create(service.fetchSchemaNow(id))
+                .expectError(ServiceNotFoundException.class)
+                .verify();
+
+        verify(autoDiscoveryWorker, never()).fetchSchemaNow(any());
+    }
+
+    @Test
+    void fetchSchemaNow_knownId_delegatesToWorker() {
+        service = newService();
+        UUID id = UUID.randomUUID();
+        InventoryEntry entry = new InventoryEntry(id, "service-a", TargetType.REST, "https://a", null, null, InventoryStatus.ACTIVE, Instant.now());
+        when(repository.findById(id)).thenReturn(Mono.just(entry));
+        when(autoDiscoveryWorker.fetchSchemaNow(entry)).thenReturn(Mono.empty());
+
+        StepVerifier.create(service.fetchSchemaNow(id)).verifyComplete();
+
+        verify(autoDiscoveryWorker).fetchSchemaNow(entry);
     }
 }

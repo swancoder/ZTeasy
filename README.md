@@ -448,11 +448,15 @@ routed traffic).
 
 **Onboarding → auto-discovery:** `POST /api/v1/admin/inventory` persists a `PENDING` row
 and returns immediately — `AutoDiscoveryWorker` probes the service in the background
-(never delaying the response): `GET {base_url}/v3/api-docs` for `REST`, a stateless
+(never delaying the response): `GET {base_url}/v3/api-docs` for `REST` (or an explicit
+`docs_url` override — a full absolute URL, for a target whose OpenAPI document doesn't
+live at that conventional path; `REST`-only, ADR-016 amendment), a stateless
 `POST {base_url}/message` JSON-RPC `tools/list` call for `MCP`. Success → `ACTIVE`;
 failure or timeout → `WARNING` ("reachable enough to route, but its schema/tool list
 couldn't be confirmed" — a degraded state that requires manual attention, not a hard
-failure).
+failure). Note that `status == ACTIVE` alone doesn't guarantee a schema was captured — a
+2xx response with an empty or non-JSON body still reaches `ACTIVE` but captures nothing;
+use `hasSchema` (below) to check.
 
 **Health polling:** every 60s (`zte.inventory.health-poll-interval-ms`), `HealthPollingService`
 pings every `ACTIVE`/`WARNING`/`DOWN` service's `/actuator/health` and records
@@ -490,7 +494,17 @@ response body — the OpenAPI document for `REST`, the JSON-RPC `tools/list` res
 click a row's "View Schema" (📄) button in the Admin Console: `REST` targets render in
 an embedded Swagger UI, `MCP` targets as a plain tool name/description list. Deliberately
 excluded from the main registry list/CRUD payload so viewing the registry table stays
-light regardless of how large a target's schema is (ADR-016 amendment, 2026-08-12).
+light regardless of how large a target's schema is (ADR-016 amendment, 2026-08-12). The
+Admin Console gates "View Schema" on the list response's `hasSchema` field, not `status`
+— see the note above on why those two aren't equivalent.
+
+**Synchronous fetch:** `POST /api/v1/admin/inventory/{id}/schema/fetch` (or the "Fetch"
+🔄 button on a Registry row) runs discovery immediately and waits for the result, instead
+of the passive background trigger onboarding uses. `200` on success; `404` if `id`
+doesn't exist; `502 Bad Gateway` if the target was unreachable, timed out, or returned no
+valid JSON — deliberately *stricter* here than the background worker's `ACTIVE`-on-any-2xx
+tolerance, since a human just clicked "Fetch" and needs a real yes/no answer, with an
+error message the UI shows directly (ADR-016 amendment, 2026-08-12, second).
 
 ```bash
 # Onboard a service
@@ -498,11 +512,20 @@ curl -s -X POST -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/
   http://localhost:8080/api/v1/admin/inventory \
   -d '{"name":"hubspot-mcp","targetType":"MCP","baseUrl":"http://localhost:9090"}'
 
+# Onboard a REST service whose OpenAPI docs live somewhere other than /v3/api-docs
+curl -s -X POST -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/json" \
+  http://localhost:8080/api/v1/admin/inventory \
+  -d '{"name":"legacy-api","targetType":"REST","baseUrl":"https://legacy.example.com","docsUrl":"https://legacy.example.com/swagger.json"}'
+
 # List the registry (includes current health snapshot)
 curl -s -H "Authorization: Bearer $TOKEN" http://localhost:8080/api/v1/admin/inventory | python3 -m json.tool
 
 # Fetch a service's captured schema (once discovery has succeeded at least once)
 curl -s -H "Authorization: Bearer $TOKEN" http://localhost:8080/api/v1/admin/inventory/<id>/schema | python3 -m json.tool
+
+# Trigger discovery synchronously (e.g. after fixing a docs_url typo) and wait for the result
+curl -s -X POST -H "Authorization: Bearer $TOKEN" -w "\n%{http_code}\n" \
+  http://localhost:8080/api/v1/admin/inventory/<id>/schema/fetch
 ```
 
 See [ADR-016](docs/adr/ADR-016-inventory-and-health-registry.md) for the full design,

@@ -400,6 +400,90 @@ something this codebase controls) into an MUI `List` for `MCP`.
 
 ---
 
+## Amendment (2026-08-12, second): custom `docs_url` + synchronous fetch
+
+A direct follow-up to the schema-capture amendment above, adding operator
+control over where `REST` discovery looks (`docs_url`, an optional full
+absolute URL, `REST`-only — no equivalent exists for `MCP`'s fixed
+`tools/list` convention) and a UI-triggered synchronous fetch
+(`POST .../inventory/{id}/schema/fetch`) alongside the existing
+passive/background one.
+
+**The task's own suggested Self-Criticism mitigation — "use
+`status === 'ACTIVE'`... for simplicity" to gate the Admin Console's "View
+Schema" button — was investigated and found incorrect against this
+codebase's actual behavior, before writing any code.** The prior
+amendment's `discoverAndUpdateStatus` marks `ACTIVE` on *any* 2xx
+response, but only writes `discovered_schema` when the body is valid,
+non-blank JSON (`isValidJson(...)` — a deliberate decision from that same
+amendment, not new). A target returning `200` with an empty body or a
+non-JSON page reaches `ACTIVE` while capturing nothing — not hypothetical:
+the pre-existing `crud_updateAndDelete` IT test's stub already does
+exactly this (a bare `200`, no body), and this very amendment makes the
+non-JSON case *more* likely by letting an operator type an arbitrary
+`docs_url` that might land on the wrong page entirely. The task itself
+named the correct alternative in the same breath ("or the backend must
+project a `has_schema` boolean into the list view") and picked the wrong
+one for expediency; implemented that alternative instead:
+`InventoryView.hasSchema` (boolean), computed via a new, cheap
+`InventoryRepository.findIdsWithDiscoveredSchema()` query (`SELECT id
+WHERE discovered_schema IS NOT NULL` — never the payload), joined in
+memory in `InventoryService.list()` the same way `HealthMetric` already
+is. Satisfies the actual goal (correctly gate "View Schema") without
+reintroducing the bandwidth cost the earlier amendment deliberately
+avoided, and without a real correctness gap.
+
+**`docs_url`** (`VARCHAR(512)`, not the task's suggested `VARCHAR(255)` —
+matched to `base_url`/`management_url`'s existing sizing) threaded through
+`InventoryEntry`, `InventoryRepository.updateFields`,
+`InventoryService.create`/`update`, `AdminInventoryController.InventoryRequest`,
+and the Admin Console form/table. `AutoDiscoveryWorker` uses it as-is (a
+full absolute URL passed directly to `WebClient.uri(String)`, not a path
+suffix) when non-blank; otherwise falls back to `{base_url}/v3/api-docs`,
+now with a trailing-slash guard on `base_url` (plain string concatenation
+doesn't self-normalize a resulting double slash the way the old
+`WebClient.Builder#baseUrl(...)`-based construction implicitly did — a
+small robustness fix made in passing, not separately requested).
+
+**Reusable fetch-and-save logic, extracted but deliberately not
+identical between callers.** `fetchBody(entry)` is the one shared HTTP
+primitive (URL resolution, the `WebClient` call, the timeout). On top of
+it, `discoverAndUpdateStatus` (existing, background path) keeps its
+original lenient behavior unchanged — any 2xx is `ACTIVE` regardless of
+body validity, any failure is `WARNING`, never an exception. The new
+`fetchSchemaNow` (synchronous, UI-triggered path) is deliberately
+*stricter*: a 2xx with an empty or non-JSON body is a **failure**
+(`SchemaFetchException`), not a silent `ACTIVE`-with-nothing-captured —
+an operator who just clicked "Fetch" needs a real yes/no answer, not the
+background worker's "reachable enough to route" tolerance. This asymmetry
+is intentional, stated in `AutoDiscoveryWorker`'s Javadoc, and directly
+exercised by one IT test that hits both entry points against the
+identical non-JSON stub in a single flow
+(`fetchSchemaNow_invalidJsonBody_returns502_evenThoughBackgroundWorkerMarksActive`)
+— proof it's a deliberate difference, not an inconsistency.
+
+**HTTP status for a failed synchronous fetch: `502 Bad Gateway`, not the
+task's literal "400/500."** A deliberate, minor, named deviation: `502` is
+the standard, correct code for "this gateway couldn't get a valid
+response from an upstream it proxies to," and that's exactly what
+happened — the client's own `POST` was fine (ruling out `400`), and
+nothing internally failed (ruling out `500`). `404` (unknown `id`) is
+exactly as asked, via a new `ServiceNotFoundException`.
+
+**Verified live**, against the real running gateway, real Postgres, and
+real `service-a`/`service-b`: `service-b` — registered before this
+amendment's code existed, so it had never had a schema captured —
+independently confirmed the exact gap this amendment closes: `status:
+ACTIVE`, `hasSchema: false`. `POST .../schema/fetch` against it returned
+`200` and `hasSchema` flipped to `true` immediately, no wait for the
+background scheduler. The same endpoint against an intentionally
+unreachable target (`http://localhost:1`, connection refused) returned
+`502` with `{"error":"Could not reach target: ..."}`. A fresh entry
+registered with `docs_url` explicitly set round-tripped correctly through
+`create`/discovery and reached `ACTIVE`/`hasSchema: true`.
+
+---
+
 ## Alternatives Considered
 
 ### On-demand schema re-fetch per Admin Console page load, instead of caching `status` (rejected)
@@ -427,6 +511,8 @@ something this codebase controls) into an MUI `List` for `MCP`.
 | No size limit on the captured `discovered_schema` payload — a misbehaving or malicious target could return an enormous `/v3/api-docs`/`tools/list` body, stored verbatim | Low | Not enforced — `zte.inventory.discovery-timeout-ms` bounds how long a probe can run, but not response size. Onboarding is an operator (`ADMIN`-only) action against a URL the operator themselves typed in, not an untrusted/public input path, so this is a lower-severity gap than it would be on a public-facing endpoint; a `Content-Length`/streaming cap is a reasonable future hardening item (§9.2) if the registry is ever opened to less-trusted onboarding. |
 | Adding `swagger-ui-react` roughly tripled the Admin Console's built bundle (589 KB → 1.88 MB raw, 177 KB → 538 KB gzipped) | Low | Direct, known cost of the task's specified library choice — not mitigated here (no dynamic import/code-splitting), since that wasn't asked for; a natural follow-up if bundle size becomes a real problem (§9.2). |
 | `swagger-ui-react`'s transitive `react-inspector@6.0.2` declares a React 16-18 peer range, not this project's React 19 | Low | `npm install` resolved it anyway (a warning, not a hard failure); `tsc -b` and `vite build` both succeed cleanly and no runtime issue was observed in manual testing. Worth revisiting only if `swagger-ui-react` itself is upgraded and starts failing outright. |
+| `docs_url` is fully operator-trusted — no validation that it points at the same host/service being registered (an `ADMIN` could set `docs_url` on one entry to a completely unrelated internal endpoint, and `AutoDiscoveryWorker` will fetch and store whatever it returns) | Low | Same trust boundary as `base_url`/`management_url` already have — this is an `ADMIN`-only onboarding action, not attacker-reachable input; the gateway's own mTLS connector is still used for the request regardless of target, so this doesn't bypass any existing trust boundary, just extends operator-controlled reach to one more URL field. |
+| `hasSchema` is binary — it can't distinguish "never attempted," "target unreachable," and "reached but returned nothing valid" | Low | The Admin Console's `status`/`actuatorStatus` columns already carry reachability signal; `hasSchema` only ever needed to answer one question ("is 'View Schema' safe to click"), not diagnose why not — adding more states wasn't asked for and isn't needed for that one job. |
 
 ---
 

@@ -1,0 +1,135 @@
+Custom docs_url + interactive synchronous schema fetch — prompt from
+"Senior Solution Architect / Full-Stack Java & React Developer" role,
+filed as a follow-up to the schema-capture feature
+(024_schema_discovery_and_ui.txt), adding operator control over where
+REST discovery looks and a UI-triggered synchronous fetch alongside the
+existing passive/background one.
+
+Original prompt (paraphrased — full text requested CoT/Self-Criticism/ADR
+protocol per CLAUDE.md): add a nullable docs_url column; use it in
+AutoDiscoveryWorker instead of {base_url}/v3/api-docs when present; add a
+synchronous POST .../inventory/{id}/schema/fetch endpoint; add a "Fetch"
+button in the Admin Console next to "View Schema"; and — the task's own
+Self-Criticism — since the list API doesn't return the (heavy)
+discovered_schema payload, use status === 'ACTIVE' as the simplest signal
+to enable "View Schema", "since our worker sets it to ACTIVE only on
+successful fetch."
+
+Instructions given: Flyway migration for docs_url VARCHAR(255); thread it
+through InventoryEntry/InventoryView/DTOs; resolve discovery URL from
+docs_url or fall back to {base_url}/v3/api-docs; extract the core
+fetch-and-save logic for reuse; new synchronous endpoint returning
+200/400/500 with a clear message on unreachable/timeout/invalid-JSON;
+frontend Docs URL field, "Fetch" icon button, Snackbar feedback, refresh
+on success, disable "View Schema" unless status is ACTIVE.
+
+---
+
+**The single biggest deviation this session: the task's own suggested
+Self-Criticism mitigation ("use status === 'ACTIVE' ... for simplicity")
+was investigated and found factually incorrect against this codebase's
+actual, already-existing implementation, before writing any code.**
+Re-read AutoDiscoveryWorker.discoverAndUpdateStatus (as it stood after
+024): every 2xx response sets status ACTIVE unconditionally
+(`.map(ProbeResult::active)`), but `discovered_schema` is only written
+`if (isValidJson(result.schema()))` — a target returning 200 with an
+empty body or a non-JSON body (an HTML error page, for instance) still
+reaches ACTIVE while writing nothing to discovered_schema. This was a
+deliberate decision made in 024 itself (documented in that session's own
+ADR amendment), not a bug — but it means "status === ACTIVE implies a
+schema exists" is false in a real, reachable case, one this very task
+makes *more* likely to hit: once an operator can type an arbitrary
+docs_url, a typo landing on the wrong (non-JSON) page is a realistic
+onboarding mistake, not a hypothetical edge case. There's also a
+pre-existing IT test (`crud_updateAndDelete`) whose /v3/api-docs stub
+returns a 200 with no body at all — concrete, already-committed proof
+this scenario is exercised, not theoretical.
+
+The task itself named the correct alternative but talked itself out of it
+("or the backend must project a has_schema boolean into the list view...
+let's use status === 'ACTIVE' ... for simplicity"). Implemented that
+alternative instead: InventoryView gained a `hasSchema` boolean, computed
+via a new, cheap `InventoryRepository.findIdsWithDiscoveredSchema()`
+query (selects only `id` where `discovered_schema IS NOT NULL` — never
+the payload itself) joined in memory the same way HealthMetric already
+is in InventoryService.list(). This satisfies the *actual* underlying
+goal (gate "View Schema" correctly) without the bandwidth cost the task
+was originally trying to avoid by not picking this option, and without
+inheriting a real correctness bug. The React admin UI's InventoryEntry
+type and the "View Schema" button's `disabled` prop use `hasSchema`, not
+`status`.
+
+Task 2, largely as specified: `docs_url` (VARCHAR(512), not the suggested
+VARCHAR(255) — matched to base_url/management_url's existing sizing, no
+reason for a URL-override column to be smaller than the URLs it
+overrides) threaded through InventoryEntry, InventoryRepository.updateFields,
+InventoryService.create/update, AdminInventoryController.InventoryRequest,
+and the Admin Console form/table. Resolution in AutoDiscoveryWorker: a
+non-blank docs_url is used as-is (a full absolute URL passed directly to
+WebClient.uri(String), not a path suffix — matches the task's own
+"custom docs_url" framing of pointing discovery at an arbitrary location,
+possibly a different host entirely); otherwise falls back to
+{base_url}/v3/api-docs, now with a trailing-slash-on-base_url guard added
+(string concatenation, unlike the old WebClient.Builder#baseUrl()-based
+construction, doesn't normalize a resulting double slash on its own — a
+small robustness fix made while touching this code, not separately
+requested). Scoped to REST only, as the task's own framing implied — MCP
+targets keep their fixed tools/list convention; docs_url is ignored for
+them.
+
+Task 3 (extract reusable fetch-and-save logic): done, but the two
+callers deliberately end up with *different* strictness, not shared
+verbatim. `fetchBody(entry)` is the one shared HTTP primitive (resolves
+the URL, does the WebClient call, applies the timeout). On top of it:
+`discoverAndUpdateStatus` (existing, background/onboarding path) keeps
+its old lenient behavior — any 2xx is ACTIVE regardless of body validity,
+any failure is WARNING, never an exception. `fetchSchemaNow` (new,
+synchronous/UI path) is stricter by design: a 2xx with an empty or
+non-JSON body is treated as a *failure* (SchemaFetchException), not a
+silent ACTIVE-with-nothing-captured — because a human who just clicked
+"Fetch" needs a real yes/no answer, not the background worker's more
+tolerant "reachable enough to route" semantics. This asymmetry is
+intentional and documented (AutoDiscoveryWorker's class Javadoc, and an
+IT test — fetchSchemaNow_invalidJsonBody_returns502_evenThoughBackgroundWorkerMarksActive
+— that exercises both entry points against the identical stub in one
+test, to prove the difference is real and deliberate, not accidental
+inconsistency).
+
+Task 3's HTTP status codes: used 502 Bad Gateway, not the task's literal
+"400/500" suggestion — a deliberate, minor deviation, not an oversight.
+502 is the standard, semantically correct code for "this gateway
+couldn't get a valid response from an upstream it proxies to," and
+ZTeasy's gateway-service is exactly that kind of service; 400 would
+misleadingly suggest the *client's* POST request was malformed (it
+wasn't — the id and method were fine), and 500 would misleadingly suggest
+an internal defect in this service rather than an upstream problem. 404
+(id doesn't exist) and the underlying error message are both still
+exactly as asked.
+
+Testing: 6 new IT cases (real Postgres via Testcontainers, same as 024) —
+custom docs_url overriding the default path (with /v3/api-docs
+deliberately left unstubbed/404'ing, to prove the override is actually
+followed, not just present alongside the default), synchronous fetch
+success, synchronous fetch against an unreachable target (port 1, refused
+without needing a stub), synchronous fetch against a non-JSON 200 body
+(the test proving the strictness asymmetry above), and synchronous fetch
+for an unknown id. All passed on the first real run. Updated existing
+InventoryServiceTest/HealthPollingServiceTest call sites for the two new
+constructor/method parameters (docsUrl, hasSchema plumbing) and added two
+more unit tests directly for InventoryService.fetchSchemaNow's own
+not-found-vs-delegates branching.
+
+Frontend: Docs URL field added to the onboard dialog (optional, REST-only
+by label/helper text, not enforced structurally since managementUrl
+already sets the precedent of "shown regardless of target type, meaningful
+mainly for REST"); a "Fetch" (🔄) icon button per row, disabled while that
+row's fetch is in flight (CircularProgress swapped in), Snackbar
+success/error, table refresh on success; "View Schema" (📄) now disabled
+via `!service.hasSchema`, with a tooltip explaining why when disabled.
+Both new/modified disabled IconButtons wrapped in a <span> — MUI's own
+documented requirement for Tooltip to keep working on a disabled child
+(a disabled button doesn't fire the pointer events Tooltip listens for
+otherwise).
+
+ADR handling: amended ADR-016 again, in place — fourth amendment to this
+stage's ADR, continuing the established pattern.

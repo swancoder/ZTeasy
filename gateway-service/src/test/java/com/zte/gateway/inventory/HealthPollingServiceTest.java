@@ -73,7 +73,7 @@ class HealthPollingServiceTest {
     }
 
     private static InventoryEntry entry(String baseUrl, String managementUrl) {
-        return new InventoryEntry(UUID.randomUUID(), "svc", TargetType.REST, baseUrl, managementUrl,
+        return new InventoryEntry(UUID.randomUUID(), "svc", TargetType.REST, baseUrl, null, managementUrl,
                 InventoryStatus.ACTIVE, Instant.now());
     }
 }

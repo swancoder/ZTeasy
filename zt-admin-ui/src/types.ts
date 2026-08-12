@@ -68,6 +68,8 @@ export interface InventoryEntry {
   name: string
   targetType: 'REST' | 'MCP'
   baseUrl: string
+  // Optional, REST-only — AutoDiscoveryWorker probes this instead of {baseUrl}/v3/api-docs when set (ADR-016 amendment).
+  docsUrl: string | null
   // Optional — health polling pings this instead of baseUrl when set (ADR-016 amendment).
   managementUrl: string | null
   status: 'ACTIVE' | 'WARNING' | 'DOWN' | 'PENDING'
@@ -75,4 +77,8 @@ export interface InventoryEntry {
   lastPingMs: number | null
   actuatorStatus: string | null
   lastSuccessfulCall: string | null
+  // Whether discovered_schema is captured — NOT implied by status === 'ACTIVE' alone
+  // (a 2xx with an empty/invalid body still reaches ACTIVE but captures nothing);
+  // use this to gate "View Schema" (ADR-016 amendment).
+  hasSchema: boolean
 }

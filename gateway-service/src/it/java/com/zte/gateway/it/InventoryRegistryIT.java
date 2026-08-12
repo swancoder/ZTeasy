@@ -18,6 +18,7 @@ import static io.restassured.RestAssured.given;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.awaitility.Awaitility.await;
 import static org.hamcrest.Matchers.equalTo;
+import static org.hamcrest.Matchers.notNullValue;
 
 /**
  * E2E test for the APIM inventory registry (ADR-016) — the literal task
@@ -101,6 +102,83 @@ class InventoryRegistryIT extends BaseZteIntegrationTest {
         assertStatusEventually(adminToken, id, "ACTIVE");
 
         assertSchemaEventually(adminToken, id, toolsListBody);
+    }
+
+    @Test
+    @DisplayName("A custom docs_url is probed instead of the {base_url}/v3/api-docs convention")
+    void onboardRestService_withCustomDocsUrl_probesDocsUrlInstead() {
+        String name = "rest-custom-docs-" + UUID.randomUUID();
+        String customBody = "{\"openapi\":\"3.0.0\",\"info\":{\"title\":\"custom-path\"}}";
+        // /v3/api-docs deliberately left unstubbed (404) — if discovery still used the
+        // default convention despite docs_url being set, this would land on WARNING.
+        WIREMOCK.stubFor(get(urlPathEqualTo("/openapi-custom.json"))
+                .willReturn(aResponse().withStatus(200).withBody(customBody)));
+
+        String adminToken = getAdminToken();
+        String id = onboard(adminToken, name, "REST", "http://localhost:" + WIREMOCK.port(),
+                "http://localhost:" + WIREMOCK.port() + "/openapi-custom.json");
+
+        assertStatusEventually(adminToken, id, "ACTIVE");
+        assertSchemaEventually(adminToken, id, customBody);
+    }
+
+    @Test
+    @DisplayName("Synchronous fetch: success returns 200 immediately and the schema is captured")
+    void fetchSchemaNow_success_returns200AndCapturesImmediately() {
+        String name = "sync-fetch-ok-" + UUID.randomUUID();
+        String body = "{\"openapi\":\"3.0.0\"}";
+        WIREMOCK.stubFor(get(urlPathEqualTo("/v3/api-docs")).willReturn(aResponse().withStatus(200).withBody(body)));
+
+        String adminToken = getAdminToken();
+        String id = onboard(adminToken, name, "REST", "http://localhost:" + WIREMOCK.port());
+        assertStatusEventually(adminToken, id, "ACTIVE"); // let background discovery settle first
+
+        fetchSchemaSync(adminToken, id).then().statusCode(200);
+        assertSchemaEventually(adminToken, id, body);
+        assertHasSchemaEventually(adminToken, id, true);
+    }
+
+    @Test
+    @DisplayName("Synchronous fetch: an unreachable target returns 502 with a clear message")
+    void fetchSchemaNow_unreachableTarget_returns502() {
+        String name = "sync-fetch-unreachable-" + UUID.randomUUID();
+        // Port 1 is a reserved, always-refused port — no stub needed to make this fail.
+        String adminToken = getAdminToken();
+        String id = onboard(adminToken, name, "REST", "http://localhost:1");
+
+        fetchSchemaSync(adminToken, id)
+                .then()
+                .statusCode(502)
+                .body("error", notNullValue());
+    }
+
+    @Test
+    @DisplayName("Synchronous fetch: a 2xx with a non-JSON body returns 502, unlike the lenient background worker")
+    void fetchSchemaNow_invalidJsonBody_returns502_evenThoughBackgroundWorkerMarksActive() {
+        String name = "sync-fetch-invalid-json-" + UUID.randomUUID();
+        WIREMOCK.stubFor(get(urlPathEqualTo("/v3/api-docs"))
+                .willReturn(aResponse().withStatus(200).withBody("<html>not json</html>")));
+
+        String adminToken = getAdminToken();
+        String id = onboard(adminToken, name, "REST", "http://localhost:" + WIREMOCK.port());
+        // The passive worker is lenient — 2xx is 2xx, so this still reaches ACTIVE even
+        // though nothing valid was captured (the exact status-doesn't-imply-schema gap
+        // hasSchema exists to close).
+        assertStatusEventually(adminToken, id, "ACTIVE");
+        assertHasSchemaEventually(adminToken, id, false);
+
+        // The synchronous, UI-triggered fetch against the same unusable body is stricter.
+        fetchSchemaSync(adminToken, id)
+                .then()
+                .statusCode(502)
+                .body("error", notNullValue());
+    }
+
+    @Test
+    @DisplayName("Synchronous fetch: an unknown id returns 404")
+    void fetchSchemaNow_unknownId_returns404() {
+        String adminToken = getAdminToken();
+        fetchSchemaSync(adminToken, UUID.randomUUID().toString()).then().statusCode(404);
     }
 
     @Test
@@ -250,6 +328,46 @@ class InventoryRegistryIT extends BaseZteIntegrationTest {
             .then()
                 .statusCode(201)
                 .extract().path("id");
+    }
+
+    private String onboard(String adminToken, String name, String targetType, String baseUrl, String docsUrl) {
+        return given()
+                .baseUri("http://localhost:" + gatewayPort)
+                .header("Authorization", "Bearer " + adminToken)
+                .contentType("application/json")
+                .body(Map.of("name", name, "targetType", targetType, "baseUrl", baseUrl, "docsUrl", docsUrl))
+            .when()
+                .post("/api/v1/admin/inventory")
+            .then()
+                .statusCode(201)
+                .extract().path("id");
+    }
+
+    private Response fetchSchemaSync(String adminToken, String id) {
+        return given()
+                .baseUri("http://localhost:" + gatewayPort)
+                .header("Authorization", "Bearer " + adminToken)
+            .when()
+                .post("/api/v1/admin/inventory/" + id + "/schema/fetch");
+    }
+
+    private void assertHasSchemaEventually(String adminToken, String id, boolean expected) {
+        await().atMost(Duration.ofSeconds(5)).untilAsserted(() -> {
+            Response res = given()
+                    .baseUri("http://localhost:" + gatewayPort)
+                    .header("Authorization", "Bearer " + adminToken)
+                .when()
+                    .get("/api/v1/admin/inventory")
+                .then()
+                    .statusCode(200)
+                    .extract().response();
+
+            List<Map<String, Object>> entries = res.jsonPath().getList("");
+            Map<String, Object> row = entries.stream()
+                    .filter(e -> id.equals(e.get("id")))
+                    .findFirst().orElseThrow();
+            assertThat(row.get("hasSchema")).isEqualTo(expected);
+        });
     }
 
     /**
