@@ -764,12 +764,11 @@ automatically instead of needing its own `WebFilter` (ADR-012).
 
 ---
 
-*This document reflects repo state through commit `9f08f39`, plus further
-audit-enrichment refinements (`SSE_OPENED`, `ClientIpResolver`, readable
-display identity, named MCP target, captured call arguments — §5.5/§8) and
-Admin Console polish present in the working tree but not yet committed as
-of this update. Restructured from a chronological per-stage narrative into
-a current-state reference plus §8's conventions — the per-stage
-investigation narrative this replaced still lives in each linked ADR and
-`prompts-hist/`; nothing was deleted, only moved to where it belongs. Keep
-this in sync the same way as README/CLAUDE.md.*
+*This document reflects repo state through commit `8383def` (the audit-row
+enrichment follow-up — `SSE_OPENED`, `ClientIpResolver`, readable display
+identity, named MCP target, captured call arguments — §5.5/§8) and
+`304269d` (Admin Console polish). Restructured from a chronological
+per-stage narrative into a current-state reference plus §8's conventions —
+the per-stage investigation narrative this replaced still lives in each
+linked ADR and `prompts-hist/`; nothing was deleted, only moved to where it
+belongs. Keep this in sync the same way as README/CLAUDE.md.*
