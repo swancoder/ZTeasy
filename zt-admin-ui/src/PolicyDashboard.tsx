@@ -2,7 +2,6 @@ import { useCallback, useEffect, useState } from 'react'
 import Box from '@mui/material/Box'
 import Button from '@mui/material/Button'
 import CircularProgress from '@mui/material/CircularProgress'
-import Paper from '@mui/material/Paper'
 import Snackbar from '@mui/material/Snackbar'
 import Alert from '@mui/material/Alert'
 import Table from '@mui/material/Table'
@@ -15,6 +14,9 @@ import Chip from '@mui/material/Chip'
 import Typography from '@mui/material/Typography'
 import Stack from '@mui/material/Stack'
 import Tooltip from '@mui/material/Tooltip'
+import Accordion from '@mui/material/Accordion'
+import AccordionSummary from '@mui/material/AccordionSummary'
+import AccordionDetails from '@mui/material/AccordionDetails'
 import type { IdpIdentityEntry, PolicyDocument, PolicyRule, ReloadResult } from './types'
 
 interface Props {
@@ -209,22 +211,28 @@ export default function PolicyDashboard({ accessToken }: Props) {
         </Button>
       </Box>
 
-      <Stack spacing={3}>
-        {CATEGORIES.map((category) => (
-          <Paper key={category.key} variant="outlined">
-            <Box sx={{ p: 2, pb: 0 }}>
-              <Typography variant="h6">{category.title}</Typography>
-              <Typography variant="body2" color="text.secondary">
-                {category.description}
-              </Typography>
-            </Box>
-            <RuleTable
-              rules={policies?.[category.key] ?? []}
-              identitySet={identitySet}
-              defaultSourceType={category.defaultSourceType}
-            />
-          </Paper>
-        ))}
+      <Stack spacing={1}>
+        {CATEGORIES.map((category) => {
+          const rules = policies?.[category.key] ?? []
+          return (
+            <Accordion key={category.key} defaultExpanded={rules.length > 0}>
+              <AccordionSummary sx={{ '& .MuiAccordionSummary-content': { alignItems: 'center', gap: 1 } }}>
+                <span>▾</span>
+                <Box>
+                  <Typography variant="subtitle1">
+                    {category.title} ({rules.length})
+                  </Typography>
+                  <Typography variant="body2" color="text.secondary">
+                    {category.description}
+                  </Typography>
+                </Box>
+              </AccordionSummary>
+              <AccordionDetails sx={{ p: 0 }}>
+                <RuleTable rules={rules} identitySet={identitySet} defaultSourceType={category.defaultSourceType} />
+              </AccordionDetails>
+            </Accordion>
+          )
+        })}
       </Stack>
 
       <Snackbar

@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useMemo, useState } from 'react'
 import Box from '@mui/material/Box'
 import Button from '@mui/material/Button'
 import CircularProgress from '@mui/material/CircularProgress'
@@ -19,9 +19,13 @@ import DialogActions from '@mui/material/DialogActions'
 import TextField from '@mui/material/TextField'
 import MenuItem from '@mui/material/MenuItem'
 import Stack from '@mui/material/Stack'
+import Accordion from '@mui/material/Accordion'
+import AccordionSummary from '@mui/material/AccordionSummary'
+import AccordionDetails from '@mui/material/AccordionDetails'
 import IconButton from '@mui/material/IconButton'
 import Tooltip from '@mui/material/Tooltip'
 import SchemaDrawer from './SchemaDrawer'
+import ConfirmDialog from './ConfirmDialog'
 import type { InventoryEntry } from './types'
 
 interface Props {
@@ -35,9 +39,103 @@ const STATUS_COLOR: Record<InventoryEntry['status'], 'success' | 'warning' | 'er
   PENDING: 'default',
 }
 
+// Mirrors Identities.tsx's ACTOR_TYPES/CONTAINER_TYPES + IdentityAccordion split —
+// same accordion shape, grouped by targetType instead of identity type.
+type TargetTypeName = InventoryEntry['targetType']
+const GROUPS: TargetTypeName[] = ['REST', 'MCP']
+const GROUP_LABELS: Record<TargetTypeName, string> = { REST: 'Services', MCP: 'MCPs' }
+
+function ServiceTable({
+  services,
+  fetchingId,
+  onEdit,
+  onFetch,
+  onView,
+  onDelete,
+}: {
+  services: InventoryEntry[]
+  fetchingId: string | null
+  onEdit: (service: InventoryEntry) => void
+  onFetch: (service: InventoryEntry) => void
+  onView: (service: InventoryEntry) => void
+  onDelete: (service: InventoryEntry) => void
+}) {
+  if (services.length === 0) {
+    return (
+      <Typography color="text.secondary" sx={{ p: 2 }}>
+        Nothing registered in this category yet.
+      </Typography>
+    )
+  }
+  return (
+    <TableContainer>
+      <Table size="small">
+        <TableHead>
+          <TableRow>
+            <TableCell>Name</TableCell>
+            <TableCell>Base URL</TableCell>
+            <TableCell>Docs URL</TableCell>
+            <TableCell>Management URL</TableCell>
+            <TableCell>Status</TableCell>
+            <TableCell>Ping (ms)</TableCell>
+            <TableCell>Last Successful Call</TableCell>
+            <TableCell align="right">Actions</TableCell>
+          </TableRow>
+        </TableHead>
+        <TableBody>
+          {services.map((service) => (
+            <TableRow key={service.id}>
+              <TableCell>{service.name}</TableCell>
+              <TableCell sx={{ fontFamily: 'monospace', fontSize: '0.8rem' }}>{service.baseUrl}</TableCell>
+              <TableCell sx={{ fontFamily: 'monospace', fontSize: '0.8rem' }}>{service.docsUrl ?? '—'}</TableCell>
+              <TableCell sx={{ fontFamily: 'monospace', fontSize: '0.8rem' }}>
+                {service.managementUrl ?? '—'}
+              </TableCell>
+              <TableCell>
+                <Chip label={service.status} color={STATUS_COLOR[service.status]} size="small" />
+              </TableCell>
+              <TableCell>{service.lastPingMs ?? '—'}</TableCell>
+              <TableCell>
+                {service.lastSuccessfulCall ? new Date(service.lastSuccessfulCall).toLocaleString() : '—'}
+              </TableCell>
+              <TableCell align="right">
+                <Tooltip title="Edit service">
+                  <IconButton size="small" onClick={() => onEdit(service)}>
+                    ✏️
+                  </IconButton>
+                </Tooltip>
+                <Tooltip title="Fetch schema now">
+                  <span>
+                    <IconButton size="small" disabled={fetchingId === service.id} onClick={() => onFetch(service)}>
+                      {fetchingId === service.id ? <CircularProgress size={16} /> : '🔄'}
+                    </IconButton>
+                  </span>
+                </Tooltip>
+                <Tooltip title={service.hasSchema ? 'View discovered schema' : 'No schema captured yet — try Fetch'}>
+                  <span>
+                    <IconButton size="small" disabled={!service.hasSchema} onClick={() => onView(service)}>
+                      📄
+                    </IconButton>
+                  </span>
+                </Tooltip>
+                <Tooltip title="Remove from registry">
+                  <IconButton size="small" onClick={() => onDelete(service)}>
+                    🗑️
+                  </IconButton>
+                </Tooltip>
+              </TableCell>
+            </TableRow>
+          ))}
+        </TableBody>
+      </Table>
+    </TableContainer>
+  )
+}
+
 export default function Inventory({ accessToken }: Props) {
   const [services, setServices] = useState<InventoryEntry[]>([])
   const [loading, setLoading] = useState(true)
+  const [refreshing, setRefreshing] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [snackbar, setSnackbar] = useState<{ message: string; severity: 'success' | 'error' } | null>(null)
 
@@ -52,9 +150,9 @@ export default function Inventory({ accessToken }: Props) {
   const [schemaTarget, setSchemaTarget] = useState<InventoryEntry | null>(null)
   const [fetchingId, setFetchingId] = useState<string | null>(null)
   const [editingService, setEditingService] = useState<InventoryEntry | null>(null)
+  const [deleteTarget, setDeleteTarget] = useState<InventoryEntry | null>(null)
 
   const fetchServices = useCallback(async () => {
-    setLoading(true)
     setError(null)
     try {
       const res = await fetch('/api/v1/admin/inventory', {
@@ -66,14 +164,22 @@ export default function Inventory({ accessToken }: Props) {
       setServices(await res.json())
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e))
-    } finally {
-      setLoading(false)
     }
   }, [accessToken])
 
   useEffect(() => {
-    fetchServices()
+    fetchServices().finally(() => setLoading(false))
   }, [fetchServices])
+
+  const handleRefresh = async () => {
+    setRefreshing(true)
+    try {
+      await fetchServices()
+      setSnackbar({ message: 'Registry refreshed', severity: 'success' })
+    } finally {
+      setRefreshing(false)
+    }
+  }
 
   const resetForm = () => {
     setFormName('')
@@ -191,6 +297,12 @@ export default function Inventory({ accessToken }: Props) {
     }
   }
 
+  const byType = useMemo(() => {
+    const grouped: Record<TargetTypeName, InventoryEntry[]> = { REST: [], MCP: [] }
+    for (const service of services) grouped[service.targetType].push(service)
+    return grouped
+  }, [services])
+
   if (loading) {
     return (
       <Box sx={{ display: 'flex', justifyContent: 'center', mt: 8 }}>
@@ -211,9 +323,14 @@ export default function Inventory({ accessToken }: Props) {
     <Box sx={{ p: 3 }}>
       <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 3 }}>
         <Typography variant="h5">APIM Registry ({services.length})</Typography>
-        <Button variant="contained" onClick={openCreateDialog}>
-          Onboard Service
-        </Button>
+        <Stack direction="row" spacing={1}>
+          <Button variant="outlined" onClick={handleRefresh} disabled={refreshing}>
+            {refreshing ? 'Refreshing…' : 'Refresh'}
+          </Button>
+          <Button variant="contained" onClick={openCreateDialog}>
+            Onboard Service
+          </Button>
+        </Stack>
       </Box>
 
       {services.length === 0 ? (
@@ -221,75 +338,28 @@ export default function Inventory({ accessToken }: Props) {
           No services registered yet — click &quot;Onboard Service&quot; to add one.
         </Typography>
       ) : (
-        <TableContainer>
-          <Table size="small">
-            <TableHead>
-              <TableRow>
-                <TableCell>Name</TableCell>
-                <TableCell>Type</TableCell>
-                <TableCell>Base URL</TableCell>
-                <TableCell>Docs URL</TableCell>
-                <TableCell>Management URL</TableCell>
-                <TableCell>Status</TableCell>
-                <TableCell>Ping (ms)</TableCell>
-                <TableCell>Last Successful Call</TableCell>
-                <TableCell align="right">Actions</TableCell>
-              </TableRow>
-            </TableHead>
-            <TableBody>
-              {services.map((service) => (
-                <TableRow key={service.id}>
-                  <TableCell>{service.name}</TableCell>
-                  <TableCell>
-                    <Chip label={service.targetType} size="small" />
-                  </TableCell>
-                  <TableCell sx={{ fontFamily: 'monospace', fontSize: '0.8rem' }}>{service.baseUrl}</TableCell>
-                  <TableCell sx={{ fontFamily: 'monospace', fontSize: '0.8rem' }}>{service.docsUrl ?? '—'}</TableCell>
-                  <TableCell sx={{ fontFamily: 'monospace', fontSize: '0.8rem' }}>
-                    {service.managementUrl ?? '—'}
-                  </TableCell>
-                  <TableCell>
-                    <Chip label={service.status} color={STATUS_COLOR[service.status]} size="small" />
-                  </TableCell>
-                  <TableCell>{service.lastPingMs ?? '—'}</TableCell>
-                  <TableCell>
-                    {service.lastSuccessfulCall ? new Date(service.lastSuccessfulCall).toLocaleString() : '—'}
-                  </TableCell>
-                  <TableCell align="right">
-                    <Tooltip title="Edit service">
-                      <IconButton size="small" onClick={() => openEditDialog(service)}>
-                        ✏️
-                      </IconButton>
-                    </Tooltip>
-                    <Tooltip title="Fetch schema now">
-                      <span>
-                        <IconButton
-                          size="small"
-                          disabled={fetchingId === service.id}
-                          onClick={() => handleFetch(service)}
-                        >
-                          {fetchingId === service.id ? <CircularProgress size={16} /> : '🔄'}
-                        </IconButton>
-                      </span>
-                    </Tooltip>
-                    <Tooltip title={service.hasSchema ? 'View discovered schema' : 'No schema captured yet — try Fetch'}>
-                      <span>
-                        <IconButton size="small" disabled={!service.hasSchema} onClick={() => setSchemaTarget(service)}>
-                          📄
-                        </IconButton>
-                      </span>
-                    </Tooltip>
-                    <Tooltip title="Remove from registry">
-                      <IconButton size="small" onClick={() => handleDelete(service)}>
-                        🗑️
-                      </IconButton>
-                    </Tooltip>
-                  </TableCell>
-                </TableRow>
-              ))}
-            </TableBody>
-          </Table>
-        </TableContainer>
+        <Stack spacing={1}>
+          {GROUPS.map((group) => (
+            <Accordion key={group} defaultExpanded={byType[group].length > 0}>
+              <AccordionSummary sx={{ '& .MuiAccordionSummary-content': { alignItems: 'center', gap: 1 } }}>
+                <span>▾</span>
+                <Typography variant="subtitle1">
+                  {GROUP_LABELS[group]} ({byType[group].length})
+                </Typography>
+              </AccordionSummary>
+              <AccordionDetails sx={{ p: 0 }}>
+                <ServiceTable
+                  services={byType[group]}
+                  fetchingId={fetchingId}
+                  onEdit={openEditDialog}
+                  onFetch={handleFetch}
+                  onView={setSchemaTarget}
+                  onDelete={setDeleteTarget}
+                />
+              </AccordionDetails>
+            </Accordion>
+          ))}
+        </Stack>
       )}
 
       <Dialog open={dialogOpen} onClose={closeDialog} fullWidth maxWidth="sm">
@@ -351,6 +421,21 @@ export default function Inventory({ accessToken }: Props) {
           </Button>
         </DialogActions>
       </Dialog>
+
+      <ConfirmDialog
+        open={deleteTarget !== null}
+        title="Remove from registry?"
+        message={
+          deleteTarget
+            ? `Remove "${deleteTarget.name}" from the APIM registry? Routing to it (if REST) stops immediately, and this can't be undone from the UI.`
+            : ''
+        }
+        onConfirm={() => {
+          if (deleteTarget) handleDelete(deleteTarget)
+          setDeleteTarget(null)
+        }}
+        onCancel={() => setDeleteTarget(null)}
+      />
 
       <Snackbar
         open={snackbar !== null}

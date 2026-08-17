@@ -101,6 +101,19 @@ public class HealthPollingService {
                 .defaultIfEmpty(0);
     }
 
+    /**
+     * TMP FIX note: this hardcodes both the path ({@code /actuator/health}) and the
+     * Spring Boot Actuator response shape ({@code {"status": "..."}}) — fine for the
+     * two Spring services this was designed against ({@code service-a}/{@code
+     * service-b}), but it forces every other backend the registry fronts to fake being
+     * a Spring app just to pass this poll. Found live via the hubspot-mcp MCP backend
+     * bridge (a plain Python stdlib HTTP server with no organic reason to expose this
+     * endpoint at all), which added a matching TMP FIX handler purely to satisfy this
+     * check — see that repo's {@code mcp_backend_bridge.py}. The more correct long-term
+     * fix belongs here: make this protocol-agnostic (any 2xx response, or a
+     * per-entry-configurable path/shape) instead of assuming Spring's convention.
+     * Left as-is for now — revisit if more non-Spring backends get registered.
+     */
     private Mono<Void> pingOne(InventoryEntry entry) {
         Instant start = Instant.now();
         return webClientBuilder.baseUrl(healthCheckUrl(entry)).build()
