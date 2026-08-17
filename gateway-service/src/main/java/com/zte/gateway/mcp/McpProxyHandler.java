@@ -1,6 +1,7 @@
 package com.zte.gateway.mcp;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.zte.gateway.audit.ClientIpResolver;
 import com.zte.gateway.mcp.audit.McpAuditEvent;
 import com.zte.gateway.mcp.audit.McpAuditService;
 import com.zte.gateway.mcp.mask.DataMaskingFilter;
@@ -71,9 +72,22 @@ public class McpProxyHandler {
     }
 
     public Mono<ServerResponse> handleSse(ServerRequest request) {
-        return currentAgentId(request).flatMap(agentId -> {
+        HttpAuditContext httpContext = HttpAuditContext.from(request);
+
+        return currentIdentity(request).flatMap(identity -> {
+            String agentId = identity.agentId();
             String sessionId = UUID.randomUUID().toString();
             log.info("MCP SSE session opened sessionId={} agentId={}", sessionId, agentId);
+
+            // No policy decision happens here (any authenticated, cert-bearing caller may
+            // open a session — the interesting security question is which tool calls it's
+            // then allowed to make, audited separately by process() below), but the session
+            // itself is still worth an audit row: otherwise "who opened a session and never
+            // called a tool" is invisible. toolName/reason null distinguish this from a real
+            // tool-call event.
+            auditService.record(new McpAuditEvent(PROCESS_ID, agentId, null, "SSE_OPENED", Instant.now(),
+                    sessionId, null, httpContext.traceId(), httpContext.clientIp(), httpContext.userAgent(),
+                    identity.displayIdentity(), null));
 
             Flux<ServerSentEvent<String>> handshake = Flux.just(
                     ServerSentEvent.<String>builder()
@@ -113,6 +127,7 @@ public class McpProxyHandler {
                                 JsonRpcRequest rpc) {
         String agentId = identity.agentId();
         String toolName = rpc.toolName();
+        String argumentsJson = serializeArguments(rpc.toolArguments());
         PolicyDecision decision = policyEngine.evaluate(agentId, toolName, rpc.toolArguments());
 
         if (!decision.allowed()) {
@@ -120,7 +135,7 @@ public class McpProxyHandler {
                     sessionId, agentId, toolName, decision.reason());
             auditService.record(new McpAuditEvent(PROCESS_ID, agentId, toolName, "DENIED", Instant.now(),
                     sessionId, decision.reason(), httpContext.traceId(), httpContext.clientIp(),
-                    httpContext.userAgent(), identity.subject()));
+                    httpContext.userAgent(), identity.displayIdentity(), argumentsJson));
             return emit(sessionId, JsonRpcResponse.denied(rpc.id(), decision.reason()));
         }
 
@@ -130,8 +145,24 @@ public class McpProxyHandler {
                 .doOnNext(resp -> auditService.record(
                         new McpAuditEvent(PROCESS_ID, agentId, toolName, "ALLOWED", Instant.now(), sessionId, null,
                                 httpContext.traceId(), httpContext.clientIp(), httpContext.userAgent(),
-                                identity.subject())))
+                                identity.displayIdentity(), argumentsJson)))
                 .flatMap(resp -> emit(sessionId, resp));
+    }
+
+    /**
+     * The {@code tools/call} request's {@code params.arguments} as compact JSON —
+     * "what was inside the message" for the Admin Console's Audit Trail Tool-name
+     * tooltip (ADR: MCP audit row enrichment). Not masked: {@link DataMaskingFilter}
+     * only ever applies to the backend's *response*, and these are the inputs the
+     * caller itself supplied, not data pulled from the (potentially sensitive)
+     * downstream system.
+     */
+    private String serializeArguments(Map<String, Object> arguments) {
+        try {
+            return objectMapper.writeValueAsString(arguments);
+        } catch (Exception ex) {
+            return String.valueOf(arguments);
+        }
     }
 
     private Mono<Void> emit(String sessionId, JsonRpcResponse response) {
@@ -142,22 +173,17 @@ public class McpProxyHandler {
     }
 
     /**
-     * The calling client's identity: prefers {@code azp} (the OAuth2 client_id —
-     * what a client-credentials-flow agent token carries, and the same claim
-     * {@code RequestAuditFilter} already uses elsewhere in this gateway), falling
-     * back to {@code sub} for tokens that don't carry {@code azp}.
-     */
-    private Mono<String> currentAgentId(ServerRequest request) {
-        return currentIdentity(request).map(CallerIdentity::agentId);
-    }
-
-    /**
-     * Same {@code azp}-preferred-over-{@code sub} resolution as {@link
-     * #currentAgentId}, plus the raw JWT {@code sub} on its own — {@code
-     * originalUserObo} in the audit trail (ADR-013/017's convention: "the JWT
-     * subject that reached the gateway," regardless of caller type; unlike REST
-     * traffic, MCP calls never mint a downstream OBO token from it, but the
-     * column means the same thing either way).
+     * The calling client's identity: {@code agentId} prefers {@code azp} (the
+     * OAuth2 client_id — what a client-credentials-flow agent token carries,
+     * and the same claim {@code RequestAuditFilter} already uses elsewhere in
+     * this gateway), falling back to {@code sub} for tokens that don't carry
+     * {@code azp}; {@code displayIdentity} is {@code preferred_username}
+     * (e.g. {@code "service-account-agent-b"}, far more legible in the Admin
+     * Console than a bare Keycloak UUID), falling back to {@code sub} if
+     * absent — {@code originalUserObo} in the audit trail. MCP calls never
+     * mint a downstream OBO token from this value (unlike REST traffic), so
+     * unlike {@code RequestAuditFilter} there's no separate raw-{@code sub}
+     * value that has to stay untouched elsewhere — this is its only use.
      */
     private Mono<CallerIdentity> currentIdentity(ServerRequest request) {
         return request.principal()
@@ -166,19 +192,23 @@ public class McpProxyHandler {
                     var jwt = auth.getToken();
                     String clientId = jwt.getClaimAsString("azp");
                     String agentId = clientId != null ? clientId : jwt.getSubject();
-                    return new CallerIdentity(agentId, jwt.getSubject());
+                    String preferredUsername = jwt.getClaimAsString("preferred_username");
+                    String displayIdentity = preferredUsername != null ? preferredUsername : jwt.getSubject();
+                    return new CallerIdentity(agentId, displayIdentity);
                 });
     }
 
-    private record CallerIdentity(String agentId, String subject) {}
+    private record CallerIdentity(String agentId, String displayIdentity) {}
 
     /**
-     * The HTTP context an audited MCP tool call carries — resolved identically
-     * to {@code RequestAuditFilter}'s {@code resolveTraceId}/{@code
-     * resolveClientIp} (same header precedence, same fallback), from the
-     * {@code POST /message} request itself rather than the original
-     * {@code GET /sse} handshake (a different connection, possibly with
-     * different proxy/forwarding headers).
+     * The HTTP context an audited MCP event carries — {@code clientIp} via the
+     * shared {@link ClientIpResolver} (same rule {@code RequestAuditFilter}
+     * uses), {@code traceId} with the same {@code X-Request-Id}-or-mint
+     * fallback, always from the specific request that triggered the event:
+     * the {@code GET /sse} request for an {@code SSE_OPENED} event, the
+     * {@code POST /message} request for a tool-call event — these are
+     * different connections and may carry different proxy/forwarding
+     * headers, so neither is reused for the other's audit row.
      */
     private record HttpAuditContext(String traceId, String clientIp, String userAgent) {
         static HttpAuditContext from(ServerRequest request) {
@@ -188,10 +218,8 @@ public class McpProxyHandler {
             String traceId = (existingTraceId != null && !existingTraceId.isBlank())
                     ? existingTraceId : UUID.randomUUID().toString();
 
-            String forwarded = headers.getFirst("X-Forwarded-For");
-            String clientIp = (forwarded != null && !forwarded.isBlank())
-                    ? forwarded.split(",")[0].trim()
-                    : request.remoteAddress().map(addr -> addr.getAddress().getHostAddress()).orElse(null);
+            String clientIp = ClientIpResolver.resolve(
+                    headers.getFirst("X-Forwarded-For"), request.remoteAddress().orElse(null));
 
             return new HttpAuditContext(traceId, clientIp, headers.getFirst(HttpHeaders.USER_AGENT));
         }

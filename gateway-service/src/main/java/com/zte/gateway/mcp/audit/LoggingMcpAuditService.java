@@ -5,6 +5,7 @@ import com.zte.gateway.audit.RequestLogAuditService;
 import jakarta.annotation.PreDestroy;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Component;
 import reactor.core.publisher.Sinks;
 import reactor.core.scheduler.Schedulers;
@@ -22,6 +23,14 @@ import reactor.core.scheduler.Schedulers;
  * line-protocol write is still the only change needed to additionally wire up a
  * real TSDB — the non-blocking contract on the caller's side does not change.
  *
+ * <p>{@code targetService} (persisted rows' "which MCP backend" — the Admin
+ * Console's Audit Trail "Target" column) is {@code mcp-backend.name}, a
+ * display label the operator sets alongside {@code mcp-backend.uri} — this
+ * gateway only ever forwards to that single configured backend (see {@link
+ * com.zte.gateway.mcp.McpBackendClient}), not looked up from the APIM
+ * Registry per-call, so it's this filter's own config value, not a live
+ * lookup.
+ *
  * <p>Demo-grade: an unbounded buffer and no delivery guarantee across restarts.
  * A production version would back the sink with a persistent queue.
  */
@@ -31,10 +40,13 @@ public class LoggingMcpAuditService implements McpAuditService {
     private static final Logger log = LoggerFactory.getLogger("ZTE-MCP-AUDIT");
 
     private final RequestLogAuditService requestLogAuditService;
+    private final String targetServiceName;
     private final Sinks.Many<McpAuditEvent> sink = Sinks.many().unicast().onBackpressureBuffer();
 
-    public LoggingMcpAuditService(RequestLogAuditService requestLogAuditService) {
+    public LoggingMcpAuditService(RequestLogAuditService requestLogAuditService,
+                                   @Value("${mcp-backend.name:hubspot-mcp}") String targetServiceName) {
         this.requestLogAuditService = requestLogAuditService;
+        this.targetServiceName = targetServiceName;
         sink.asFlux()
                 .publishOn(Schedulers.boundedElastic())
                 .subscribe(this::persist, ex -> log.error("MCP audit stream terminated unexpectedly", ex));
@@ -54,16 +66,30 @@ public class LoggingMcpAuditService implements McpAuditService {
         log.info("[ZTE-MCP-AUDIT] process={} agent={} tool={} status={} ts={}",
                 event.processId(), event.agentId(), event.toolName(), event.status(), event.timestamp());
 
-        boolean allowed = "ALLOWED".equals(event.status());
-        // sessionId no longer travels as trace_id (see RequestLog.forMcp's Javadoc) — folded
-        // into message instead, so it's still queryable/visible without a dedicated column.
-        String message = event.reason() != null
-                ? "Session: " + event.sessionId() + ". " + event.reason()
-                : "Session: " + event.sessionId();
+        // Three event shapes share this one persist() path: a session opening (GET /sse,
+        // no policy decision — always "succeeds") and a tool call's allow/deny outcome
+        // (POST /message). Only "DENIED" is ever a non-2xx/non-ALLOW row.
+        boolean denied = "DENIED".equals(event.status());
+        boolean sseOpened = "SSE_OPENED".equals(event.status());
+        String path = sseOpened ? "/sse" : "/message";
+        String httpMethod = sseOpened ? "GET" : "POST";
+
+        // sessionId no longer travels as trace_id (see RequestLog.forMcp's Javadoc), and
+        // argumentsJson has no dedicated column either — both folded into message instead,
+        // so they're still queryable/visible without another schema migration. The Admin
+        // Console shows this as a tooltip on the Tool-name cell ("what was inside the
+        // /message call").
+        StringBuilder message = new StringBuilder("Session: ").append(event.sessionId());
+        if (event.reason() != null) {
+            message.append(". ").append(event.reason());
+        }
+        if (event.argumentsJson() != null) {
+            message.append(". Args: ").append(event.argumentsJson());
+        }
         requestLogAuditService.record(RequestLog.forMcp(
                 event.traceId(), event.clientIp(), event.userAgent(), event.processId(), event.agentId(),
-                event.toolName(), "/message", allowed ? 200 : 403, message, event.originalUserObo(), "mcp",
-                allowed ? "ALLOW" : "DENY"));
+                event.toolName(), path, httpMethod, denied ? 403 : 200, message.toString(), event.originalUserObo(),
+                targetServiceName, denied ? "DENY" : "ALLOW"));
     }
 
     @PreDestroy

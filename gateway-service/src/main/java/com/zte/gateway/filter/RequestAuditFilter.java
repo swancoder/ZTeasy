@@ -1,6 +1,7 @@
 package com.zte.gateway.filter;
 
 import com.zte.auth.audit.ZteAuditLogger;
+import com.zte.gateway.audit.ClientIpResolver;
 import com.zte.gateway.audit.RequestLog;
 import com.zte.gateway.audit.RequestLogAuditService;
 import com.zte.gateway.inventory.HealthTelemetryService;
@@ -19,7 +20,6 @@ import org.springframework.web.server.WebFilter;
 import org.springframework.web.server.WebFilterChain;
 import reactor.core.publisher.Mono;
 
-import java.net.InetSocketAddress;
 import java.util.UUID;
 import java.util.concurrent.atomic.AtomicReference;
 
@@ -96,6 +96,7 @@ public class RequestAuditFilter implements WebFilter, Ordered {
         // since doFinally's Consumer<SignalType> callback doesn't participate in context
         // propagation the way an operator further up the same chain would.
         AtomicReference<String> subjectRef = new AtomicReference<>();
+        AtomicReference<String> displayIdentityRef = new AtomicReference<>();
         AtomicReference<String> initiatorClientRef = new AtomicReference<>();
 
         return ReactiveSecurityContextHolder.getContext()
@@ -103,13 +104,24 @@ public class RequestAuditFilter implements WebFilter, Ordered {
                 .flatMap(ctx -> {
                     Authentication auth = ctx.getAuthentication();
                     String subject = null;
+                    String displayIdentity = null;
                     String initiatorClient = null;
                     if (auth instanceof JwtAuthenticationToken jwtAuth) {
                         subject = jwtAuth.getToken().getSubject();
+                        // preferred_username is human-readable ("zte-admin",
+                        // "service-account-agent-b") vs. sub's opaque Keycloak UUID — used
+                        // ONLY for the audit trail's display value (originalUserObo below),
+                        // never for X-User-Id or the OBO token itself (UserContextPropagationFilter
+                        // reads sub independently, straight from the security context — this
+                        // filter's own display choice can't affect what's cryptographically
+                        // propagated downstream).
+                        String preferredUsername = jwtAuth.getToken().getClaimAsString("preferred_username");
+                        displayIdentity = preferredUsername != null ? preferredUsername : subject;
                         initiatorClient = jwtAuth.getToken().getClaimAsString("azp");
                         log.info("ZT-AUDIT sub={} azp={} path={} traceId={}", subject, initiatorClient, path, traceId);
                     }
                     subjectRef.set(subject);
+                    displayIdentityRef.set(displayIdentity);
                     initiatorClientRef.set(initiatorClient);
 
                     String finalSubject = subject;
@@ -146,7 +158,7 @@ public class RequestAuditFilter implements WebFilter, Ordered {
                     ZteAuditLogger.requestLog(traceId, path, statusCode);
                     auditService.record(RequestLog.forRest(
                             traceId, clientIp, userAgent, PROCESS_ID, path, statusCode, null,
-                            initiatorClientRef.get(), subjectRef.get(), targetService, httpMethod,
+                            initiatorClientRef.get(), displayIdentityRef.get(), targetService, httpMethod,
                             decisionEffect(statusCode)));
                 });
     }
@@ -188,13 +200,8 @@ public class RequestAuditFilter implements WebFilter, Ordered {
         return (existing != null && !existing.isBlank()) ? existing : UUID.randomUUID().toString();
     }
 
-    /** Prefers {@code X-Forwarded-For}'s first hop (the original client) over the raw connection address. */
     private String resolveClientIp(ServerWebExchange exchange) {
         String forwarded = exchange.getRequest().getHeaders().getFirst("X-Forwarded-For");
-        if (forwarded != null && !forwarded.isBlank()) {
-            return forwarded.split(",")[0].trim();
-        }
-        InetSocketAddress remote = exchange.getRequest().getRemoteAddress();
-        return remote != null && remote.getAddress() != null ? remote.getAddress().getHostAddress() : null;
+        return ClientIpResolver.resolve(forwarded, exchange.getRequest().getRemoteAddress());
     }
 }

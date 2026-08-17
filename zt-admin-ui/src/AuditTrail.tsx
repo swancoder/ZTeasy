@@ -11,6 +11,7 @@ import TableHead from '@mui/material/TableHead'
 import TableRow from '@mui/material/TableRow'
 import Chip from '@mui/material/Chip'
 import Typography from '@mui/material/Typography'
+import Tooltip from '@mui/material/Tooltip'
 import type { RequestLogEntry } from './types'
 
 interface Props {
@@ -79,7 +80,7 @@ export default function AuditTrail({ accessToken }: Props) {
                 <TableCell>Timestamp</TableCell>
                 <TableCell>Trace ID</TableCell>
                 <TableCell>Client IP</TableCell>
-                <TableCell>Agent/User ID</TableCell>
+                <TableCell>Agent ID</TableCell>
                 <TableCell>Initiator / OBO User</TableCell>
                 <TableCell>Method</TableCell>
                 <TableCell>Path</TableCell>
@@ -102,7 +103,18 @@ export default function AuditTrail({ accessToken }: Props) {
                   <TableCell>{entry.httpMethod ?? '—'}</TableCell>
                   <TableCell>{entry.path}</TableCell>
                   <TableCell>{entry.targetService ?? '—'}</TableCell>
-                  <TableCell>{entry.toolName ?? '—'}</TableCell>
+                  <TableCell>
+                    {entry.toolName ? (
+                      // message holds "Session: <id>[. <deny reason>][. Args: {...}]" (folded in
+                      // rather than a dedicated column — see LoggingMcpAuditService) — the actual
+                      // JSON-RPC params.arguments sent to POST /message, for inspection on hover.
+                      <Tooltip title={entry.message ?? 'No details captured'} arrow>
+                        <span>{entry.toolName}</span>
+                      </Tooltip>
+                    ) : (
+                      '—'
+                    )}
+                  </TableCell>
                   <TableCell>
                     <Chip
                       label={entry.statusCode ?? '—'}

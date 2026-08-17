@@ -28,10 +28,10 @@ class LoggingMcpAuditServiceTest {
 
     @Test
     void allowedEvent_persistsAsAllowWith200() {
-        LoggingMcpAuditService service = new LoggingMcpAuditService(requestLogAuditService);
+        LoggingMcpAuditService service = new LoggingMcpAuditService(requestLogAuditService, "test-mcp-backend");
 
         service.record(new McpAuditEvent("1234", "agent-a", "echo", "ALLOWED", Instant.now(), "session-1", null,
-                "trace-abc", "203.0.113.7", "test-agent/1.0", "agent-a-subject-uuid"));
+                "trace-abc", "203.0.113.7", "test-agent/1.0", "agent-a-subject-uuid", "{\"text\":\"hi\"}"));
 
         ArgumentCaptor<RequestLog> captor = ArgumentCaptor.forClass(RequestLog.class);
         verify(requestLogAuditService, timeout(2000)).record(captor.capture());
@@ -49,17 +49,37 @@ class LoggingMcpAuditServiceTest {
         assertThat(logged.httpMethod()).isEqualTo("POST");
         assertThat(logged.statusCode()).isEqualTo(200);
         assertThat(logged.decisionEffect()).isEqualTo("ALLOW");
-        assertThat(logged.targetService()).isEqualTo("mcp");
-        assertThat(logged.message()).isEqualTo("Session: session-1");
+        assertThat(logged.targetService()).isEqualTo("test-mcp-backend");
+        assertThat(logged.message()).isEqualTo("Session: session-1. Args: {\"text\":\"hi\"}");
+    }
+
+    @Test
+    void sseOpenedEvent_persistsAsAllowWith200OnSseGetPath() {
+        LoggingMcpAuditService service = new LoggingMcpAuditService(requestLogAuditService, "test-mcp-backend");
+
+        service.record(new McpAuditEvent("1234", "agent-a", null, "SSE_OPENED", Instant.now(), "session-3", null,
+                "trace-open", "203.0.113.9", "test-agent/3.0", "agent-a-subject-uuid", null));
+
+        ArgumentCaptor<RequestLog> captor = ArgumentCaptor.forClass(RequestLog.class);
+        verify(requestLogAuditService, timeout(2000)).record(captor.capture());
+        RequestLog logged = captor.getValue();
+        assertThat(logged.traceId()).isEqualTo("trace-open");
+        assertThat(logged.agentId()).isEqualTo("agent-a");
+        assertThat(logged.toolName()).isNull();
+        assertThat(logged.path()).isEqualTo("/sse");
+        assertThat(logged.httpMethod()).isEqualTo("GET");
+        assertThat(logged.statusCode()).isEqualTo(200);
+        assertThat(logged.decisionEffect()).isEqualTo("ALLOW");
+        assertThat(logged.message()).isEqualTo("Session: session-3");
     }
 
     @Test
     void deniedEvent_persistsAsDenyWith403AndReasonAppendedToSessionInMessage() {
-        LoggingMcpAuditService service = new LoggingMcpAuditService(requestLogAuditService);
+        LoggingMcpAuditService service = new LoggingMcpAuditService(requestLogAuditService, "test-mcp-backend");
 
         service.record(new McpAuditEvent("1234", "agent-b", "delete_all", "DENIED", Instant.now(),
                 "session-2", "tool not granted to this agent",
-                "trace-xyz", "203.0.113.8", "test-agent/2.0", "agent-b-subject-uuid"));
+                "trace-xyz", "203.0.113.8", "test-agent/2.0", "agent-b-subject-uuid", "{\"id\":\"deal-1\"}"));
 
         ArgumentCaptor<RequestLog> captor = ArgumentCaptor.forClass(RequestLog.class);
         verify(requestLogAuditService, timeout(2000)).record(captor.capture());
@@ -67,6 +87,7 @@ class LoggingMcpAuditServiceTest {
         assertThat(logged.traceId()).isEqualTo("trace-xyz");
         assertThat(logged.statusCode()).isEqualTo(403);
         assertThat(logged.decisionEffect()).isEqualTo("DENY");
-        assertThat(logged.message()).isEqualTo("Session: session-2. tool not granted to this agent");
+        assertThat(logged.message())
+                .isEqualTo("Session: session-2. tool not granted to this agent. Args: {\"id\":\"deal-1\"}");
     }
 }

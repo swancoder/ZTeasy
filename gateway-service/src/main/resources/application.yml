@@ -97,6 +97,11 @@ service-b:
 # ── MCP proxy: downstream MCP server fronted by GET /sse + POST /message ──
 mcp-backend:
   uri: ${MCP_BACKEND_URI:http://localhost:9090}
+  # Purely a display label for request_logs.target_service (Audit Trail's "Target"
+  # column) — this gateway only ever forwards to the single backend at uri above,
+  # not looked up from the APIM Registry per-call, so this must be kept in sync
+  # with whatever's actually running there by whoever configures MCP_BACKEND_URI.
+  name: ${MCP_BACKEND_NAME:hubspot-mcp}
 
 # ── mTLS outbound (gateway → service-a / service-b) ──
 zte:
