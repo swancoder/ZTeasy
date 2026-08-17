@@ -133,7 +133,7 @@ zte-lightweight/
 │        build.gradle.kts via the node-gradle plugin, packaged into its jar)
 │
 ├── certs/
-│   └── generate-certs.sh  Generates ZTE-CA, client.p12, service-a.p12, service-b.p12
+│   └── generate-certs.sh  Generates ZTE-CA, client.p12/.pem, service-a.p12, service-b.p12, gateway.p12
 │
 ├── scripts/
 │   └── install-hooks.sh   Installs .githooks/pre-commit into local .git/hooks/

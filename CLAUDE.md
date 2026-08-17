@@ -56,7 +56,7 @@ This file should stay small enough to read in one pass.
 - `./service-b`: Second protected downstream service — validates OBO token (port 8082 HTTPS/mTLS, 9082 management).
 - `./zt-agents`: AI security copilot (Kotlin Spring Boot WebFlux, port 8083) — Policy Auditor Agent (Anthropic Claude).
 - `./zt-admin-ui`: React Admin Console (Vite/TypeScript/MUI) — plain npm project, built by `gateway-service`'s Gradle build and served at `/admin/` (not run standalone).
-- `./certs`: Dev certificate scripts (`generate-certs.sh`) and generated PKCS12 files (gitignored).
+- `./certs`: Dev certificate scripts (`generate-certs.sh`) and generated PKCS12/PEM files (gitignored).
 - `./prompts-hist`: Log of every major task prompt and how the implementation deviated from it.
 - `./docs/adr`: Architectural Decision Records — one per structural/architectural decision.
 - `./docs/SPECS.md`: Consolidated technical spec — architecture, component specs, data model, API reference, risk register, progress-flagged roadmap. The authoritative reference tying together README, CLAUDE.md, and the ADRs.

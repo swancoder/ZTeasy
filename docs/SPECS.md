@@ -230,7 +230,7 @@ See `docker-compose.yml`.
 | `service-b` | Java 21 (WebFlux) | Deepest downstream; validates OBO token | 8082 (mTLS), 9082 (mgmt) |
 | `zt-agents` | Kotlin (WebFlux) | AI security copilot — Policy Auditor Agent | 8083 |
 | `zt-admin-ui` | TypeScript (Vite/React) | Admin Console SPA — plain npm project, built and packaged by `gateway-service`'s Gradle build (ADR-012), not run standalone | — (served by 8080) |
-| `certs` | shell | Dev cert generation (ZTE-CA, PKCS12 stores) | — |
+| `certs` | shell | Dev cert generation (ZTE-CA, PKCS12 stores, plus `client.pem` for non-JVM clients) | — |
 | `scripts` | shell | Keycloak password bootstrap, git hook install | — |
 | `docs/adr` | Markdown | Architectural Decision Records | — |
 
