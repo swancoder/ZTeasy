@@ -7,7 +7,7 @@
 ## Where Things Live (read this before re-deriving anything)
 This file is a short orientation index, not the record of what was built or why.
 Detail lives in exactly one place each — don't duplicate it back into this file:
-- **What's implemented, per stage, with commit hashes:** `docs/SPECS.md` §2 (Status Summary).
+- **What's implemented, per stage:** `docs/SPECS.md` §2 (Status Summary) — commit hashes live in `git log`, not duplicated there since SPECS.md was compacted into a current-state reference (see its own footer).
 - **Why a decision was made, alternatives considered, self-critique, consequences:** the ADR for that stage — `docs/adr/ADR-XXX-name.md` (index: `docs/SPECS.md` §11, and `README.md`'s ADR Index).
 - **The literal prompt a stage was built from, and how the implementation deviated from it:** `prompts-hist/`.
 - **Full architecture, component specs, data model, API reference, known risks, roadmap:** `docs/SPECS.md` (all of it — this is the consolidated technical reference).
@@ -65,8 +65,8 @@ This file should stay small enough to read in one pass.
 
 ## Stage Index
 
-One line per stage: what it is, and where the detail lives. Full table with commit
-hashes: `docs/SPECS.md` §2. Reasoning/alternatives/self-critique: the linked ADR.
+One line per stage: what it is, and where the detail lives. Full table (no commit
+hashes — see `git log`): `docs/SPECS.md` §2. Reasoning/alternatives/self-critique: the linked ADR.
 
 | Stage | Title | ADR |
 |---|---|---|

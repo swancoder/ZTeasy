@@ -10,7 +10,7 @@ import java.util.Optional;
 
 /**
  * Pure, in-memory rule matching — no I/O, safe to call from the reactive gateway
- * path or synchronously from {@code McpPolicyEngine.evaluate()} (ADR-009 §8.2).
+ * path or synchronously from {@code McpPolicyEngine.evaluate()} (ADR-009; see also SPECS.md §5.4).
  *
  * <p>Precedence: among all rules matching the request tuple, an explicit DENY
  * always wins over an explicit ALLOW, regardless of declaration order or

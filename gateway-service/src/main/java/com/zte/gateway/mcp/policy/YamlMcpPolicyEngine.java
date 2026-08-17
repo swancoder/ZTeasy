@@ -14,7 +14,7 @@ import java.util.Map;
  * {@link McpPolicyEngine} backed by the YAML {@code agentMcpToolCalls} rules
  * (ADR-011), replacing the {@code DummyMcpPolicyEngine} placeholder.
  *
- * <p>Satisfies ADR-009 §8.2: {@link #evaluate} is synchronous and zero-I/O —
+ * <p>Satisfies ADR-009 (see also SPECS.md §5.4): {@link #evaluate} is synchronous and zero-I/O —
  * rule data is pre-loaded into {@link PolicyDefinitionStore}'s
  * {@code AtomicReference} snapshot, read here with a plain field access, never
  * fetched inline during the request path.

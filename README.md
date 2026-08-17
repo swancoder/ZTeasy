@@ -388,16 +388,23 @@ docker exec zte-postgres psql -U zte_user -d zte_db \
 ```
 
 Also visible in the Admin Console's "Audit Trail" tab (Timestamp, Trace ID, Client IP,
-Initiator/OBO User, Method, Target, Tool, Path, Status, Decision).
+Agent ID, Initiator/OBO User, Method, Path, Target, Tool, Status, Decision). Hovering a
+Tool name shows a tooltip with the MCP session id, deny reason (if any), and the actual
+`tools/call` arguments sent — "Agent ID" is MCP-only (`agentId`, `null` for REST rows);
+REST/interactive-user identity lives in the adjacent "Initiator/OBO User" column instead.
 
-**Unified with MCP audit (ADR-017).** REST and MCP traffic now share this one table —
-`LoggingMcpAuditService` (see [MCP Proxy](#mcp-proxy) below) also writes a row per tool
-call, populating `agent_id`/`tool_name` (always blank for REST rows, and vice versa).
-Every row also carries `initiator_client` (the calling service/agent's JWT `azp`, blank
-for a plain interactive user), `original_user_obo` (the JWT `sub` the OBO token was
-minted for), `target_service`, `http_method`, and `decision_effect`
-(`ALLOW`/`DENY`/`ERROR`, derived from the final status code — see
-[ADR-017](docs/adr/ADR-017-dynamic-routing-and-audit.md)).
+**Unified with MCP audit (ADR-017, further enriched in a same-area follow-up).** REST
+and MCP traffic share this one table — `LoggingMcpAuditService` (see [MCP
+Proxy](#mcp-proxy) below) writes a row per MCP event (a session opening, or a tool
+call's outcome), populating `agent_id`/`tool_name` (always blank for REST rows, and vice
+versa) and carrying the same full HTTP context (`trace_id`/`client_ip`/`user_agent`) REST
+rows always had — no more separate, thinner MCP-only row. Every row also carries
+`initiator_client` (the calling service/agent's JWT `azp`, blank for a plain interactive
+user), `original_user_obo` (the caller's `preferred_username`, falling back to JWT `sub`
+— display-only; the OBO token the gateway actually mints for downstream propagation
+always uses the raw `sub`, read independently and unaffected by this display choice),
+`target_service`, `http_method`, and `decision_effect` (`ALLOW`/`DENY`/`ERROR`, derived
+from the final status code — see [ADR-017](docs/adr/ADR-017-dynamic-routing-and-audit.md)).
 
 ---
 
