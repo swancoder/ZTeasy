@@ -11,6 +11,9 @@
 #   ca.key              — ZTE CA private key (keep secret)
 #   client.p12          — PKCS12 keystore for internal client auth
 #                         (used by gateway + service-a for outbound mTLS calls)
+#   client.pem          — same client cert+key as client.p12, combined PEM form
+#                         (for non-JVM clients, e.g. hubspot-mcp's agent_simulator.py —
+#                         see the security note at its generation step below)
 #   service-a.p12       — PKCS12 keystore for service-a's HTTPS server
 #   service-b.p12       — PKCS12 keystore for service-b's HTTPS server
 #   gateway.p12         — PKCS12 keystore for gateway-service's HTTPS server
@@ -71,6 +74,14 @@ openssl pkcs12 -export \
     -certfile ca.crt \
     -out client.p12 -passout "pass:${PASS}" \
     -name "zte-internal-client"
+
+# Combined cert+unencrypted-key PEM — most non-JVM HTTP clients (Python `requests`,
+# curl's --cert without --cert-type, etc.) expect this shape, not PKCS12. An
+# unencrypted private key sitting in a plain file is a real security tradeoff —
+# acceptable only because this is a local dev CA with no production exposure;
+# never do this for a real deployment. Consumed by hubspot-mcp's agent_simulator.py.
+cat client.crt client.key > client.pem
+chmod 600 client.pem
 
 # ── 3. Service A Server Certificate ────────────────────────────────────────
 info "3/6  Generating service-a server certificate ..."

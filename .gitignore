@@ -79,6 +79,7 @@ replay_pid*
 certs/*.key
 certs/*.crt
 certs/*.p12
+certs/*.pem
 certs/*.csr
 certs/*.srl
 
