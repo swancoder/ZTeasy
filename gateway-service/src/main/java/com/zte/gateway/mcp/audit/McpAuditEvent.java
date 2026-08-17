@@ -9,13 +9,22 @@ import java.time.Instant;
  * {@code processId}/{@code agentId}/{@code toolName} as tags, {@code status} as
  * a field, {@code timestamp} as the point time.
  *
- * <p>{@code sessionId} (ADR-017) — the MCP {@code GET /sse} session id, used
- * as this event's {@code request_logs.trace_id} equivalent once persisted:
- * MCP calls don't carry an {@code X-Request-Id} the way REST traffic does,
- * and {@code sessionId} is the closest thing MCP has to a per-flow
- * correlation identifier. {@code reason} (ADR-017) — {@code
- * PolicyDecision#reason()} for a {@code DENIED} event, {@code null} for
- * {@code ALLOWED} — becomes {@code request_logs.message}.
+ * <p>{@code sessionId} — the MCP {@code GET /sse} session id, correlating every
+ * tool call within one session. No longer this event's {@code
+ * request_logs.trace_id} (that's now {@code traceId}, the caller's actual
+ * {@code X-Request-Id} — see below); {@code sessionId} is folded into {@code
+ * request_logs.message} instead by {@code LoggingMcpAuditService}, so it isn't
+ * lost. {@code reason} — {@code PolicyDecision#reason()} for a {@code DENIED}
+ * event, {@code null} for {@code ALLOWED}.
+ *
+ * <p>{@code traceId}/{@code clientIp}/{@code userAgent}/{@code originalUserObo}
+ * (unifies the previously-separate REST transport row and MCP semantic row
+ * into one — see ADR-017's Self-Criticism table) — the same HTTP context
+ * {@code RequestAuditFilter} captures for REST traffic, extracted by {@code
+ * McpProxyHandler} from the {@code POST /message} request that triggered this
+ * event (not the original {@code GET /sse} handshake, which may be a different
+ * connection).
  */
 public record McpAuditEvent(String processId, String agentId, String toolName, String status, Instant timestamp,
-                             String sessionId, String reason) {}
+                             String sessionId, String reason, String traceId, String clientIp, String userAgent,
+                             String originalUserObo) {}

@@ -45,7 +45,7 @@ class RequestAuditFilterTest {
 
     /** Same default list application.yml ships (see application.yml's zte.audit block). */
     private static final List<String> DEFAULT_EXCLUSIONS =
-            List.of("/admin/", "/api/v1/admin/", "/api/v1/internal/", "/actuator/");
+            List.of("/admin/", "/api/v1/admin/", "/api/v1/internal/", "/actuator/", "/sse", "/message");
 
     @Mock RequestLogAuditService auditService;
     @Mock WebFilterChain          chain;

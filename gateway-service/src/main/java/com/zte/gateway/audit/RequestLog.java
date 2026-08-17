@@ -64,16 +64,25 @@ public record RequestLog(
 
     /**
      * MCP tool-call traffic ({@code com.zte.gateway.mcp.audit.LoggingMcpAuditService},
-     * ADR-017) — {@code initiatorClient} is set to {@code agentId} too, so a
-     * "who initiated this row" query never has to branch on target type;
-     * {@code clientIp}/{@code userAgent}/{@code originalUserObo} are
-     * {@code null} — the MCP path (SSE session + async {@code POST /message})
-     * doesn't carry those the same way a synchronous REST call does.
+     * ADR-017, unified with the REST transport row as a follow-up — see that
+     * ADR's Self-Criticism table) — {@code initiatorClient} is set to {@code
+     * agentId} too, so a "who initiated this row" query never has to branch on
+     * target type. Deliberately not a separate {@code initiatorClient} parameter:
+     * there is no scenario where an MCP row's initiator legitimately differs
+     * from the calling agent, and accepting one anyway would let the two
+     * silently drift apart for no benefit.
+     *
+     * <p>{@code traceId} is the caller's {@code X-Request-Id} (minted if absent),
+     * the same convention REST traffic uses — the MCP session id is a separate,
+     * longer-lived correlator (one session spans many tool calls) and doesn't
+     * fit the "one row, one trace" shape {@code trace_id} is queried by; it's
+     * preserved in {@code message} instead (see {@code LoggingMcpAuditService}).
      */
-    public static RequestLog forMcp(String traceId, String processId, String agentId, String toolName, String path,
-                                     Integer statusCode, String message, String targetService,
+    public static RequestLog forMcp(String traceId, String clientIp, String userAgent, String processId,
+                                     String agentId, String toolName, String path, Integer statusCode,
+                                     String message, String originalUserObo, String targetService,
                                      String decisionEffect) {
-        return new RequestLog(null, Instant.now(), traceId, null, null, processId, agentId, toolName, path,
-                statusCode, message, agentId, null, targetService, "POST", decisionEffect);
+        return new RequestLog(null, Instant.now(), traceId, clientIp, userAgent, processId, agentId, toolName, path,
+                statusCode, message, agentId, originalUserObo, targetService, "POST", decisionEffect);
     }
 }

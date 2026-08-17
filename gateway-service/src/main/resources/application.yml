@@ -145,6 +145,10 @@ zte:
       - /api/v1/internal/  # zt-agents/ops internal endpoints — network-perimeter
                             # tooling traffic, not proxied-service traffic
       - /actuator/         # health checks — same class of noise
+      - /sse               # MCP proxy (ADR-017 unification) — LoggingMcpAuditService
+      - /message           # already writes one enriched request_logs row per tool call
+                            # (HTTP context + MCP semantics together); this filter's own
+                            # transport-only row would just duplicate it
 
 # ── Logging ──
 logging:

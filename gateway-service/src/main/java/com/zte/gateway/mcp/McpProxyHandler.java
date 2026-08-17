@@ -11,6 +11,7 @@ import com.zte.gateway.mcp.policy.PolicyDecision;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.core.ParameterizedTypeReference;
+import org.springframework.http.HttpHeaders;
 import org.springframework.http.MediaType;
 import org.springframework.http.codec.ServerSentEvent;
 import org.springframework.security.oauth2.server.resource.authentication.JwtAuthenticationToken;
@@ -95,9 +96,11 @@ public class McpProxyHandler {
                     .bodyValue(Map.of("error", "Unknown or missing sessionId — call GET /sse first"));
         }
 
-        return currentAgentId(request)
-                .flatMap(agentId -> request.bodyToMono(JsonRpcRequest.class)
-                        .flatMap(rpc -> process(sessionId, agentId, rpc)))
+        HttpAuditContext httpContext = HttpAuditContext.from(request);
+
+        return currentIdentity(request)
+                .flatMap(identity -> request.bodyToMono(JsonRpcRequest.class)
+                        .flatMap(rpc -> process(sessionId, identity, httpContext, rpc)))
                 .then(ServerResponse.accepted().build());
     }
 
@@ -106,7 +109,9 @@ public class McpProxyHandler {
      * backend result) into the caller's SSE session. Never surfaces an error to
      * the {@code POST /message} response itself — everything travels via SSE.
      */
-    private Mono<Void> process(String sessionId, String agentId, JsonRpcRequest rpc) {
+    private Mono<Void> process(String sessionId, CallerIdentity identity, HttpAuditContext httpContext,
+                                JsonRpcRequest rpc) {
+        String agentId = identity.agentId();
         String toolName = rpc.toolName();
         PolicyDecision decision = policyEngine.evaluate(agentId, toolName, rpc.toolArguments());
 
@@ -114,7 +119,8 @@ public class McpProxyHandler {
             log.warn("MCP DENY sessionId={} agentId={} tool={} reason={}",
                     sessionId, agentId, toolName, decision.reason());
             auditService.record(new McpAuditEvent(PROCESS_ID, agentId, toolName, "DENIED", Instant.now(),
-                    sessionId, decision.reason()));
+                    sessionId, decision.reason(), httpContext.traceId(), httpContext.clientIp(),
+                    httpContext.userAgent(), identity.subject()));
             return emit(sessionId, JsonRpcResponse.denied(rpc.id(), decision.reason()));
         }
 
@@ -122,7 +128,9 @@ public class McpProxyHandler {
         return backendClient.forward(rpc)
                 .map(dataMaskingFilter::mask)
                 .doOnNext(resp -> auditService.record(
-                        new McpAuditEvent(PROCESS_ID, agentId, toolName, "ALLOWED", Instant.now(), sessionId, null)))
+                        new McpAuditEvent(PROCESS_ID, agentId, toolName, "ALLOWED", Instant.now(), sessionId, null,
+                                httpContext.traceId(), httpContext.clientIp(), httpContext.userAgent(),
+                                identity.subject())))
                 .flatMap(resp -> emit(sessionId, resp));
     }
 
@@ -140,12 +148,52 @@ public class McpProxyHandler {
      * back to {@code sub} for tokens that don't carry {@code azp}.
      */
     private Mono<String> currentAgentId(ServerRequest request) {
+        return currentIdentity(request).map(CallerIdentity::agentId);
+    }
+
+    /**
+     * Same {@code azp}-preferred-over-{@code sub} resolution as {@link
+     * #currentAgentId}, plus the raw JWT {@code sub} on its own — {@code
+     * originalUserObo} in the audit trail (ADR-013/017's convention: "the JWT
+     * subject that reached the gateway," regardless of caller type; unlike REST
+     * traffic, MCP calls never mint a downstream OBO token from it, but the
+     * column means the same thing either way).
+     */
+    private Mono<CallerIdentity> currentIdentity(ServerRequest request) {
         return request.principal()
                 .cast(JwtAuthenticationToken.class)
                 .map(auth -> {
                     var jwt = auth.getToken();
                     String clientId = jwt.getClaimAsString("azp");
-                    return clientId != null ? clientId : jwt.getSubject();
+                    String agentId = clientId != null ? clientId : jwt.getSubject();
+                    return new CallerIdentity(agentId, jwt.getSubject());
                 });
+    }
+
+    private record CallerIdentity(String agentId, String subject) {}
+
+    /**
+     * The HTTP context an audited MCP tool call carries — resolved identically
+     * to {@code RequestAuditFilter}'s {@code resolveTraceId}/{@code
+     * resolveClientIp} (same header precedence, same fallback), from the
+     * {@code POST /message} request itself rather than the original
+     * {@code GET /sse} handshake (a different connection, possibly with
+     * different proxy/forwarding headers).
+     */
+    private record HttpAuditContext(String traceId, String clientIp, String userAgent) {
+        static HttpAuditContext from(ServerRequest request) {
+            HttpHeaders headers = request.headers().asHttpHeaders();
+
+            String existingTraceId = headers.getFirst("X-Request-Id");
+            String traceId = (existingTraceId != null && !existingTraceId.isBlank())
+                    ? existingTraceId : UUID.randomUUID().toString();
+
+            String forwarded = headers.getFirst("X-Forwarded-For");
+            String clientIp = (forwarded != null && !forwarded.isBlank())
+                    ? forwarded.split(",")[0].trim()
+                    : request.remoteAddress().map(addr -> addr.getAddress().getHostAddress()).orElse(null);
+
+            return new HttpAuditContext(traceId, clientIp, headers.getFirst(HttpHeaders.USER_AGENT));
+        }
     }
 }

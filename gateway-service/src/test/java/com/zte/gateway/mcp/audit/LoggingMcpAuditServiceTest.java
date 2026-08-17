@@ -30,12 +30,18 @@ class LoggingMcpAuditServiceTest {
     void allowedEvent_persistsAsAllowWith200() {
         LoggingMcpAuditService service = new LoggingMcpAuditService(requestLogAuditService);
 
-        service.record(new McpAuditEvent("1234", "agent-a", "echo", "ALLOWED", Instant.now(), "session-1", null));
+        service.record(new McpAuditEvent("1234", "agent-a", "echo", "ALLOWED", Instant.now(), "session-1", null,
+                "trace-abc", "203.0.113.7", "test-agent/1.0", "agent-a-subject-uuid"));
 
         ArgumentCaptor<RequestLog> captor = ArgumentCaptor.forClass(RequestLog.class);
         verify(requestLogAuditService, timeout(2000)).record(captor.capture());
         RequestLog logged = captor.getValue();
-        assertThat(logged.traceId()).isEqualTo("session-1");
+        // ADR-017 unification: trace_id is the real HTTP X-Request-Id, not the MCP
+        // session id — the session id is preserved in message instead (below).
+        assertThat(logged.traceId()).isEqualTo("trace-abc");
+        assertThat(logged.clientIp()).isEqualTo("203.0.113.7");
+        assertThat(logged.userAgent()).isEqualTo("test-agent/1.0");
+        assertThat(logged.originalUserObo()).isEqualTo("agent-a-subject-uuid");
         assertThat(logged.agentId()).isEqualTo("agent-a");
         assertThat(logged.toolName()).isEqualTo("echo");
         assertThat(logged.initiatorClient()).isEqualTo("agent-a");
@@ -44,21 +50,23 @@ class LoggingMcpAuditServiceTest {
         assertThat(logged.statusCode()).isEqualTo(200);
         assertThat(logged.decisionEffect()).isEqualTo("ALLOW");
         assertThat(logged.targetService()).isEqualTo("mcp");
-        assertThat(logged.message()).isNull();
+        assertThat(logged.message()).isEqualTo("Session: session-1");
     }
 
     @Test
-    void deniedEvent_persistsAsDenyWith403AndReasonAsMessage() {
+    void deniedEvent_persistsAsDenyWith403AndReasonAppendedToSessionInMessage() {
         LoggingMcpAuditService service = new LoggingMcpAuditService(requestLogAuditService);
 
         service.record(new McpAuditEvent("1234", "agent-b", "delete_all", "DENIED", Instant.now(),
-                "session-2", "tool not granted to this agent"));
+                "session-2", "tool not granted to this agent",
+                "trace-xyz", "203.0.113.8", "test-agent/2.0", "agent-b-subject-uuid"));
 
         ArgumentCaptor<RequestLog> captor = ArgumentCaptor.forClass(RequestLog.class);
         verify(requestLogAuditService, timeout(2000)).record(captor.capture());
         RequestLog logged = captor.getValue();
+        assertThat(logged.traceId()).isEqualTo("trace-xyz");
         assertThat(logged.statusCode()).isEqualTo(403);
         assertThat(logged.decisionEffect()).isEqualTo("DENY");
-        assertThat(logged.message()).isEqualTo("tool not granted to this agent");
+        assertThat(logged.message()).isEqualTo("Session: session-2. tool not granted to this agent");
     }
 }

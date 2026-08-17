@@ -55,9 +55,15 @@ public class LoggingMcpAuditService implements McpAuditService {
                 event.processId(), event.agentId(), event.toolName(), event.status(), event.timestamp());
 
         boolean allowed = "ALLOWED".equals(event.status());
+        // sessionId no longer travels as trace_id (see RequestLog.forMcp's Javadoc) — folded
+        // into message instead, so it's still queryable/visible without a dedicated column.
+        String message = event.reason() != null
+                ? "Session: " + event.sessionId() + ". " + event.reason()
+                : "Session: " + event.sessionId();
         requestLogAuditService.record(RequestLog.forMcp(
-                event.sessionId(), event.processId(), event.agentId(), event.toolName(), "/message",
-                allowed ? 200 : 403, event.reason(), "mcp", allowed ? "ALLOW" : "DENY"));
+                event.traceId(), event.clientIp(), event.userAgent(), event.processId(), event.agentId(),
+                event.toolName(), "/message", allowed ? 200 : 403, message, event.originalUserObo(), "mcp",
+                allowed ? "ALLOW" : "DENY"));
     }
 
     @PreDestroy
