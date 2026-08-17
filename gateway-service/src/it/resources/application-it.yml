@@ -3,6 +3,13 @@
 # Disables mTLS cert loading (MtlsHttpClientConfig is @ConditionalOnProperty).
 # All container URLs are injected via @DynamicPropertySource in BaseZteIntegrationTest.
 
+server:
+  ssl:
+    enabled: false      # ADR-018: embedded test server stays plain HTTP — IT suite
+                         # drives it via RestAssured over http://; independent of
+                         # zte.mtls.enabled below (that one only gates the outbound
+                         # client config in MtlsHttpClientConfig)
+
 zte:
   mtls:
     enabled: false      # skips MtlsHttpClientConfig — no client.p12 needed in tests

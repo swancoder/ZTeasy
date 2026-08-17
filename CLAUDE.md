@@ -50,7 +50,7 @@ This file should stay small enough to read in one pass.
 - `generate-adr`: (Planned) Helper to scaffold a new ADR file with required CoT/Critique sections.
 
 ## Key Directories
-- `./gateway-service`: The ZTE entry point (port 8080 HTTP).
+- `./gateway-service`: The ZTE entry point (port 8080 HTTPS, `client-auth: want` — see ADR-018).
 - `./auth-library`: Shared security logic — `SecurityConfig`, `ZteAuditLogger`, `ReloadableSslContextFactory`, `UserContextTokenService`.
 - `./service-a`: First protected downstream service (port 8081 HTTPS/mTLS, 9081 management).
 - `./service-b`: Second protected downstream service — validates OBO token (port 8082 HTTPS/mTLS, 9082 management).
@@ -89,5 +89,6 @@ hashes: `docs/SPECS.md` §2. Reasoning/alternatives/self-critique: the linked AD
 | 15 | Identities UI Refactor (Actors vs. Access Containers) + Relational Caching | [Identities UI + Relations](docs/adr/identities-ui-actors-containers-and-relations-caching.md) |
 | 16 | APIM Inventory Registry — Auto-Discovery + Health Telemetry | [ADR-016](docs/adr/ADR-016-inventory-and-health-registry.md) |
 | 17 | Dynamic Inventory-Driven Routing + Unified Audit Logging + Strict S2S Rules | [ADR-017](docs/adr/ADR-017-dynamic-routing-and-audit.md) |
+| 18 | Smart mTLS Enforcement (server.ssl client-auth: want + MtlsEnforcementWebFilter) | [ADR-018](docs/adr/ADR-018-smart-mtls-enforcement.md) |
 
 **Backlog:** tracked in `docs/SPECS.md` §9 (Roadmap) — not duplicated here.

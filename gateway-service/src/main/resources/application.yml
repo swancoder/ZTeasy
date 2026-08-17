@@ -69,6 +69,19 @@ spring.cloud.gateway:
 
 server:
   port: ${SERVER_PORT:8080}
+  ssl:
+    enabled: true
+    key-store: file:${ZTE_CERTS_DIR:./certs}/gateway.p12
+    key-store-password: ${ZTE_KEY_PASSWORD:zte-pass}
+    key-store-type: PKCS12
+    # ADR-018: "want", not "need" — the TLS handshake succeeds with or without a
+    # client cert, so the Admin UI/Admin API/actuator stay cert-free over the same
+    # port. Cert *presence* is enforced only for MCP/S2S paths, at the application
+    # layer, by MtlsEnforcementWebFilter — not here.
+    client-auth: want
+    trust-store: file:${ZTE_CERTS_DIR:./certs}/truststore.p12
+    trust-store-password: ${ZTE_KEY_PASSWORD:zte-pass}
+    trust-store-type: PKCS12
 
 # ── Downstream services — bootstrap seed values only (ADR-017): routing itself
 #    is 100% inventory_services-driven (InventoryRouteDefinitionLocator); these

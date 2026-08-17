@@ -13,6 +13,8 @@
 #                         (used by gateway + service-a for outbound mTLS calls)
 #   service-a.p12       — PKCS12 keystore for service-a's HTTPS server
 #   service-b.p12       — PKCS12 keystore for service-b's HTTPS server
+#   gateway.p12         — PKCS12 keystore for gateway-service's HTTPS server
+#                         (ADR-018: server.ssl.client-auth=want — see MtlsEnforcementWebFilter)
 #   truststore.p12      — PKCS12 truststore containing only the ZTE CA cert
 #                         (used by all services to trust peer certificates)
 #
@@ -46,7 +48,7 @@ for cmd in openssl keytool; do
 done
 
 # ── 1. ZTE Root CA ──────────────────────────────────────────────────────────
-info "1/5  Generating ZTE Root CA (${DAYS_CA}d) ..."
+info "1/6  Generating ZTE Root CA (${DAYS_CA}d) ..."
 openssl req -x509 -newkey rsa:4096 \
     -keyout ca.key -out ca.crt \
     -days $DAYS_CA -nodes \
@@ -54,7 +56,7 @@ openssl req -x509 -newkey rsa:4096 \
 
 # ── 2. Internal Client Certificate ─────────────────────────────────────────
 # Used by gateway (outbound to service-a/b) and service-a (outbound to service-b)
-info "2/5  Generating internal client certificate ..."
+info "2/6  Generating internal client certificate ..."
 openssl req -newkey rsa:2048 \
     -keyout client.key -out client.csr \
     -nodes -subj "${SUBJ_BASE}/CN=zte-internal-client"
@@ -71,7 +73,7 @@ openssl pkcs12 -export \
     -name "zte-internal-client"
 
 # ── 3. Service A Server Certificate ────────────────────────────────────────
-info "3/5  Generating service-a server certificate ..."
+info "3/6  Generating service-a server certificate ..."
 openssl req -newkey rsa:2048 \
     -keyout service-a.key -out service-a.csr \
     -nodes -subj "${SUBJ_BASE}/CN=service-a"
@@ -88,7 +90,7 @@ openssl pkcs12 -export \
     -name "service-a"
 
 # ── 4. Service B Server Certificate ────────────────────────────────────────
-info "4/5  Generating service-b server certificate ..."
+info "4/6  Generating service-b server certificate ..."
 openssl req -newkey rsa:2048 \
     -keyout service-b.key -out service-b.csr \
     -nodes -subj "${SUBJ_BASE}/CN=service-b"
@@ -104,8 +106,26 @@ openssl pkcs12 -export \
     -out service-b.p12 -passout "pass:${PASS}" \
     -name "service-b"
 
-# ── 5. Truststore (CA cert only) ────────────────────────────────────────────
-info "5/5  Generating shared truststore (CA cert only) ..."
+# ── 5. Gateway Server Certificate ──────────────────────────────────────────
+# ADR-018: gateway-service's own HTTPS listener (server.ssl.client-auth=want).
+info "5/6  Generating gateway server certificate ..."
+openssl req -newkey rsa:2048 \
+    -keyout gateway.key -out gateway.csr \
+    -nodes -subj "${SUBJ_BASE}/CN=gateway"
+
+openssl x509 -req \
+    -in gateway.csr -CA ca.crt -CAkey ca.key -CAcreateserial \
+    -out gateway.crt -days $DAYS_SVC \
+    -extfile <(printf "subjectAltName=DNS:gateway,DNS:localhost,IP:127.0.0.1\nextendedKeyUsage=serverAuth")
+
+openssl pkcs12 -export \
+    -in gateway.crt -inkey gateway.key \
+    -certfile ca.crt \
+    -out gateway.p12 -passout "pass:${PASS}" \
+    -name "gateway"
+
+# ── 6. Truststore (CA cert only) ────────────────────────────────────────────
+info "6/6  Generating shared truststore (CA cert only) ..."
 rm -f truststore.p12
 keytool -import -trustcacerts \
     -alias zte-ca \

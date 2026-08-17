@@ -81,7 +81,7 @@ zte-lightweight/
 │   ├── ReloadableSslContextFactory   Netty client SslContext with AtomicRef hot-swap
 │   └── UserContextTokenService       HMAC-SHA256 OBO token create/validate
 │
-├── gateway-service/       ZTE entry point — port 8080 (HTTP)
+├── gateway-service/       ZTE entry point — port 8080 (HTTPS, client-auth: want — ADR-018)
 │   ├── ZteAuthorizationFilter        users2service: YAML-only, deny-by-default (HIGHEST_PRECEDENCE+100, ADR-012)
 │   ├── ServiceToServiceAuthorizationFilter  service2service: YAML-only, default-deny (HIGHEST_PRECEDENCE+150)
 │   ├── UserContextPropagationFilter  OBO token injection (HIGHEST_PRECEDENCE+200)
@@ -168,6 +168,7 @@ zte-lightweight/
 | [Identities UI + Relational Caching](docs/adr/identities-ui-actors-containers-and-relations-caching.md) | Identities UI Refactor (Actors vs. Access Containers) and Relational Caching (deliberately unnumbered filename — see the ADR's own note) | Accepted |
 | [ADR-016](docs/adr/ADR-016-inventory-and-health-registry.md) | APIM Inventory Registry — Auto-Discovery and Health Telemetry | Accepted |
 | [ADR-017](docs/adr/ADR-017-dynamic-routing-and-audit.md) | Dynamic Inventory-Driven Routing, Unified Audit Logging, and Strict S2S Rules | Accepted |
+| [ADR-018](docs/adr/ADR-018-smart-mtls-enforcement.md) | Smart mTLS Enforcement (client-auth: want + Application-Layer WebFilter) | Accepted |
 
 ---
 
@@ -225,7 +226,11 @@ TOKEN=$(curl -s -X POST http://localhost:8180/realms/zte-realm/protocol/openid-c
   -d "grant_type=client_credentials&client_id=agent-a&client_secret=agent-a-secret-dev-only" \
   | python3 -c "import sys,json; print(json.load(sys.stdin)['access_token'])")
 
-curl -s -N -H "Authorization: Bearer $TOKEN" http://localhost:8080/sse
+# As of ADR-018, /sse is a protected path: a JWT alone is no longer enough, a client
+# certificate signed by the ZTE-CA is also required (server.ssl.client-auth: want +
+# MtlsEnforcementWebFilter) — -k accepts the dev self-signed CA on the gateway's own cert.
+curl -sk --cert certs/client.p12:zte-pass --cert-type P12 \
+  -N -H "Authorization: Bearer $TOKEN" https://localhost:8080/sse
 # → data: /message?sessionId=<id>  (open a second terminal to POST while this stays open)
 ```
 
@@ -296,7 +301,7 @@ Every rule, in every category, shares one shape:
    [Admin Console](#admin-console-adr-012) below):
 
    ```bash
-   curl -s -X POST http://localhost:8080/api/v1/internal/policies/reload | python3 -m json.tool
+   curl -sk -X POST https://localhost:8080/api/v1/internal/policies/reload | python3 -m json.tool
    ```
 
    An invalid file (bad schema, duplicate `id`, etc.) fails validation and the
@@ -309,9 +314,14 @@ Every rule, in every category, shares one shape:
 ## Admin Console (ADR-012)
 
 A React/Vite/TypeScript SPA (`zt-admin-ui/`), built by `gateway-service`'s own Gradle
-build and served statically at `http://localhost:8080/admin/index.html` — no separate
+build and served statically at `https://localhost:8080/admin/index.html` — no separate
 process to run. Shows the full active YAML policy set (all three categories) and a
 "Reload Policies" button.
+
+**No client certificate needed here:** `/admin/**` and `/api/v1/admin/**` are both in
+`MtlsEnforcementWebFilter`'s excluded-path list (ADR-018) — the gateway is HTTPS-only as
+of that ADR, but this is plain server-authenticated TLS (your browser will warn about the
+dev self-signed ZTE-CA cert; accept it to proceed, same as any local HTTPS dev setup).
 
 **Login flow:** the SPA itself is served unauthenticated (`/admin/**`, permitAll) — it
 redirects to Keycloak (`react-oidc-context`, client `zte-admin-ui`, PKCE) and only then
@@ -325,7 +335,7 @@ the page itself loads.
 ./gradlew :gateway-service:bootRun
 
 # 2. Open the console
-open http://localhost:8080/admin/index.html   # or just visit it in a browser
+open https://localhost:8080/admin/index.html   # or just visit it in a browser
 
 # 3. Log in as zte-admin / Admin@123!
 ```
@@ -370,7 +380,7 @@ JWT (`403`), not a missing token, so this doesn't affect the common case. See
 
 ```bash
 # Read the latest 100 rows via the admin API (ADMIN JWT required)
-curl -s -H "Authorization: Bearer $TOKEN" http://localhost:8080/api/v1/admin/audit-logs | python3 -m json.tool
+curl -sk -H "Authorization: Bearer $TOKEN" https://localhost:8080/api/v1/admin/audit-logs | python3 -m json.tool
 
 # ...or query Postgres directly
 docker exec zte-postgres psql -U zte_user -d zte_db \
@@ -422,13 +432,13 @@ Keycloak dependency on that request path, ever.
 
 ```bash
 # Manual sync (also runs automatically every 15 min, zte.idp.sync-interval-ms)
-curl -s -X POST -H "Authorization: Bearer $TOKEN" http://localhost:8080/api/v1/admin/identities/sync
+curl -sk -X POST -H "Authorization: Bearer $TOKEN" https://localhost:8080/api/v1/admin/identities/sync
 
 # Search the cache (used by the Admin Console's autocomplete / Identities tab)
-curl -s -H "Authorization: Bearer $TOKEN" "http://localhost:8080/api/v1/admin/identities/search?type=CLIENT" | python3 -m json.tool
+curl -sk -H "Authorization: Bearer $TOKEN" "https://localhost:8080/api/v1/admin/identities/search?type=CLIENT" | python3 -m json.tool
 
 # Roles/groups related to a given Actor identity (cached only, no Keycloak call)
-curl -s -H "Authorization: Bearer $TOKEN" "http://localhost:8080/api/v1/admin/identities/<id>/relations" | python3 -m json.tool
+curl -sk -H "Authorization: Bearer $TOKEN" "https://localhost:8080/api/v1/admin/identities/<id>/relations" | python3 -m json.tool
 ```
 
 **Orphaned rules:** a rule in any category whose `source` doesn't resolve to any cached
@@ -538,24 +548,24 @@ itself), and `404` if `id` doesn't exist (ADR-016 amendment, 2026-08-12, fourth)
 
 ```bash
 # Onboard a service
-curl -s -X POST -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/json" \
-  http://localhost:8080/api/v1/admin/inventory \
+curl -sk -X POST -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/json" \
+  https://localhost:8080/api/v1/admin/inventory \
   -d '{"name":"hubspot-mcp","targetType":"MCP","baseUrl":"http://localhost:9090"}'
 
 # Onboard a REST service whose OpenAPI docs live somewhere other than /v3/api-docs
-curl -s -X POST -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/json" \
-  http://localhost:8080/api/v1/admin/inventory \
+curl -sk -X POST -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/json" \
+  https://localhost:8080/api/v1/admin/inventory \
   -d '{"name":"legacy-api","targetType":"REST","baseUrl":"https://legacy.example.com","docsUrl":"https://legacy.example.com/swagger.json"}'
 
 # List the registry (includes current health snapshot)
-curl -s -H "Authorization: Bearer $TOKEN" http://localhost:8080/api/v1/admin/inventory | python3 -m json.tool
+curl -sk -H "Authorization: Bearer $TOKEN" https://localhost:8080/api/v1/admin/inventory | python3 -m json.tool
 
 # Fetch a service's captured schema (once discovery has succeeded at least once)
-curl -s -H "Authorization: Bearer $TOKEN" http://localhost:8080/api/v1/admin/inventory/<id>/schema | python3 -m json.tool
+curl -sk -H "Authorization: Bearer $TOKEN" https://localhost:8080/api/v1/admin/inventory/<id>/schema | python3 -m json.tool
 
 # Trigger discovery synchronously (e.g. after fixing a docs_url typo) and wait for the result
-curl -s -X POST -H "Authorization: Bearer $TOKEN" -w "\n%{http_code}\n" \
-  http://localhost:8080/api/v1/admin/inventory/<id>/schema/fetch
+curl -sk -X POST -H "Authorization: Bearer $TOKEN" -w "\n%{http_code}\n" \
+  https://localhost:8080/api/v1/admin/inventory/<id>/schema/fetch
 ```
 
 See [ADR-016](docs/adr/ADR-016-inventory-and-health-registry.md) for the full design,
@@ -632,7 +642,12 @@ TOKEN=$(curl -s -X POST http://localhost:8180/realms/zte-realm/protocol/openid-c
   -d "username=zte-admin&password=Admin@123!" | python3 -c "import sys,json; print(json.load(sys.stdin)['access_token'])")
 
 # 7. Call the full chain: User → Gateway → Service A → Service B
-curl -s -H "Authorization: Bearer $TOKEN" http://localhost:8080/api/v1/service-a/hello | python3 -m json.tool
+# As of ADR-018, /api/v1/** (proxied REST traffic) requires a client certificate in
+# addition to the JWT — server.ssl.client-auth: want + MtlsEnforcementWebFilter. This
+# applies uniformly to this general REST-proxy surface, not just agent/MCP traffic, so
+# even this interactive-user demo call needs --cert now. -k accepts the dev self-signed CA.
+curl -sk --cert certs/client.p12:zte-pass --cert-type P12 \
+  -H "Authorization: Bearer $TOKEN" https://localhost:8080/api/v1/service-a/hello | python3 -m json.tool
 ```
 
 **Expected response:**
@@ -668,3 +683,4 @@ curl -s -H "Authorization: Bearer $TOKEN" http://localhost:8080/api/v1/service-a
 | 15 | Identities UI refactor (Actors vs. Access Containers, MUI Accordions, quick search, relations Drawer), `idp_identity_relations` caching, Keycloak system-client filtering | `1198921` |
 | 16 | APIM inventory registry (`inventory_services`/`health_metrics`), auto-discovery on onboarding, periodic health polling, passive `last_successful_call` telemetry, Admin Console "Registry" tab | `c3fd7de` |
 | 17 | Dynamic inventory-driven routing (`InventoryRouteDefinitionLocator`, replacing hardcoded routes), REST/MCP audit unification into `request_logs`, strict `service2service` policy scenario (ADR-017) | `87d9976` |
+| 18 | Smart mTLS enforcement: gateway HTTPS (`gateway.p12`), `server.ssl.client-auth: want`, `MtlsEnforcementWebFilter` gating `/sse`/`/message`/`/api/v1/**` minus `/admin`/`/internal` (ADR-018) | `<commit>` |

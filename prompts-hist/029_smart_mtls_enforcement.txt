@@ -1,0 +1,85 @@
+# Role: Senior Solution Architect / Java Developer
+# Context: Project ZTeasy.
+# We are implementing mTLS enforcement for incoming MCP agent traffic (Agent -> Gateway) and S2S traffic, but we MUST NOT break the browser-based Admin UI which uses plain HTTPS (no client cert).
+# We rejected creating a second Netty port. Instead, we are using the "Smart Option 2" approach: configuring the main gateway port to request (but not strictly require at the transport layer) a client certificate, and enforcing its presence at the application layer via a custom WebFilter for specific paths.
+# Keep the implementation clean and decoupled, as the Data Plane will eventually be rewritten in Go.
+
+## Instructions:
+1. **Chain of Thought:**
+   - Update `application.yml` to set `server.ssl.client-auth=want` (or `requested` depending on Spring Boot version).
+   - Create an `MtlsEnforcementWebFilter` that intercepts all requests.
+   - Define a list of protected path prefixes (e.g., `/sse`, `/message`, and dynamically routed S2S paths `/api/v1/**` excluding `/api/v1/admin/**` and `/api/v1/internal/**`).
+   - If a request matches a protected path, check `exchange.getRequest().getSslInfo().getPeerCertificates()`. If the certificate is missing or invalid, immediately terminate with `401 Unauthorized`.
+   - Ensure this filter honors the existing `@ConditionalOnProperty(name = "zte.mtls.enabled", havingValue = "true")` or checks the property at runtime, so we do not break `BaseZteIntegrationTest` which runs without TLS.
+2. **Self-Criticism:**
+   - `client-auth: want` means the TLS handshake succeeds even without a cert. The security boundary is entirely on this new `WebFilter`. It MUST run before any authorization or proxying filters (use high precedence).
+   - Carefully check the path exclusions. The React Admin UI (`/admin/**`), Admin API (`/api/v1/admin/**`), and Actuator (`/actuator/**`) must remain accessible without a client cert.
+3. **ADR Protocol:** Create a new ADR (e.g., `ADR-[ADR_NUMBER]-smart-mtls-enforcement.md`) documenting why we chose `client-auth: want` + `WebFilter` over a dedicated mTLS port (8443) or blanket `client-auth: need`. Mention the future Go Data Plane migration context.
+4. **History:** Save this prompt to `./prompts-hist/[STAGE_NUMBER]_smart_mtls_enforcement.txt`.
+
+## Tasks:
+
+1. **TLS Configuration:**
+   - Update `server.ssl.client-auth` in `gateway-service/src/main/resources/application.yml` from `need` (if currently set) to `want`.
+
+2. **Enforcement Filter:**
+   - Create `MtlsEnforcementWebFilter` implementing `WebFilter` and `Ordered`. Give it a very high precedence (e.g., `Ordered.HIGHEST_PRECEDENCE + 50`).
+   - Implement the path-matching logic. If the path requires mTLS, extract the client certificate. If missing, return a clean `401` JSON response and stop the chain.
+   - Inject the `zte.mtls.enabled` property (or use an auto-configuration guard) so the filter simply passes the chain if mTLS is disabled globally.
+
+3. **Testing:**
+   - Write a unit test for `MtlsEnforcementWebFilter` using `MockServerWebExchange` (mocking both presence and absence of `SslInfo`).
+   - Ensure the existing integration test suite (`./gradlew test integrationTest`) remains green. (The IT suite uses `zte.mtls.enabled=false`, so the filter should seamlessly bypass).
+
+## Verification:
+- Tests pass.
+- In a live local run with `zte.mtls.enabled=true`:
+  - `curl -k https://localhost:8080/admin/index.html` (no cert) succeeds.
+  - `curl -k https://localhost:8080/sse` (no cert) fails with `401`.
+  - `curl -k --cert client.p12:... https://localhost:8080/sse` succeeds.
+
+## Git:
+- Commit message: "feat: implement smart mTLS enforcement via WebFilter and client-auth want"
+
+---
+
+## How the implementation deviated from this prompt
+
+- **`server.ssl.client-auth` was not "need" being flipped to "want" — there was no
+  `server.ssl` block at all.** `gateway-service/src/main/resources/application.yml`
+  had only `server.port` before this change; the gateway ran plain HTTP. This task
+  therefore also generated a brand-new gateway server certificate
+  (`certs/generate-certs.sh` step 5/6, `gateway.p12`) and stood up HTTPS on port 8080
+  for the first time, not merely reconfigured an existing listener.
+- **`application-it.yml` needed a new, separate `server.ssl.enabled: false`.** The
+  prompt's own testing section assumed `zte.mtls.enabled=false` alone would keep the
+  IT suite green — verified false: that property only ever gated
+  `MtlsHttpClientConfig`'s *outbound* client config. Every `*IT` class drives the
+  embedded server over plain `http://` via RestAssured; without a separate
+  `server.ssl.enabled: false`, the whole suite fails at the TCP/TLS layer before any
+  application code (including the new filter) runs. Added as its own key.
+- **A real test regression, found and fixed:** `McpProxySecurityWebFluxTest`
+  (`@WebFluxTest`) auto-detects every plain `WebFilter` bean into its slice context,
+  the same way it already auto-detects `AdminAuthorizationFilter`/`RequestAuditFilter`
+  (documented in its own pre-existing Javadoc). `WebTestClient` there performs no real
+  TLS handshake, so `MtlsEnforcementWebFilter` rejected its `/sse`/`/message` calls
+  with `401` regardless of the JWT sent. Fixed with
+  `@TestPropertySource(properties = "zte.mtls.enabled=false")` on that test class —
+  the same mechanism already used for the IT suite, applied for the same reason.
+- **Keycloak's registered redirect URIs were hardcoded to `http://localhost:8080`**
+  (`keycloak/realm-export.json`, `zte-gateway` and `zte-admin-ui` clients) — not
+  mentioned in the original prompt, but without updating them to `https://`, the
+  Admin Console's real browser OIDC login flow would break post-change even though a
+  raw `curl -k .../admin/index.html` would still succeed. Updated as a necessary
+  corollary. Note: this file is only imported by Keycloak once, on first
+  `--import-realm`; the already-running dev Keycloak container needs a
+  `docker compose down && up` (destructive to its dev-mode DB) or a manual Admin API
+  update to pick this up — not done automatically as part of this change.
+- **The verification curl's `--cert client.p12:<password>` was missing `--cert-type
+  P12`** — curl defaults to PEM and fails to parse a `.p12` file without it. Corrected
+  in the README's updated examples.
+- **`/api/v1/**` protection is broader than "agent/MCP traffic" alone** — it also
+  covers the general REST-proxy surface, including the Quick Start's own
+  `/api/v1/service-a/hello` interactive-user demo call. That example now also needs
+  `--cert`, not just a JWT — flagged explicitly in the README rather than left to be
+  discovered as a surprise.

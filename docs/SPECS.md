@@ -52,7 +52,8 @@ auditable — the opposite of a mesh's "hide it in the sidecar" approach. See
 | 15 | Identities UI refactor (Actors vs. Access Containers accordions, quick search, relations Drawer), `idp_identity_relations` caching, Keycloak system-client filtering | ✅ Complete | `1198921` | [Identities UI + Relations](adr/identities-ui-actors-containers-and-relations-caching.md) |
 | 16 | APIM inventory registry (`inventory_services`/`health_metrics`), auto-discovery on onboarding, periodic health polling, passive `last_successful_call` telemetry, Admin Console "Registry" tab | ✅ Complete | `c3fd7de` | [016](adr/ADR-016-inventory-and-health-registry.md) |
 | 17 | Dynamic inventory-driven routing (`InventoryRouteDefinitionLocator`, replacing hardcoded routes), REST/MCP audit unification into `request_logs`, strict `service2service` policy scenario (`service-a`→`service-b`) | ✅ Complete | `87d9976` | [017](adr/ADR-017-dynamic-routing-and-audit.md) |
-| 18+ | Backlog (rate limiting, ABAC…) | ⬜ Planned | — | see §9.2 |
+| 18 | Smart mTLS enforcement — gateway HTTPS (`gateway.p12`), `server.ssl.client-auth: want`, `MtlsEnforcementWebFilter` gating `/sse`/`/message`/`/api/v1/**` (minus `/admin`/`/internal`) | ✅ Complete | `<commit>` | [018](adr/ADR-018-smart-mtls-enforcement.md) |
+| 19+ | Backlog (rate limiting, ABAC…) | ⬜ Planned | — | see §9.2 |
 
 **Test status:** all unit tests green (`./gradlew test`), including the
 `policy.def` package (`PolicyValidatorTest`, `PolicyMatcherTest`,
@@ -118,7 +119,18 @@ reaching the downstream WireMock stub (`verify(0, ...)`), with a
 for the base class's new inventory-seeding `@BeforeEach` and ADR-017
 audit fields respectively. Full suite (`./gradlew test integrationTest`)
 confirmed green after two real, previously-latent bugs this stage was the
-first to exercise were found and fixed — see §10.
+first to exercise were found and fixed — see §10. Stage 18 adds
+`MtlsEnforcementWebFilterTest` (8 cases: valid/absent/empty peer-cert array
+on a protected path, three unprotected-path exemptions, `zte.mtls.enabled=false`
+bypass) and a `zte.mtls.enabled=false` `@TestPropertySource` override on
+`McpProxySecurityWebFluxTest` (a `@WebFluxTest` slice with no real TLS
+handshake, which auto-detects `MtlsEnforcementWebFilter` the same way it
+already auto-detects `AdminAuthorizationFilter`/`RequestAuditFilter` — see
+that test class's own Javadoc). `application-it.yml` gains a new, separate
+`server.ssl.enabled: false` (independent of the existing `zte.mtls.enabled:
+false`) — without it the entire IT suite fails at the TCP/TLS layer once
+`server.ssl.enabled: true` lands in the main config. Full suite confirmed
+green after both fixes.
 
 ---
 
@@ -129,8 +141,12 @@ first to exercise were found and fixed — see §10.
 ```
                               ┌───────────────────────────────────────────┐
                               │              gateway-service               │
-                              │              port 8080 (HTTP)              │
+                              │      port 8080 (HTTPS, client-auth: want)  │
   User ──[Keycloak JWT]──────►│  SecurityConfig (auth-library): JWT req'd  │
+                              │                                             │
+                              │  ⓪ MtlsEnforcementWebFilter (ADR-018):     │
+                              │     client cert required on /sse, /message,│
+                              │     /api/v1/** — except /admin, /internal  │
                               │                                             │
                               │  REST path (ADR-011/ADR-012):              │
                               │   ① ZteAuthorizationFilter                 │
@@ -229,7 +245,7 @@ Stage 4):
 |---|---|---|---|
 | 1 | Who is the user? | Keycloak JWT (RS256) | `SecurityConfig` (`auth-library`), all services |
 | 2 | Is the user allowed? | YAML `users2service` rules (`zte-policies.yaml`) — sole source of truth as of ADR-012 | `ZteAuthorizationFilter` (gateway-routed paths); `AdminAuthorizationFilter` (`/api/v1/admin/**`) |
-| 3 | Who is the internal caller? | mTLS client cert (ZTE-CA) | `MtlsHttpClientConfig` + service HTTPS listeners |
+| 3 | Who is the internal caller? | mTLS client cert (ZTE-CA) | `MtlsHttpClientConfig` + service HTTPS listeners (outbound); as of ADR-018, cert *presence* is also required inbound to the gateway itself on `/sse`, `/message`, and `/api/v1/**` (minus `/admin`/`/internal`) via `MtlsEnforcementWebFilter` — `server.ssl.client-auth: want`, enforced at the application layer, not the TLS layer |
 | 4 | On whose behalf? | Signed OBO token (`X-ZTE-User-Context`, HMAC-SHA256, 30s TTL) | `UserContextPropagationFilter` → `UserContextTokenService` |
 
 The MCP proxy (§8) adds a fifth question for AI agents specifically: **is this
@@ -282,6 +298,18 @@ Reusable security config imported by every service (`ZteSecurityAutoConfiguratio
 
 ### 5.2 `gateway-service` — REST path
 
+- **`MtlsEnforcementWebFilter`** (`filter` package, `WebFilter`, order
+  `HIGHEST_PRECEDENCE+50`, new in ADR-018) — runs before every other filter
+  below, including Spring Security's own JWT check. `server.ssl.client-auth`
+  is `want` (TLS handshake succeeds with or without a client cert), so this
+  filter is what actually requires one, and only on specific paths: `/sse`,
+  `/message` (always), and `/api/v1/**` except `/api/v1/admin/` and
+  `/api/v1/internal/` (the same two prefixes `AuditExclusionProperties`
+  already treats as gateway-local). No `SslInfo`/empty peer-cert array on a
+  protected path → `401` before any JWT/policy work happens. `/admin/**`,
+  `/actuator/**`, and the two excluded prefixes stay reachable over plain
+  browser HTTPS. Gated by `zte.mtls.enabled` (default `true`), the same
+  property `MtlsHttpClientConfig` uses for the outbound side.
 - **`InventoryRouteDefinitionLocator`** (`inventory` package, ADR-017,
   replacing `GatewayRouteConfig`) — a `RouteDefinitionLocator` bean that
   queries `InventoryRepository.findAll()`, filtered to `target_type=REST`
@@ -1132,7 +1160,10 @@ isolation.
   survive a restart or work across multiple gateway replicas without sticky
   routing or a shared store.
 - `McpBackendClient` has no auth toward the backend (no bearer token, no
-  mTLS) — inconsistent with the mTLS-secured service-a/b calls.
+  mTLS) — inconsistent with the mTLS-secured service-a/b calls. **Unaffected
+  by ADR-018**: that ADR enforces client-cert presence *inbound* to the
+  gateway (agent → gateway); this backend-facing hop (gateway → MCP backend,
+  `mcp-backend.uri`) is a separate, still-open gap.
 - `LoggingMcpAuditService`'s buffer is unbounded — a stuck downstream writer
   grows memory without limit.
 
@@ -1376,6 +1407,7 @@ own, all are new capabilities.
 | [Identities UI + Relations](adr/identities-ui-actors-containers-and-relations-caching.md) | Identities UI Refactor (Actors vs. Access Containers) and Relational Caching — deliberately unnumbered filename, see the ADR's own note |
 | [016](adr/ADR-016-inventory-and-health-registry.md) | APIM Inventory Registry — Auto-Discovery and Health Telemetry |
 | [017](adr/ADR-017-dynamic-routing-and-audit.md) | Dynamic Inventory-Driven Routing, Unified Audit Logging, and Strict S2S Rules |
+| [018](adr/ADR-018-smart-mtls-enforcement.md) | Smart mTLS Enforcement (client-auth: want + Application-Layer WebFilter) |
 
 ---
 
@@ -1383,6 +1415,6 @@ own, all are new capabilities.
 Registry, plus the mTLS/OpenAPI, management-URL health-polling, discovered-schema API
 Catalog, custom-docs-URL/synchronous-fetch, inline-edit/refetch, and known-issues/
 test-coverage amendments) plus Stage 17 (dynamic routing, audit unification, strict S2S
-rules — `87d9976`, see §2). Keep it in sync the same way as README/CLAUDE.md — per
-CLAUDE.md's mandatory workflow, update it alongside any task that completes a stage or
-changes the roadmap.*
+rules — `87d9976`, see §2) plus Stage 18 (smart mTLS enforcement — `<commit>`, see §2).
+Keep it in sync the same way as README/CLAUDE.md — per CLAUDE.md's mandatory workflow,
+update it alongside any task that completes a stage or changes the roadmap.*

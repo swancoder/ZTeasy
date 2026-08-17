@@ -17,6 +17,7 @@ import org.springframework.boot.test.mock.mockito.MockBean;
 import org.springframework.context.annotation.Import;
 import org.springframework.http.MediaType;
 import org.springframework.http.codec.ServerSentEvent;
+import org.springframework.test.context.TestPropertySource;
 import org.springframework.test.web.reactive.server.WebTestClient;
 import reactor.core.publisher.Flux;
 import reactor.core.publisher.Mono;
@@ -53,9 +54,19 @@ import static org.springframework.security.test.web.reactive.server.SecurityMock
  * import, Spring Security falls back to its generic default reactive chain,
  * which (unlike ours) doesn't disable CSRF, and every POST here would 403
  * before ever reaching authentication.
+ *
+ * <p>{@code zte.mtls.enabled=false} (ADR-018): {@code MtlsEnforcementWebFilter}
+ * is a plain {@code WebFilter} too, so it's auto-detected into this slice just
+ * like {@code AdminAuthorizationFilter}/{@code RequestAuditFilter} below — but
+ * {@code WebTestClient} here never performs a real TLS handshake, so there's
+ * no {@code SslInfo} to present regardless of what the test sends. This test
+ * exists to verify the JWT/policy boundary, not the mTLS one (that's
+ * {@code MtlsEnforcementWebFilterTest}), so the property is disabled the same
+ * way {@code application-it.yml} disables it for the same reason.
  */
 @WebFluxTest(controllers = McpProxyHandler.class)
 @Import({McpRouterConfig.class, SecurityConfig.class})
+@TestPropertySource(properties = "zte.mtls.enabled=false")
 class McpProxySecurityWebFluxTest {
 
     @Autowired

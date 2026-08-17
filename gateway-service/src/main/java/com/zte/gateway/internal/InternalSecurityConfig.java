@@ -15,10 +15,11 @@ import org.springframework.security.web.server.util.matcher.ServerWebExchangeMat
  * With {@code @Order(-100)}, this chain is checked before the default chain from
  * {@code auth-library/SecurityConfig} (which requires JWT for all other paths).
  *
- * <p><strong>Why no JWT?</strong> The gateway runs on HTTP (port 8080), making
- * transport-layer mTLS infeasible without a second HTTPS listener. The internal
- * endpoint is protected at the network level (Docker bridge; not proxied externally
- * via {@code InventoryRouteDefinitionLocator}).
+ * <p><strong>Why no JWT?</strong> As of ADR-018, the gateway does run HTTPS
+ * (port 8080, {@code server.ssl.client-auth: want}) — but {@code /api/v1/internal/**}
+ * is deliberately kept in {@code MtlsEnforcementWebFilter}'s excluded-prefix list,
+ * same as before: it's protected at the network level (Docker bridge; not proxied
+ * externally via {@code InventoryRouteDefinitionLocator}), not by a client cert or JWT.
  *
  * <p>The {@link ZteAuthorizationFilter} passes unauthenticated requests through
  * automatically (its {@code defaultIfEmpty} path skips the DB policy check when
