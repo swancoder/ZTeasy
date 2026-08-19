@@ -1,0 +1,57 @@
+# Context
+User request (verbatim): "Implement stage 6"
+
+Following the approved staged plan (/home/uwabami/.claude/plans/what-is-required-to-wondrous-dragon.md).
+Stages 1-5 are done (HOLD/ADR-019, honest-deny verification, ACAP scope
+profiles/ADR-020, governance dashboard/ADR-021, hubspot-mcp tool alignment
+in the sibling repo). Stage 6 is the final, lower-priority stage: surface
+ACAP agent metadata (owner, deployment date, re-auth due, risk
+classification) read-only in the Admin Console, and implement `thresholds`
+(e.g. followup_drafts_per_day limit 30 -> hold on exceed) as an in-memory
+per-agent-per-metric counter that can escalate ALLOW to HOLD.
+
+## Instructions
+1. Extend AcapProfile with optional agent/risk/thresholds fields, keeping
+   the existing 3-arg (agentId, territory, scope) constructor working via a
+   compat constructor — every existing call site across 5 test files must
+   keep compiling unchanged.
+2. Dates as plain ISO strings, not LocalDate — avoid registering a Jackson
+   time module on AcapProfileFileLoader's standalone YAMLMapper for a value
+   nothing in Java computes with; do the one "is this overdue" comparison
+   in the Admin Console instead.
+3. Thresholds need an explicit toolName field, not derived from the metric
+   name string — don't guess a naming convention robust enough to trust.
+   Only implement onExceed: "hold" (the only value the real ACAP example
+   uses).
+4. New AcapThresholdTracker: simple in-memory Map<agentId,Map<metric,count>>
+   with a daily reset, matching this codebase's established demo-scale
+   in-memory-state precedent (McpSessionManager, LoggingMcpAuditService's
+   sink) rather than a new DB table.
+5. Wire threshold checking as a NEW method on AcapScopeEvaluator
+   (checkThresholds), separate from the existing tighten() — different
+   question (usage-over-time vs does-this-call-violate-scope), different
+   contract (has a side effect; can escalate to HOLD instead of only
+   tightening to DENY). Called by YamlMcpPolicyEngine only when tighten()
+   didn't already produce a DENY.
+6. Admin Console: fold into the existing Governance tab (ADR-021) as a new
+   "ACAP Profiles" section rather than a whole new tab — same per-agent
+   narrative, avoids unnecessary UI surface area for what's a compact
+   card-per-agent display.
+7. Update the real demo profile (acap-profiles/crm-account-health-emea-01.yaml)
+   with the full agent/risk/thresholds metadata from the actual ACAP source
+   JSON. Add a permanent regression test loading this real file (not just
+   fixtures) — a stale doc/reality mismatch should fail a test, not just
+   surface at startup.
+8. Full test coverage: AcapThresholdTracker unit tests, checkThresholds
+   branch coverage in AcapScopeEvaluatorTest, end-to-end escalation test in
+   YamlMcpPolicyEngineTest, real-profile-parses test in
+   AcapProfileFileLoaderTest.
+9. ADR (next number), CLAUDE.md/SPECS.md/README.md/policy-schema.md
+   doc-sync — including fixing now-stale "no tab yet, deferred to Stage 6"
+   references left over from ADR-020/021, this prompts-hist file.
+
+## Verification
+./gradlew :gateway-service:compileJava :gateway-service:compileTestJava
+  :gateway-service:compileItJava
+./gradlew :gateway-service:test
+./gradlew :gateway-service:buildAdminUi --rerun (frontend TS/Vite build)

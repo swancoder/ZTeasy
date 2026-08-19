@@ -12,8 +12,10 @@ import PolicyDashboard from './PolicyDashboard'
 import AuditTrail from './AuditTrail'
 import Identities from './Identities'
 import Inventory from './Inventory'
+import Approvals from './Approvals'
+import Governance from './Governance'
 
-type View = 'policies' | 'audit' | 'identities' | 'inventory'
+type View = 'policies' | 'audit' | 'identities' | 'inventory' | 'approvals' | 'governance'
 
 export default function App() {
   const auth = useAuth()
@@ -83,12 +85,16 @@ export default function App() {
           <Tab value="audit" label="Audit Trail" />
           <Tab value="identities" label="Identities" />
           <Tab value="inventory" label="Registry" />
+          <Tab value="approvals" label="Approvals" />
+          <Tab value="governance" label="Governance" />
         </Tabs>
       </AppBar>
       {view === 'policies' && <PolicyDashboard accessToken={accessToken} />}
       {view === 'audit' && <AuditTrail accessToken={accessToken} />}
       {view === 'identities' && <Identities accessToken={accessToken} />}
       {view === 'inventory' && <Inventory accessToken={accessToken} />}
+      {view === 'approvals' && <Approvals accessToken={accessToken} />}
+      {view === 'governance' && <Governance accessToken={accessToken} />}
     </Box>
   )
 }

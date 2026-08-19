@@ -1,0 +1,3 @@
+agentId: some-agent
+territory: EMEA
+unknownTopLevelField: this-is-not-part-of-the-schema

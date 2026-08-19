@@ -1,0 +1,7 @@
+agentId: agent-a
+territory: EMEA
+scope:
+  read:
+    - resource: contacts
+      fields: [name, company]
+  writeAllowed: false

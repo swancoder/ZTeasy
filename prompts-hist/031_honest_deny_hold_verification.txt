@@ -1,0 +1,54 @@
+# Context
+User request (verbatim): "let's run into stage 2"
+
+Following the approved staged plan (/home/uwabami/.claude/plans/what-is-required-to-wondrous-dragon.md,
+originally derived from examples-from-vlad/'s ACAP/DIGI-KAI demo materials).
+Stage 1 (HOLD decision outcome + approval queue, ADR-019) is done. Stage 2
+is the demo owner's priority #2: "honest deny, not a fake 202" — described
+in the plan as mostly-already-true, a verification + minor-polish pass
+rather than a big build.
+
+## Instructions
+1. Verify, don't assume: check every PolicyDecision.deny(...)/hold(...) call
+   site for a specific, non-generic reason string.
+2. Reconcile the demo's "honest deny, not fake 202" concern with MCP's own
+   HTTP+SSE transport contract, where POST /message legitimately always
+   returns 202 Accepted regardless of the real decision — document why this
+   is not a violation of "honest," since the real signal travels over SSE
+   (result.isError for deny, a distinct status:"held" for hold) and the
+   audit trail's decision_effect/status_code columns give the ACAP-style
+   "as if HTTP status" view for compliance reporting independent of the
+   real wire-level response code.
+3. Check whether the Admin Console visually surfaces deny/hold as clearly
+   and immediately as the JSON payload does — "honest" partly means visibly
+   honest for a demo audience, not just technically-correct JSON.
+4. Fix anything found; this is a verification stage, not a new architecture
+   — no new ADR number unless something structural turns up.
+
+## What was found and fixed
+- AuditTrail.tsx's Status chip painted every status code < 400 green,
+  including a held call's 202 — visually indistinguishable from a real
+  success. Fixed: HOLD gets its own color (amber), independent of the raw
+  status-code threshold.
+- AuditTrail.tsx's Decision chip mapped anything other than ALLOW/DENY to
+  one shared "warning" bucket, conflating HOLD (a genuinely pending
+  decision) with ERROR (something broke). Made explicit: ALLOW/DENY/HOLD/
+  ERROR each get their own color.
+- PolicyDashboard.tsx's agentMcpToolHolds rows displayed their literal
+  (unused-by-convention, always-ALLOW) `effect` field — reading as "this
+  rule ALLOWs" for a category that exists specifically to hold, not allow.
+  Fixed: an `effectOverride` prop makes the category display "HOLD"
+  regardless of the underlying JSON field.
+- docs/examples/zte-policies-example.yaml — a genuine doc-honesty gap left
+  over from Stage 1: the worked example demonstrating "every policy
+  category" never got an agentMcpToolHolds section when that category was
+  added last stage. Added one; updated DocumentationExampleConformanceTest
+  to assert it's non-empty too (was previously only checking the original
+  three categories, silently not exercising the fourth).
+- Deny/hold reason strings themselves were already all specific (named rule
+  id, or the exact missing grant) — no fix needed, confirmed by direct
+  reading of YamlMcpPolicyEngine, not assumed.
+
+## Verification
+./gradlew :gateway-service:test (includes the frontend TS/Vite build via
+  buildAdminUi, and DocumentationExampleConformanceTest)

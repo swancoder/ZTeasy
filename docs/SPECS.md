@@ -56,7 +56,14 @@ auditable — the opposite of a mesh's "hide it in the sidecar" approach. See
 | 17 | Dynamic inventory-driven routing, REST/MCP audit unification, strict `service2service` scenario | [017](adr/ADR-017-dynamic-routing-and-audit.md) |
 | 18 | Smart mTLS enforcement — gateway HTTPS, `client-auth: want`, `MtlsEnforcementWebFilter` | [018](adr/ADR-018-smart-mtls-enforcement.md) |
 | — | Audit row enrichment (closes ADR-017's own duplicate-row gap): `SSE_OPENED` events, shared `ClientIpResolver`, readable display identity, named MCP target, captured call arguments | ADR-017 amendment, see §5.5 |
-| 19+ | Backlog (rate limiting, ABAC…) | see §9 |
+| 19 | HOLD decision outcome + durable approval queue (ACAP/DIGI-KAI governance demo, Stage 1 of 6) — Admin Console "Approvals" tab, new `crm-account-health-emea-01` demo agent | [019](adr/ADR-019-hold-decision-and-approval-queue.md) |
+| — | Honest-deny/hold verification (ACAP demo Stage 2 of 6): confirmed deny/hold reasons are always specific, reconciled with MCP's always-202 transport, fixed two Admin Console chip-coloring gaps that painted a held (202) call green | ADR-019 amendment, see §5.4 |
+| 20 | ACAP scope profiles (ACAP demo Stage 3 of 6): per-agent argument/field-level policy tightening — territory, data-minimization fields, read-only write-deny, bulk/export deny; new `crm-account-health-emea-01` demo profile | [020](adr/ADR-020-acap-scope-profiles.md) |
+| 21 | Governance dashboard (ACAP demo Stage 4 of 6): per-agent ALLOW/HOLD/DENY activity + out-of-policy-attempts feed + JSON export, Admin Console "Governance" tab — read-only reporting over the existing `request_logs` audit trail, no new table | [021](adr/ADR-021-governance-dashboard.md) |
+| 22 | CRM tool-surface alignment (ACAP demo Stage 5 of 6, in the sibling `hubspot-mcp` repo, not this one — no ADR here): `read_contacts`/`read_deals`/`read_activities`/`update_deal`/`export_contacts`/`send_email`/`draft_followup`/`escalate`, matching `demo-case-A-crm-hubspot.pdf`'s exact tool names/arguments, added alongside (not replacing) agent-a/b's existing tools; `agent_simulator.py` extended to run the full 🟢/🔴/🟡 script for `crm-account-health-emea-01` | see `hubspot-mcp/README.md` |
+| 23 | ACAP agent metadata + usage thresholds (ACAP demo Stage 6 of 6, final stage): `AcapProfile.agent`/`risk` (display-only, Admin Console "Governance" tab's new ACAP Profiles section), `thresholds` + `AcapThresholdTracker` (in-memory, daily-reset per-agent-per-metric counter that can escalate ALLOW to HOLD) | [022](adr/ADR-022-acap-agent-metadata-and-thresholds.md) |
+| 24 | `mcpTarget` — scopes `agentMcpToolCalls`/`agentMcpToolHolds` rules to a specific MCP backend (matched against `mcp-backend.name`), so a rule authored against one backend's tool semantics can't silently keep matching if the gateway is repointed at a different one | [023](adr/ADR-023-policy-rule-mcp-target.md) |
+| 25+ | Backlog (rate limiting, ABAC…) | see §9 |
 
 **Testing:** `./gradlew test` (unit — every package below has direct
 coverage for its pure decision logic; I/O-calling code that has no
@@ -247,20 +254,29 @@ Internal (network-perimeter-only, no JWT, `InternalSecurityConfig`):
 ### 5.3 YAML Policy Engine
 
 One file (`zte-policies.yaml`, path via `zte.policy.file`) is the sole
-runtime source of truth for all three rule categories. Full schema,
+runtime source of truth for all four rule categories. Full schema,
 precedence, and validation reference: `docs/policy-schema.md`; worked
 example: `docs/examples/zte-policies-example.yaml` (kept honest by
-`DocumentationExampleConformanceTest`).
+`DocumentationExampleConformanceTest`). A per-agent `AcapProfile` (Stage 3,
+ADR-020 — see §5.4) is a separate, additive enrichment on top of this file,
+not a fifth category within it.
 
 | Category | Governs | Enforced by |
 |---|---|---|
 | `users2service` | User (realm role) → gateway REST service | `ZteAuthorizationFilter`, `AdminAuthorizationFilter` |
 | `service2service` | Calling service/agent (`azp`) → gateway REST service | `ServiceToServiceAuthorizationFilter` |
 | `agentMcpToolCalls` | MCP agent (`azp`) → MCP tool name | `YamlMcpPolicyEngine` |
+| `agentMcpToolHolds` (ADR-019) | MCP tool calls routed to a human even when `agentMcpToolCalls` would ALLOW them | `YamlMcpPolicyEngine`, matched via `PolicyMatcher.matchAny` (not `evaluate` — see ADR-019 for why this is a separate list rather than a third `RuleEffect`) |
 
 One `PolicyRule` shape (`id`/`effect`/`source`/`target`/`pathPattern`/
-`methods`/`priority`) is reused across all three — `pathPattern`/`methods`
-are simply unused by `agentMcpToolCalls`. `PolicyDefinitionStore` holds an
+`methods`/`priority`/`mcpTarget`) is reused across all four — `pathPattern`/
+`methods` are simply unused by `agentMcpToolCalls`/`agentMcpToolHolds`,
+`effect` is unused (conventionally `ALLOW`) by `agentMcpToolHolds`, and
+conversely `mcpTarget` (ADR-023) is unused by `users2service`/
+`service2service` — when set on an MCP-category rule, it must match the
+configured `mcp-backend.name` (exact string, not an Ant pattern) or the rule
+doesn't apply; unset matches any backend, same "unscoped means universal"
+convention as `pathPattern`/`methods`. `PolicyDefinitionStore` holds an
 `AtomicReference<PolicyDocument>`, hot-swappable via
 `POST /api/v1/internal/policies/reload` (or the ADMIN-gated counterpart);
 `PolicyMatcher` — deny always overrides allow, `AntPathMatcher`-based, no
@@ -293,17 +309,77 @@ HTTP+SSE transport needs `POST /message` to inject its result into an
 3. **Deny** → a JSON-RPC success envelope with `result.isError = true`
    (matches MCP's own convention), injected via SSE; `McpBackendClient` never
    called.
-4. **Allow** → `McpBackendClient.forward(rpc)` calls `mcp-backend.uri`, the
-   result passes through `DataMaskingFilter` (currently a pass-through stub),
-   then is injected the same way.
-5. Either path records an audit event (§5.5). `POST /message` always returns
-   `202 Accepted` — the real answer only ever arrives over SSE.
+4. **Hold** (ADR-019) → `PendingApprovalService.hold(...)` persists a
+   `pending_approvals` row (R2DBC — durable, since review may happen well
+   after the session closes) and a `status: "held"` envelope is injected via
+   SSE; `McpBackendClient` never called yet. A human decides later via
+   `POST /api/v1/admin/approvals/{id}/approve|reject` (`AdminApprovalsController`,
+   Admin Console "Approvals" tab) — approve reconstructs and forwards the
+   original call through the same `McpForwardService` the Allow path uses,
+   reject synthesizes an honest denial; either way the decision is audited,
+   and pushed back into the originating SSE session only if it's still open.
+5. **Allow** → `McpForwardService.execute(rpc)` (wraps
+   `McpBackendClient.forward` + `DataMaskingFilter`, currently a pass-through
+   stub) — shared with the Hold-then-approve path above so masking can't
+   drift between the two.
+5a. **ACAP tightening (ADR-020, Stage 3)**: before returning any non-DENY
+   decision from step 2, `YamlMcpPolicyEngine` checks whether the calling
+   agent has an `AcapProfile` (`AcapProfileStore.find`); if so,
+   `AcapScopeEvaluator.tighten` may further downgrade ALLOW/HOLD to DENY
+   based on the call's *arguments* — territory, requested fields, write/bulk
+   shape — something step 2's tool-name-only matching can't express.
+   Additive and opt-in: an agent with no profile is unaffected; a DENY from
+   step 2 is never reconsidered. See `docs/policy-schema.md`'s "ACAP scope
+   profiles" section for the full check list. If tightening didn't already
+   deny the call, `AcapScopeEvaluator.checkThresholds` (Stage 6, ADR-022)
+   gets one more chance: a per-agent-per-metric usage limit (e.g.
+   `followup_drafts_per_day`, tracked in-memory by `AcapThresholdTracker`
+   with a daily reset) can escalate an ALLOW to HOLD once exceeded — never
+   touches an existing HOLD/DENY, never invents an ALLOW.
+6. Every path records an audit event (§5.5) — `HELD`/`APPROVED`/`REJECTED`
+   join `ALLOWED`/`DENIED`/`SSE_OPENED` as of ADR-019, mapped to
+   `decisionEffect` `HOLD`/`ALLOW`/`DENY` respectively. `POST /message`
+   always returns `202 Accepted` — the real answer only ever arrives over SSE.
+
+**"Honest deny," reconciled with MCP's always-202 transport (verified, Stage 2):**
+the `202` on `POST /message` is MCP's own HTTP+SSE transport contract, not
+something this gateway can (or should) change without breaking protocol
+compliance — the real result always travels over SSE, by design, for every
+caller. "Honest" doesn't mean "the raw HTTP status is 403"; it means a caller
+inspecting the actual result can never mistake a deny/hold for a success.
+Verified true at every layer that matters:
+- The SSE envelope itself: `denied()` sets `result.isError = true` with a
+  specific reason (§5.4 point 3) — an MCP client checking `isError` (the
+  protocol's own convention for a failed tool call) sees a real failure, not
+  a disguised success. `held()` (point 4) is a third, distinct shape
+  (`status: "held"`) — not `isError`, since a hold isn't a policy failure
+  either.
+- Every deny reason is concrete, never generic filler: `YamlMcpPolicyEngine`
+  always names the matched rule id or the specific missing grant (see that
+  class) — checked directly, not assumed, while auditing this stage.
+- The audit trail (§5.5, `request_logs.decision_effect`/`status_code`) gives
+  the ACAP-style "as if it had an HTTP status" view (`403`/`202`/`200` for
+  DENY/HOLD/ALLOW) for compliance reporting, entirely independent of what the
+  real transport-level HTTP response code was — this is where a `403`
+  actually shows up, deliberately not on the wire.
+- Admin Console honesty gap found and fixed this stage: `AuditTrail.tsx`'s
+  Status chip previously painted every `< 400` status green, including a
+  held call's `202` — indistinguishable from a real success at a glance.
+  Now `HOLD` gets its own (amber) color, independent of the raw status code
+  threshold; the Decision chip's `HOLD`/`ERROR` mapping was likewise made
+  explicit instead of falling into one shared "warning" bucket. Similarly,
+  `PolicyDashboard.tsx`'s `agentMcpToolHolds` rows previously displayed their
+  (unused-by-convention, always-`ALLOW`) `effect` field literally — reading
+  as "this rule ALLOWs" for a category that exists to hold, not allow; now
+  overridden to display `HOLD`.
 
 **Gaps:** `McpBackendClient` assumes one JSON response per call (no
 incremental relay for a streaming backend); it has no auth toward the
 backend at all (separate from, and unaffected by, ADR-018's *inbound*
 enforcement); `McpSessionManager`'s session map is in-memory,
-single-instance; `LoggingMcpAuditService`'s buffer is unbounded.
+single-instance; `LoggingMcpAuditService`'s buffer is unbounded. A held
+call's decision is never pushed back to the agent if its SSE session has
+since closed — see ADR-019's Self-Criticism.
 
 ### 5.5 Unified Audit Trail
 
@@ -340,6 +416,17 @@ only applies to the backend's response) are folded into `message`
 (`"Session: <id>[. <deny reason>][. Args: <json>]"`) rather than dedicated
 columns; the Admin Console shows this as a tooltip on the Audit Trail's
 Tool-name cell.
+
+**Governance dashboard (Stage 4, ADR-021)** reads this same table, not a
+separate one: `GovernanceService` aggregates MCP rows (`agent_id IS NOT
+NULL`) in memory (no SQL `GROUP BY`, matching `InventoryService`'s own
+join-in-Java precedent) into per-agent ALLOW/HOLD/DENY counts
+(`GET /api/v1/admin/governance/agent-activity?hours=`) and a live
+out-of-policy feed — `decisionEffect = "DENY"` rows, which already includes
+a human's post-hold `REJECTED` decision for free since `LoggingMcpAuditService`
+maps that to `DENY` too (ADR-019) — (`GET /api/v1/admin/governance/out-of-policy`).
+`GET /api/v1/admin/governance/report` bundles both, unmodified, as a plain
+JSON export (Admin Console's "Governance" tab, "Export Report" button).
 
 ### 5.6 IdP Identity Sync
 
@@ -456,8 +543,13 @@ Keycloak login (client `zte-admin-ui`, authorization code + PKCE). Built by
 ## 6. Data Model
 
 `zte-policies.yaml` (file, not a DB table): one `PolicyDocument` —
-`schemaVersion` (must be `1`) + three rule lists (§5.3's `PolicyRule` shape,
+`schemaVersion` (must be `1`) + four rule lists (§5.3's `PolicyRule` shape,
 `docs/policy-schema.md` for the full reference).
+
+`acap-profiles/*.yaml` (files, not a DB table, ADR-020): zero or more
+`AcapProfile` documents — `agentId`/`territory`/`scope.read[].{resource,fields}`/
+`scope.writeAllowed` (`docs/policy-schema.md`'s "ACAP scope profiles" section
+for the full reference). Best-effort loaded (§5.4), unlike `zte-policies.yaml`.
 
 **`request_logs`** (Flyway `V4`+`V12`) — the unified REST+MCP audit trail:
 
@@ -478,7 +570,7 @@ Keycloak login (client `zte-admin-ui`, authorization code + PKCE). Built by
 | `original_user_obo` | `VARCHAR(128)`, nullable | JWT `preferred_username` (falling back to `sub`), REST and MCP alike — display-only, see §5.5 |
 | `target_service` | `VARCHAR(255)`, nullable | REST: `RequestTargetResolver`-derived name. MCP: `mcp-backend.name` |
 | `http_method` | `VARCHAR(10)`, nullable | REST: the actual verb. MCP: `GET` (`SSE_OPENED`) or `POST` (tool call) |
-| `decision_effect` | `VARCHAR(10)`, nullable | `ALLOW`/`DENY`/`ERROR`, derived from `status_code` — a coarse, post-hoc signal, not per-filter provenance of which layer decided |
+| `decision_effect` | `VARCHAR(10)`, nullable | `ALLOW`/`DENY`/`HOLD`/`ERROR`, derived from `status_code` — a coarse, post-hoc signal, not per-filter provenance of which layer decided. `HOLD` (ADR-019) is a held MCP call; a later `APPROVED`/`REJECTED` decision is its own row, mapped to `ALLOW`/`DENY` respectively |
 
 Written by `RequestLogAuditService` (§5.5/§8's async pattern), read via `GET
 /api/v1/admin/audit-logs` (`findTop100ByOrderByTimestampDesc()`).
@@ -518,6 +610,22 @@ target_id, relation_type)`.
 `service_id` (`UNIQUE REFERENCES inventory_services(id) ON DELETE CASCADE`),
 `last_ping_ms`, `actuator_status`, `last_successful_call`, `updated_at`.
 
+**`pending_approvals`** (Flyway `V13`, ADR-019) — the 🟡 HOLD outcome's durable queue:
+
+| Column | Type | Notes |
+|---|---|---|
+| `id` | `UUID` | PK |
+| `session_id` | `VARCHAR(64)` | The originating MCP session — may have since closed, see ADR-019 |
+| `agent_id` | `VARCHAR(128)` | |
+| `tool_name` | `VARCHAR(255)` | |
+| `rpc_id_json` / `arguments_json` | `VARCHAR(255)` / `TEXT`, nullable | The original `tools/call` request's `id`/`arguments`, compact-JSON — reconstructed verbatim on approval |
+| `route_to` | `VARCHAR(128)`, nullable | Stored, not yet enforced/routed anywhere — see ADR-019 Self-Criticism |
+| `reason` | `TEXT`, nullable | Why it was held (the matched `agentMcpToolHolds` rule) |
+| `status` | `VARCHAR(10)` + `CHECK`, `DEFAULT 'PENDING'` | `PENDING`/`APPROVED`/`REJECTED` |
+| `requested_at` / `decided_at` | `TIMESTAMPTZ` | |
+| `decided_by` | `VARCHAR(128)`, nullable | Deciding admin's JWT `preferred_username`/`sub` |
+| `trace_id` / `client_ip` / `user_agent` / `display_identity` | — | Same audit-context fields as `request_logs`, carried through to the eventual `APPROVED`/`REJECTED` audit row |
+
 ---
 
 ## 7. API Reference
@@ -534,6 +642,14 @@ target_id, relation_type)`.
 | `/api/v1/admin/identities/{id}/relations` | GET | JWT + `ADMIN` | gateway | Local-cache-only |
 | `/api/v1/admin/inventory[/{id}]` | GET/POST/PUT/DELETE | JWT + `ADMIN` | gateway | APIM registry CRUD |
 | `/api/v1/admin/inventory/{id}/schema[/fetch]` | GET/POST | JWT + `ADMIN` | gateway | Captured discovery payload; synchronous re-probe |
+| `/api/v1/admin/approvals` | GET | JWT + `ADMIN` | gateway | Pending 🟡 HOLD queue (ADR-019) |
+| `/api/v1/admin/approvals/{id}/approve` | POST | JWT + `ADMIN` | gateway | Forwards the original held call; audits `APPROVED` |
+| `/api/v1/admin/approvals/{id}/reject` | POST | JWT + `ADMIN` | gateway | Honest denial; audits `REJECTED` |
+| `/api/v1/admin/acap-profiles` | GET | JWT + `ADMIN` | gateway | Loaded ACAP profiles + current threshold usage (`AcapProfileView`, ADR-020/ADR-022) — Admin Console "Governance" tab's ACAP Profiles section |
+| `/api/v1/admin/acap-profiles/reload` | POST | JWT + `ADMIN` | gateway | Re-reads `zte.acap.profiles-location`; always 200 (best-effort, see ADR-020) |
+| `/api/v1/admin/governance/agent-activity` | GET | JWT + `ADMIN` | gateway | Per-agent ALLOW/HOLD/DENY counts (`?hours=`, default 24) (ADR-021) |
+| `/api/v1/admin/governance/out-of-policy` | GET | JWT + `ADMIN` | gateway | Latest 50 MCP-agent denials, newest first (ADR-021) |
+| `/api/v1/admin/governance/report` | GET | JWT + `ADMIN` | gateway | Combined JSON export of the above two (`?hours=`) (ADR-021) |
 | `/admin/**` | GET | none (SPA handles its own login) | gateway | Admin Console static bundle |
 | `/sse` | GET | JWT + client cert | gateway (MCP proxy) | Opens an MCP session; SSE stream |
 | `/message?sessionId=<id>` | POST | JWT + client cert | gateway (MCP proxy) | JSON-RPC `tools/call`; result via SSE |
@@ -761,6 +877,11 @@ automatically instead of needing its own `WebFilter` (ADR-012).
 | [016](adr/ADR-016-inventory-and-health-registry.md) | APIM Inventory Registry — Auto-Discovery and Health Telemetry |
 | [017](adr/ADR-017-dynamic-routing-and-audit.md) | Dynamic Inventory-Driven Routing, Unified Audit Logging, and Strict S2S Rules |
 | [018](adr/ADR-018-smart-mtls-enforcement.md) | Smart mTLS Enforcement (client-auth: want + Application-Layer WebFilter) |
+| [019](adr/ADR-019-hold-decision-and-approval-queue.md) | HOLD as a Third MCP Decision Outcome, and a Durable Approval Queue |
+| [020](adr/ADR-020-acap-scope-profiles.md) | ACAP Scope Profiles — Argument/Field-Level Policy Tightening |
+| [021](adr/ADR-021-governance-dashboard.md) | Governance Dashboard — Per-Agent Activity and Out-of-Policy Feed |
+| [022](adr/ADR-022-acap-agent-metadata-and-thresholds.md) | ACAP Agent Metadata and Usage Thresholds |
+| [023](adr/ADR-023-policy-rule-mcp-target.md) | `mcpTarget` — Scoping agentMcpToolCalls/agentMcpToolHolds Rules to a Specific MCP Backend |
 
 ---
 

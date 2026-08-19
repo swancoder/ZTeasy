@@ -90,4 +90,52 @@ class LoggingMcpAuditServiceTest {
         assertThat(logged.message())
                 .isEqualTo("Session: session-2. tool not granted to this agent. Args: {\"id\":\"deal-1\"}");
     }
+
+    /** Stage 1 (ADR-019): a held call is neither an ALLOW nor a DENY — 202, decisionEffect HOLD. */
+    @Test
+    void heldEvent_persistsAsHoldWith202() {
+        LoggingMcpAuditService service = new LoggingMcpAuditService(requestLogAuditService, "test-mcp-backend");
+
+        service.record(new McpAuditEvent("1234", "crm-account-health-emea-01", "send_email", "HELD", Instant.now(),
+                "session-4", "held for human approval", "trace-hold", "203.0.113.10", "test-agent/4.0",
+                "crm-subject-uuid", "{\"to\":\"rep@nordwind.example\"}"));
+
+        ArgumentCaptor<RequestLog> captor = ArgumentCaptor.forClass(RequestLog.class);
+        verify(requestLogAuditService, timeout(2000)).record(captor.capture());
+        RequestLog logged = captor.getValue();
+        assertThat(logged.statusCode()).isEqualTo(202);
+        assertThat(logged.decisionEffect()).isEqualTo("HOLD");
+    }
+
+    /** A human-rejected hold is audited as a DENY — it's now the reviewer's decision, not the policy engine's. */
+    @Test
+    void rejectedEvent_persistsAsDenyWith403() {
+        LoggingMcpAuditService service = new LoggingMcpAuditService(requestLogAuditService, "test-mcp-backend");
+
+        service.record(new McpAuditEvent("1234", "crm-account-health-emea-01", "send_email", "REJECTED",
+                Instant.now(), "session-4", "Rejected by admin@zte", "trace-hold", "203.0.113.10",
+                "test-agent/4.0", "crm-subject-uuid", "{\"to\":\"rep@nordwind.example\"}"));
+
+        ArgumentCaptor<RequestLog> captor = ArgumentCaptor.forClass(RequestLog.class);
+        verify(requestLogAuditService, timeout(2000)).record(captor.capture());
+        RequestLog logged = captor.getValue();
+        assertThat(logged.statusCode()).isEqualTo(403);
+        assertThat(logged.decisionEffect()).isEqualTo("DENY");
+    }
+
+    /** A human-approved hold is audited as an ALLOW. */
+    @Test
+    void approvedEvent_persistsAsAllowWith200() {
+        LoggingMcpAuditService service = new LoggingMcpAuditService(requestLogAuditService, "test-mcp-backend");
+
+        service.record(new McpAuditEvent("1234", "crm-account-health-emea-01", "send_email", "APPROVED",
+                Instant.now(), "session-4", "Approved by admin@zte", "trace-hold", "203.0.113.10",
+                "test-agent/4.0", "crm-subject-uuid", "{\"to\":\"rep@nordwind.example\"}"));
+
+        ArgumentCaptor<RequestLog> captor = ArgumentCaptor.forClass(RequestLog.class);
+        verify(requestLogAuditService, timeout(2000)).record(captor.capture());
+        RequestLog logged = captor.getValue();
+        assertThat(logged.statusCode()).isEqualTo(200);
+        assertThat(logged.decisionEffect()).isEqualTo("ALLOW");
+    }
 }

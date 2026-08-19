@@ -8,6 +8,9 @@ export interface PolicyRule {
   pathPattern: string | null
   methods: string | null
   priority: number
+  // Which MCP backend this rule applies to, matched against mcp-backend.name —
+  // agentMcpToolCalls/agentMcpToolHolds only; null matches any backend (ADR-023).
+  mcpTarget: string | null
 }
 
 export interface PolicyDocument {
@@ -15,6 +18,10 @@ export interface PolicyDocument {
   users2service: PolicyRule[]
   service2service: PolicyRule[]
   agentMcpToolCalls: PolicyRule[]
+  // Stage 1 (ADR-019) — tool calls held for human approval even when
+  // agentMcpToolCalls would ALLOW them. Matched independently (PolicyMatcher.matchAny),
+  // not a third `effect` value — see that method's Javadoc for why.
+  agentMcpToolHolds: PolicyRule[]
 }
 
 export interface ReloadResult {
@@ -43,7 +50,28 @@ export interface RequestLogEntry {
   originalUserObo: string | null
   targetService: string | null
   httpMethod: string | null
-  decisionEffect: 'ALLOW' | 'DENY' | 'ERROR' | null
+  // 'HOLD' added Stage 1 (ADR-019) — a held tool call awaiting human review.
+  decisionEffect: 'ALLOW' | 'DENY' | 'HOLD' | 'ERROR' | null
+}
+
+// Mirrors gateway-service's com.zte.gateway.mcp.approval.PendingApproval (Stage 1, ADR-019).
+export interface PendingApproval {
+  id: string
+  sessionId: string
+  agentId: string
+  toolName: string
+  rpcIdJson: string
+  argumentsJson: string | null
+  routeTo: string | null
+  reason: string | null
+  status: 'PENDING' | 'APPROVED' | 'REJECTED'
+  requestedAt: string
+  decidedAt: string | null
+  decidedBy: string | null
+  traceId: string | null
+  clientIp: string | null
+  userAgent: string | null
+  displayIdentity: string | null
 }
 
 // Mirrors gateway-service's com.zte.gateway.identity.IdpIdentity (ADR-014,
@@ -87,4 +115,73 @@ export interface InventoryEntry {
   // (a 2xx with an empty/invalid body still reaches ACTIVE but captures nothing);
   // use this to gate "View Schema" (ADR-016 amendment).
   hasSchema: boolean
+}
+
+// Mirrors gateway-service's com.zte.gateway.governance.AgentActivitySummary (Stage 4, ADR-021).
+export interface AgentActivitySummary {
+  agentId: string
+  allowCount: number
+  denyCount: number
+  holdCount: number
+  lastActivity: string | null
+}
+
+// Mirrors gateway-service's com.zte.gateway.governance.GovernanceReport (Stage 4, ADR-021).
+export interface GovernanceReport {
+  generatedAt: string
+  windowHours: number
+  agentActivity: AgentActivitySummary[]
+  outOfPolicyAttempts: RequestLogEntry[]
+}
+
+// Mirrors gateway-service's com.zte.gateway.mcp.acap.* (Stage 3 ADR-020, agent
+// metadata/thresholds Stage 6 ADR-022) — display-only, no client-side enforcement.
+export interface AcapReadGrant {
+  resource: string
+  fields: string[]
+}
+
+export interface AcapScope {
+  read: AcapReadGrant[]
+  writeAllowed: boolean
+}
+
+export interface AcapOwner {
+  name: string
+  email: string
+}
+
+export interface AcapAgentInfo {
+  name: string | null
+  client: string | null
+  owner: AcapOwner | null
+  deploymentDate: string | null
+  reauthDue: string | null
+}
+
+export interface AcapRisk {
+  euAiActClass: string | null
+  internalTier: number | null
+}
+
+export interface AcapThreshold {
+  metric: string
+  toolName: string
+  limit: number
+  onExceed: string
+}
+
+export interface AcapProfile {
+  agentId: string
+  territory: string
+  scope: AcapScope | null
+  agent: AcapAgentInfo | null
+  risk: AcapRisk | null
+  thresholds: AcapThreshold[]
+}
+
+// Mirrors gateway-service's com.zte.gateway.admin.AdminAcapProfileController.AcapProfileView (Stage 6, ADR-022).
+export interface AcapProfileView {
+  profile: AcapProfile
+  currentThresholdUsage: Record<string, number>
 }

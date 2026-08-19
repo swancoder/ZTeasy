@@ -118,7 +118,17 @@ export default function AuditTrail({ accessToken }: Props) {
                   <TableCell>
                     <Chip
                       label={entry.statusCode ?? '—'}
-                      color={entry.statusCode != null && entry.statusCode < 400 ? 'success' : 'error'}
+                      // 202 (HOLD, ADR-019) is neither a success nor a failure — a genuinely
+                      // pending outcome. Painting it green alongside real 2xx successes would
+                      // be the exact "looks like it succeeded when it didn't" problem this
+                      // stage's honest-deny/hold pass exists to catch (Stage 2).
+                      color={
+                        entry.decisionEffect === 'HOLD'
+                          ? 'warning'
+                          : entry.statusCode != null && entry.statusCode < 400
+                            ? 'success'
+                            : 'error'
+                      }
                       size="small"
                     />
                   </TableCell>
@@ -132,7 +142,9 @@ export default function AuditTrail({ accessToken }: Props) {
                             ? 'success'
                             : entry.decisionEffect === 'DENY'
                               ? 'error'
-                              : 'warning'
+                              : entry.decisionEffect === 'HOLD'
+                                ? 'warning'
+                                : 'default'
                         }
                       />
                     ) : (

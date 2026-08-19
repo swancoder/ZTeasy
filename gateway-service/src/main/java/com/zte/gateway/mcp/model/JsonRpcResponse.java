@@ -27,6 +27,24 @@ public record JsonRpcResponse(String jsonrpc, Object id, Map<String, Object> res
         ), null);
     }
 
+    /**
+     * Stage 1 (ADR-019): the call was neither allowed nor denied — it's parked
+     * pending a human decision at {@code approvalId} (see {@code
+     * com.zte.gateway.mcp.approval}). A non-error, non-success envelope
+     * ({@code isError} omitted rather than {@code true}): this is not a policy
+     * failure, and a client that only checks {@code isError} shouldn't treat it
+     * as one.
+     */
+    public static JsonRpcResponse held(Object id, String approvalId, String reason) {
+        return new JsonRpcResponse("2.0", id, Map.of(
+                "content", List.of(Map.of(
+                        "type", "text",
+                        "text", "Action held for human approval: " + reason)),
+                "status", "held",
+                "approvalId", approvalId
+        ), null);
+    }
+
     public static JsonRpcResponse backendError(Object id, String message) {
         return new JsonRpcResponse("2.0", id, null, new JsonRpcError(-32000, message));
     }

@@ -1,0 +1,53 @@
+# Context
+User request (verbatim): "hit stage 3"
+
+Following the approved staged plan (/home/uwabami/.claude/plans/what-is-required-to-wondrous-dragon.md).
+Stages 1 (HOLD, ADR-019) and 2 (honest-deny verification) are done. Stage 3
+is the demo's biggest technical lift and its own core thesis: "the gate must
+look at arguments, not just the tool name" — the SAME tool name
+(read_contacts) must be allowed or denied differently depending on its
+arguments (territory, requested fields), and a read-only agent's write
+attempts must be denied regardless of any coarse tool-name grant.
+
+## Instructions
+1. Design a new AcapProfile model + evaluator, consulted from
+   YamlMcpPolicyEngine only for agents that opt in (additive — an agent with
+   no profile behaves exactly as before this stage).
+2. This layer may only TIGHTEN an ALLOW/HOLD decision to DENY — never loosen
+   a DENY, never invent an ALLOW of its own. Verify with a dedicated test
+   that a DENY from the coarse layer never even consults the ACAP layer.
+3. Keep the model a deliberately simplified subset of the real ACAP JSON
+   (examples-from-vlad/acap-crm-account-health.json) — agentId/territory/
+   scope.read[].{resource,fields}/scope.writeAllowed only. hold/never/
+   thresholds/risk/platforms/audit/evidence/deny_response are either
+   already handled elsewhere (hold -> ADR-019's agentMcpToolHolds; never ->
+   realized as fixed reason labels on the checks themselves, not loaded
+   data) or explicitly deferred to Stage 6. Document the mapping.
+4. Loading must be best-effort, not fail-fast like the core policy file — a
+   malformed or duplicate profile is logged and skipped, not a startup
+   failure, since ACAP profiles are additive and the coarse layer's
+   default-deny is always still enforced regardless.
+5. Wire a demo profile for crm-account-health-emea-01 (EMEA, read-only,
+   field-scoped per resource matching the ACAP JSON). Add a coarse
+   update_deal ALLOW for this agent in zte-policies.yaml specifically so
+   the write-check has something real to override, demonstrating the
+   two-layer interaction the demo script's RED point #3 describes.
+6. Reload endpoints: keep them separate from the existing policy reload
+   controllers (new blast radius only, don't touch already-tested code).
+7. Full test coverage: unit tests for the evaluator's every branch, the
+   loader's best-effort behavior (valid/missing-agent-id/missing-territory/
+   malformed/duplicate fixtures), the store's hot-swap, and
+   YamlMcpPolicyEngine's integration of all of it. New IT scenarios
+   exercising the demo's actual RED/GREEN light cases end-to-end (same
+   tool, different arguments -> different SSE outcome).
+8. ADR (next number), CLAUDE.md/SPECS.md/README.md/policy-schema.md
+   doc-sync, this prompts-hist file.
+
+## Verification
+./gradlew :gateway-service:compileJava :gateway-service:compileTestJava
+  :gateway-service:compileItJava
+./gradlew :gateway-service:test
+./gradlew :gateway-service:integrationTest --tests "com.zte.gateway.it.McpProxyIT"
+  (blocked in this sandbox by a pre-existing Testcontainers/Keycloak
+  container-launch failure unrelated to this change — every IT test in the
+  class, old and new alike, fails identically at container startup)

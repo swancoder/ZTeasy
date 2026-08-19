@@ -156,6 +156,22 @@
       "authorizationServicesEnabled": false
     },
     {
+      "clientId": "crm-account-health-emea-01",
+      "name": "Account-Health Assistant (Nordwind Components demo)",
+      "description": "Confidential OIDC client (Stage 1, ADR-019) for the ACAP CRM demo's Account-Health Assistant agent — read-only, EMEA territory. Client Credentials grant only, matching agent-a/agent-b's shape. See examples-from-vlad/acap-crm-account-health.json for its full ACAP profile.",
+      "enabled": true,
+      "protocol": "openid-connect",
+      "clientAuthenticatorType": "client-secret",
+      "secret": "crm-account-health-emea-01-secret-dev-only",
+      "publicClient": false,
+      "bearerOnly": false,
+      "standardFlowEnabled": false,
+      "implicitFlowEnabled": false,
+      "directAccessGrantsEnabled": false,
+      "serviceAccountsEnabled": true,
+      "authorizationServicesEnabled": false
+    },
+    {
       "clientId": "zte-admin-ui",
       "name": "ZTE Admin Console",
       "description": "Public OIDC client (PKCE) for the React admin SPA (ADR-012), served statically by the gateway at /admin/.",

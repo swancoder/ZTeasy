@@ -66,13 +66,19 @@ public class LoggingMcpAuditService implements McpAuditService {
         log.info("[ZTE-MCP-AUDIT] process={} agent={} tool={} status={} ts={}",
                 event.processId(), event.agentId(), event.toolName(), event.status(), event.timestamp());
 
-        // Three event shapes share this one persist() path: a session opening (GET /sse,
-        // no policy decision — always "succeeds") and a tool call's allow/deny outcome
-        // (POST /message). Only "DENIED" is ever a non-2xx/non-ALLOW row.
-        boolean denied = "DENIED".equals(event.status());
+        // Event shapes sharing this one persist() path: a session opening (GET /sse, no
+        // policy decision — always "succeeds"), a tool call's ALLOW/DENY/HOLD outcome
+        // (POST /message), and a held call's later APPROVED/REJECTED decision (Stage 1,
+        // ADR-019) — REJECTED is audited as a DENY (the human's decision, not the
+        // original policy engine's), APPROVED as an ALLOW, HELD as its own HOLD effect
+        // (202: the call is genuinely pending, not yet succeeded or failed).
+        boolean denied = "DENIED".equals(event.status()) || "REJECTED".equals(event.status());
+        boolean held = "HELD".equals(event.status());
         boolean sseOpened = "SSE_OPENED".equals(event.status());
         String path = sseOpened ? "/sse" : "/message";
         String httpMethod = sseOpened ? "GET" : "POST";
+        String decisionEffect = denied ? "DENY" : held ? "HOLD" : "ALLOW";
+        int statusCode = denied ? 403 : held ? 202 : 200;
 
         // sessionId no longer travels as trace_id (see RequestLog.forMcp's Javadoc), and
         // argumentsJson has no dedicated column either — both folded into message instead,
@@ -88,8 +94,8 @@ public class LoggingMcpAuditService implements McpAuditService {
         }
         requestLogAuditService.record(RequestLog.forMcp(
                 event.traceId(), event.clientIp(), event.userAgent(), event.processId(), event.agentId(),
-                event.toolName(), path, httpMethod, denied ? 403 : 200, message.toString(), event.originalUserObo(),
-                targetServiceName, denied ? "DENY" : "ALLOW"));
+                event.toolName(), path, httpMethod, statusCode, message.toString(), event.originalUserObo(),
+                targetServiceName, decisionEffect));
     }
 
     @PreDestroy

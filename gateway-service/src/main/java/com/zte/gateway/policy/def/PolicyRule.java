@@ -7,7 +7,8 @@ package com.zte.gateway.policy.def;
  * method, with an effect and a tie-break priority) is identical across all three;
  * a class hierarchy would only add ceremony. {@code pathPattern}/{@code methods}
  * are simply unused (left {@code null}) by agentMcpToolCalls rules, whose "target"
- * is a tool name rather than a service.
+ * is a tool name rather than a service; conversely {@code mcpTarget} is simply
+ * unused by users2service/service2service rules.
  *
  * <p>{@code source} and {@code target} are Ant-style patterns, matched via
  * {@link org.springframework.util.AntPathMatcher} by {@link PolicyMatcher} —
@@ -21,6 +22,7 @@ package com.zte.gateway.policy.def;
  * @param pathPattern Ant-style request path pattern; {@code null}/absent matches any path (users2service/service2service only)
  * @param methods     comma-separated HTTP verbs, or {@code "*"}; {@code null}/absent matches any method (users2service/service2service only)
  * @param priority    higher priority is preferred when multiple rules of the same effect match; ties broken by declaration order
+ * @param mcpTarget   which MCP backend this rule applies to, matched against the configured {@code mcp-backend.name} (agentMcpToolCalls/agentMcpToolHolds only — ADR-023); {@code null}/absent matches regardless of backend, same "unscoped means universal" convention {@code pathPattern}/{@code methods} already use. Exists so a rule authored against one MCP backend's tool semantics can't silently keep matching if the gateway is later repointed at a different backend exposing a same-named but semantically different tool — see ADR-023's Decision section for why this is a rule field rather than routing infrastructure.
  */
 public record PolicyRule(
         String id,
@@ -29,5 +31,13 @@ public record PolicyRule(
         String target,
         String pathPattern,
         String methods,
-        int priority
-) {}
+        int priority,
+        String mcpTarget
+) {
+
+    /** Convenience constructor for every call site written before ADR-023's {@code mcpTarget} field existed. */
+    public PolicyRule(String id, RuleEffect effect, String source, String target, String pathPattern,
+                       String methods, int priority) {
+        this(id, effect, source, target, pathPattern, methods, priority, null);
+    }
+}

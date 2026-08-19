@@ -40,6 +40,7 @@ public class PolicyValidator {
         validateCategory("users2service", document.users2service(), true, errors, warnings);
         validateCategory("service2service", document.service2service(), true, errors, warnings);
         validateCategory("agentMcpToolCalls", document.agentMcpToolCalls(), false, errors, warnings);
+        validateCategory("agentMcpToolHolds", document.agentMcpToolHolds(), false, errors, warnings);
 
         checkDuplicateIds(document, errors);
 
@@ -63,14 +64,19 @@ public class PolicyValidator {
                         + "' (expected '*' or a comma-separated list of " + VALID_METHODS + ")");
             }
 
-            String tuple = rule.source() + "|" + rule.target() + "|" + rule.pathPattern() + "|" + rule.methods();
+            // mcpTarget (ADR-023) is part of the tuple: two rules differing only by
+            // which MCP backend they're scoped to are legitimately distinct, not
+            // duplicates — e.g. the same source/target ALLOWed on one backend and
+            // DENYed on another.
+            String tuple = rule.source() + "|" + rule.target() + "|" + rule.pathPattern() + "|" + rule.methods()
+                    + "|" + rule.mcpTarget();
             PolicyRule prior = seenByTuple.putIfAbsent(tuple, rule);
             if (prior != null) {
                 if (prior.effect() == rule.effect()) {
-                    errors.add(ref + ": duplicate rule (same source/target/path/methods/effect as '"
+                    errors.add(ref + ": duplicate rule (same source/target/path/methods/mcpTarget/effect as '"
                             + prior.id() + "')");
                 } else {
-                    warnings.add(category + ": conflicting ALLOW/DENY rules for the same source/target/path/methods ('"
+                    warnings.add(category + ": conflicting ALLOW/DENY rules for the same source/target/path/methods/mcpTarget ('"
                             + prior.id() + "' vs '" + rule.id()
                             + "') — DENY takes precedence at evaluation time regardless of declaration order");
                 }
@@ -93,6 +99,7 @@ public class PolicyValidator {
         all.addAll(document.users2service());
         all.addAll(document.service2service());
         all.addAll(document.agentMcpToolCalls());
+        all.addAll(document.agentMcpToolHolds());
         return all;
     }
 

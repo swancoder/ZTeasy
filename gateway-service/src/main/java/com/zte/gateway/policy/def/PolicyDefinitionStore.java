@@ -52,10 +52,12 @@ public class PolicyDefinitionStore {
         this.properties = properties;
         this.eventPublisher = eventPublisher;
         current.set(loadAndValidateOrThrow());
-        log.info("Policy definitions loaded: {} users2service, {} service2service, {} agentMcpToolCalls rules",
+        log.info("Policy definitions loaded: {} users2service, {} service2service, {} agentMcpToolCalls, "
+                        + "{} agentMcpToolHolds rules",
                 current.get().users2service().size(),
                 current.get().service2service().size(),
-                current.get().agentMcpToolCalls().size());
+                current.get().agentMcpToolCalls().size(),
+                current.get().agentMcpToolHolds().size());
     }
 
     /** Zero-I/O synchronous read — safe to call inline from the reactive gateway path or {@code McpPolicyEngine.evaluate()}. */

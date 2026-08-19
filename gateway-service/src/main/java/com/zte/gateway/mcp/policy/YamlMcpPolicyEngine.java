@@ -1,14 +1,20 @@
 package com.zte.gateway.mcp.policy;
 
 import com.zte.gateway.identity.IdentitySources;
+import com.zte.gateway.mcp.acap.AcapProfile;
+import com.zte.gateway.mcp.acap.AcapProfileStore;
+import com.zte.gateway.mcp.acap.AcapScopeEvaluator;
 import com.zte.gateway.policy.def.PolicyDefaultsProperties;
 import com.zte.gateway.policy.def.PolicyDefinitionStore;
 import com.zte.gateway.policy.def.PolicyEvaluation;
 import com.zte.gateway.policy.def.PolicyMatcher;
 import com.zte.gateway.policy.def.RuleEffect;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Component;
 
+import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 
 /**
  * {@link McpPolicyEngine} backed by the YAML {@code agentMcpToolCalls} rules
@@ -18,6 +24,12 @@ import java.util.Map;
  * rule data is pre-loaded into {@link PolicyDefinitionStore}'s
  * {@code AtomicReference} snapshot, read here with a plain field access, never
  * fetched inline during the request path.
+ *
+ * <p>{@code mcpBackendName} (ADR-023) is the configured {@code mcp-backend.name}
+ * — passed to every {@link PolicyMatcher} call so an {@code agentMcpToolCalls}/
+ * {@code agentMcpToolHolds} rule that names a specific {@code mcpTarget} only
+ * applies while the gateway is actually pointed at that backend, rather than
+ * silently keeping a stale grant alive if the backend is later swapped out.
  */
 @Component
 public class YamlMcpPolicyEngine implements McpPolicyEngine {
@@ -25,13 +37,22 @@ public class YamlMcpPolicyEngine implements McpPolicyEngine {
     private final PolicyDefinitionStore policyDefinitionStore;
     private final PolicyMatcher policyMatcher;
     private final PolicyDefaultsProperties policyDefaults;
+    private final AcapProfileStore acapProfileStore;
+    private final AcapScopeEvaluator acapScopeEvaluator;
+    private final String mcpBackendName;
 
     public YamlMcpPolicyEngine(PolicyDefinitionStore policyDefinitionStore,
                                 PolicyMatcher policyMatcher,
-                                PolicyDefaultsProperties policyDefaults) {
+                                PolicyDefaultsProperties policyDefaults,
+                                AcapProfileStore acapProfileStore,
+                                AcapScopeEvaluator acapScopeEvaluator,
+                                @Value("${mcp-backend.name:hubspot-mcp}") String mcpBackendName) {
         this.policyDefinitionStore = policyDefinitionStore;
         this.policyMatcher = policyMatcher;
         this.policyDefaults = policyDefaults;
+        this.acapProfileStore = acapProfileStore;
+        this.acapScopeEvaluator = acapScopeEvaluator;
+        this.mcpBackendName = mcpBackendName;
     }
 
     @Override
@@ -43,18 +64,61 @@ public class YamlMcpPolicyEngine implements McpPolicyEngine {
             return PolicyDecision.deny("Missing tool name");
         }
 
+        List<String> sources = IdentitySources.enrichClient(agentId);
         PolicyEvaluation eval = policyMatcher.evaluate(
-                policyDefinitionStore.current().agentMcpToolCalls(),
-                IdentitySources.enrichClient(agentId), toolName, null, null);
+                policyDefinitionStore.current().agentMcpToolCalls(), sources, toolName, null, null, mcpBackendName);
 
-        return switch (eval.outcome()) {
+        PolicyDecision decision = switch (eval.outcome()) {
             case DENIED -> PolicyDecision.deny(
                     "Tool '" + toolName + "' denied by rule '" + eval.matchedRule().id() + "'");
-            case ALLOWED -> PolicyDecision.allow();
+            case ALLOWED -> checkHold(sources, toolName);
             case NO_MATCH -> policyDefaults.getDefaultEffect() == RuleEffect.ALLOW
-                    ? PolicyDecision.allow()
+                    ? checkHold(sources, toolName)
                     : PolicyDecision.deny(
                             "No policy grants agent '" + agentId + "' access to tool '" + toolName + "'");
         };
+
+        return tightenViaAcapProfile(decision, agentId, toolName, arguments);
+    }
+
+    /**
+     * Stage 3 (ADR-020): an agent with an {@link AcapProfile} gets a further,
+     * argument-aware tightening pass on top of the coarse decision above — a
+     * DENY is already final and skips this entirely (this layer only ever
+     * tightens, never loosens); an ALLOW/HOLD may still be downgraded to DENY
+     * (territory mismatch, disallowed field, unscoped write, bulk/export).
+     *
+     * <p>Stage 6 (ADR-022): if scope tightening didn't already produce a
+     * DENY, a per-agent-per-metric usage threshold may still escalate an
+     * ALLOW to HOLD ({@code followup_drafts_per_day}-style limits).
+     */
+    private PolicyDecision tightenViaAcapProfile(PolicyDecision decision, String agentId, String toolName,
+                                                  Map<String, Object> arguments) {
+        if (decision.outcome() == PolicyDecision.Outcome.DENY) {
+            return decision;
+        }
+        Optional<AcapProfile> profile = acapProfileStore.find(agentId);
+        if (profile.isEmpty()) {
+            return decision;
+        }
+        Optional<PolicyDecision> scopeDecision = acapScopeEvaluator.tighten(profile.get(), toolName, arguments);
+        if (scopeDecision.isPresent()) {
+            return scopeDecision.get();
+        }
+        return acapScopeEvaluator.checkThresholds(profile.get(), toolName, decision.outcome()).orElse(decision);
+    }
+
+    /**
+     * Stage 1 (ADR-019): a call the coarse {@code agentMcpToolCalls} check
+     * would otherwise ALLOW may still be held for a human decision, per {@code
+     * agentMcpToolHolds} — checked as a separate pass via {@link
+     * PolicyMatcher#matchAny}, never able to loosen a DENY into an ALLOW.
+     */
+    private PolicyDecision checkHold(List<String> sources, String toolName) {
+        return policyMatcher.matchAny(policyDefinitionStore.current().agentMcpToolHolds(), sources, toolName,
+                        mcpBackendName)
+                .map(rule -> PolicyDecision.hold(
+                        "Tool '" + toolName + "' held for human approval by rule '" + rule.id() + "'"))
+                .orElseGet(PolicyDecision::allow);
     }
 }

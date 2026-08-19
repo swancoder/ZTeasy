@@ -1,0 +1,4 @@
+agentId: some-agent
+scope:
+  read: []
+  writeAllowed: false

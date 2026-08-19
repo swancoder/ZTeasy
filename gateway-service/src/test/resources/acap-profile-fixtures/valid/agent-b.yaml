@@ -1,0 +1,7 @@
+agentId: agent-b
+territory: NA
+scope:
+  read:
+    - resource: deals
+      fields: []
+  writeAllowed: true

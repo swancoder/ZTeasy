@@ -169,6 +169,11 @@ zte-lightweight/
 | [ADR-016](docs/adr/ADR-016-inventory-and-health-registry.md) | APIM Inventory Registry — Auto-Discovery and Health Telemetry | Accepted |
 | [ADR-017](docs/adr/ADR-017-dynamic-routing-and-audit.md) | Dynamic Inventory-Driven Routing, Unified Audit Logging, and Strict S2S Rules | Accepted |
 | [ADR-018](docs/adr/ADR-018-smart-mtls-enforcement.md) | Smart mTLS Enforcement (client-auth: want + Application-Layer WebFilter) | Accepted |
+| [ADR-019](docs/adr/ADR-019-hold-decision-and-approval-queue.md) | HOLD as a Third MCP Decision Outcome, and a Durable Approval Queue | Accepted |
+| [ADR-020](docs/adr/ADR-020-acap-scope-profiles.md) | ACAP Scope Profiles — Argument/Field-Level Policy Tightening | Accepted |
+| [ADR-021](docs/adr/ADR-021-governance-dashboard.md) | Governance Dashboard — Per-Agent Activity and Out-of-Policy Feed | Accepted |
+| [ADR-022](docs/adr/ADR-022-acap-agent-metadata-and-thresholds.md) | ACAP Agent Metadata and Usage Thresholds | Accepted |
+| [ADR-023](docs/adr/ADR-023-policy-rule-mcp-target.md) | `mcpTarget` — Scoping agentMcpToolCalls/agentMcpToolHolds Rules to a Specific MCP Backend | Accepted |
 
 ---
 
@@ -192,22 +197,75 @@ router rather than a Gateway route.
    checks the `agentMcpToolCalls` rules in `zte-policies.yaml` (deny always wins, no match →
    default-deny). A denial is injected as a JSON-RPC envelope with `result.isError=true`,
    naming the matched rule — the backend is never called. An allow forwards the call to
-   `McpBackendClient`, runs the result through `DataMaskingFilter`, and injects it into the
-   SSE stream. The POST still always returns `202 Accepted` regardless — the transport
-   contract from Stage 8 is unchanged, only what gets computed. This supersedes Stage 9's
-   (ADR-010) deliberate dead-end stub — see ADR-011 for the full reasoning.
-4. Every call is recorded asynchronously via `LoggingMcpAuditService` (non-blocking sink,
-   logs today, TSDB-ready) with status `"ALLOWED"`/`"DENIED"`, and synchronously via the
-   unified `ZteAuditLogger.policyDecision(...)` structured log line shared with the gateway's
-   REST policy filters.
+   `McpForwardService` (backend + masking), and injects the result into the SSE stream. The
+   POST still always returns `202 Accepted` regardless — the transport contract from Stage 8
+   is unchanged, only what gets computed. This supersedes Stage 9's (ADR-010) deliberate
+   dead-end stub — see ADR-011 for the full reasoning.
+4. **As of Stage 19 (ADR-019), a third outcome — Hold — routes a call to a human** instead of
+   allowing or denying it outright: an otherwise-allowed call additionally matching an
+   `agentMcpToolHolds` rule is parked in `pending_approvals` (durable — a held item may be
+   reviewed well after this SSE session closes) and a `status: "held"` envelope is injected
+   instead. A human then calls `POST /api/v1/admin/approvals/{id}/approve` (forwards the
+   original call through the same `McpForwardService` path) or `/reject` (an honest denial) —
+   see the Admin Console's **Approvals** tab, below.
+4a. **As of Stage 20 (ADR-020), an agent with an ACAP profile gets a further,
+   argument-aware tightening pass** on top of steps 3–4's decision: a call step 3
+   would otherwise ALLOW (or hold) can still be denied based on its *arguments* —
+   wrong territory, a disallowed field, a write attempt from a read-only agent, or
+   a bulk/export-shaped tool — checks the coarse, tool-name-only rules above have
+   no way to express. This is why `read_contacts(territory=EMEA)` and
+   `read_contacts(territory=NA)` — the *same* tool, different arguments — can (and
+   for the demo agent, do) produce different decisions. Additive and opt-in: an
+   agent with no ACAP profile file is unaffected; a deny from step 3 is never
+   reconsidered. See [YAML Policy Engine](#yaml-policy-engine-stage-10-full-migration-stage-11--adr-012)'s
+   "ACAP scope profiles" note below and `docs/policy-schema.md`.
+5. Every call is recorded asynchronously via `LoggingMcpAuditService` (non-blocking sink,
+   logs today, TSDB-ready) with status `"ALLOWED"`/`"DENIED"`/`"HELD"`/`"APPROVED"`/`"REJECTED"`,
+   and synchronously via the unified `ZteAuditLogger.policyDecision(...)` structured log line
+   shared with the gateway's REST policy filters.
 
 **Tested by:** `McpProxyIT` (`gateway-service/src/it`) — full `GET /sse` → `POST /message` →
 SSE-injection round trip against a real running gateway (Testcontainers + WireMock), using
-Agent A/Agent B's actual client-credentials tokens; covers an allowed call forwarded to the
-backend, a tool with no grant, and a destructive-shaped tool caught by the deny-list, plus
-401-without-token and unknown-`sessionId` 400. Also `McpProxySecurityWebFluxTest` (`src/test`)
-— a fast `@WebFluxTest` slice covering the same allow/deny paths without Docker. Run with
-`./gradlew test integrationTest`.
+Agent A/Agent B's (and, as of ADR-019, the demo `crm-account-health-emea-01` agent's) actual
+client-credentials tokens; covers an allowed call forwarded to the backend, a tool with no
+grant, a destructive-shaped tool caught by the deny-list, a held call followed by an admin
+approval, and (ADR-020) the same `read_contacts` tool call allowed/denied differently by
+territory and by requested fields, plus a coarsely-granted-but-ACAP-denied `update_deal`,
+plus 401-without-token and unknown-`sessionId` 400. Also `McpProxySecurityWebFluxTest`
+(`src/test`) — a fast `@WebFluxTest` slice covering the same allow/deny/hold paths without
+Docker. Run with `./gradlew test integrationTest`.
+
+### Approvals — the 🟡 Hold Queue (ADR-019)
+
+Admin Console **Approvals** tab: every call currently parked by an `agentMcpToolHolds` rule —
+agent, tool, arguments, and why it was held — with **Approve**/**Reject** buttons. Approve
+reconstructs and forwards the exact original call; Reject sends back an honest denial. Either
+way the decision is durable and audited even if the agent's SSE session has since closed; only
+pushing the result into that *specific* live connection is best-effort (see ADR-019's
+Self-Criticism). The demo `crm-account-health-emea-01` agent (`zte-policies.yaml`) holds on
+`send_email`/`draft_followup` — try it: open an SSE session as that agent, call one of those
+tools, then approve or reject it from this tab.
+
+### Governance Dashboard (ADR-021)
+
+Admin Console **Governance** tab — the historical/reporting half (Approvals above is the
+live, actionable half): read-only over the same `request_logs` audit trail every prior stage
+already writes to, no new table.
+
+- **Agent Activity** — per-agent ALLOW/HOLD/DENY counts over a selectable window (last hour /
+  24 hours / 7 days), plus each agent's most recent activity timestamp.
+- **Out-of-Policy Attempts** — the latest 50 denied MCP-agent calls, newest first (agent, tool,
+  reason) — deliberately narrower than the Audit Trail tab (MCP-agent traffic only, not REST);
+  a human's post-hold rejection shows up here too, since it's audited as a `DENY` (ADR-019).
+- **Export Report** — downloads both views as one JSON snapshot for the selected window.
+- **ACAP Profiles** (Stage 22, ADR-022) — one card per loaded ACAP profile: owner, deployment
+  date, a red "OVERDUE" badge once re-authorization is due, EU AI Act risk tier, and live
+  `used/limit` chips for any usage thresholds — see below.
+
+```bash
+curl -sk "https://localhost:8080/api/v1/admin/governance/agent-activity?hours=24" -H "Authorization: Bearer $ADMIN_TOKEN"
+curl -sk https://localhost:8080/api/v1/admin/governance/out-of-policy -H "Authorization: Bearer $ADMIN_TOKEN"
+```
 
 ---
 
@@ -242,9 +300,9 @@ does the token fetch, `GET /sse` handshake, and `POST /message` for both agents 
 ## YAML Policy Engine (Stage 10, full migration Stage 11 / ADR-012)
 
 A single YAML file (`gateway-service/src/main/resources/zte-policies.yaml`, path
-configurable via `zte.policy.file`) defines allow/deny rules for three relationship
+configurable via `zte.policy.file`) defines allow/deny rules for four relationship
 categories, loaded and validated at startup and hot-swappable at runtime, and is the
-**sole** source of truth for all three (no DB fallback anywhere, as of ADR-012 — see
+**sole** source of truth for all four (no DB fallback anywhere, as of ADR-012 — see
 [ADR-011](docs/adr/ADR-011-yaml-policy-engine.md),
 [ADR-012](docs/adr/ADR-012-full-yaml-migration-and-admin-console.md), and
 [`docs/policy-schema.md`](docs/policy-schema.md) for the full schema and precedence rules.
@@ -254,6 +312,7 @@ categories, loaded and validated at startup and hot-swappable at runtime, and is
 | `users2service` | User (realm role) → gateway REST service | `ZteAuthorizationFilter` (Gateway-routed paths); `AdminAuthorizationFilter` (`/api/v1/admin/**` — see ADR-012 for why a local `@RestController` needs its own filter) | Deny |
 | `service2service` | Calling service/agent (JWT `azp`) → gateway REST service | `ServiceToServiceAuthorizationFilter` | `zte.policy.default-effect` (default `DENY`) |
 | `agentMcpToolCalls` | MCP agent (JWT `azp`) → MCP tool name | `YamlMcpPolicyEngine` | `zte.policy.default-effect` (default `DENY`) |
+| `agentMcpToolHolds` (ADR-019) | MCP tool calls routed to a human even when `agentMcpToolCalls` would ALLOW them | `YamlMcpPolicyEngine` (`PolicyMatcher.matchAny`, not `evaluate` — see ADR-019 for why) | Not held (plain ALLOW/DENY stands) |
 
 Deny always overrides allow, regardless of priority or declaration order. Full schema
 reference (all fields, precedence, validation rules): [`docs/policy-schema.md`](docs/policy-schema.md).
@@ -266,6 +325,7 @@ schemaVersion: 1        # required, must be exactly 1
 users2service: [ ... ]  # list of rules, may be empty/omitted
 service2service: [ ... ]
 agentMcpToolCalls: [ ... ]
+agentMcpToolHolds: [ ... ]   # ADR-019 — route a call to a human instead of forwarding it
 ```
 
 Every rule, in every category, shares one shape:
@@ -279,6 +339,7 @@ Every rule, in every category, shares one shape:
 | `pathPattern` | no | Request path scope (Ant pattern); unused by `agentMcpToolCalls` |
 | `methods` | no | Comma-separated HTTP verbs, or `*`; unused by `agentMcpToolCalls` |
 | `priority` | no | Tie-break within the same effect only (default `0`) — never breaks a DENY vs ALLOW tie |
+| `mcpTarget` | no | Which MCP backend this rule applies to, matched exactly against `mcp-backend.name` (ADR-023). Unused by `users2service`/`service2service`. Omit to match any backend — a rule authored against a specific backend's tool semantics should set this so it stops applying if the gateway is ever repointed elsewhere. |
 
 ### How to add a rule
 
@@ -309,14 +370,88 @@ Every rule, in every category, shares one shape:
 3. Check the gateway log for the `[ZTE-AUDIT]` `POLICY_ALLOW`/`POLICY_DENY` line naming
    the matched rule `id` to confirm it's taking effect.
 
+### ACAP scope profiles (Stage 20 / ADR-020)
+
+A separate, additive, opt-in layer on top of the four categories above — one
+YAML file per agent under `gateway-service/src/main/resources/acap-profiles/`
+(path via `zte.acap.profiles-location`), consulted only for agents that have
+one. Where `zte-policies.yaml` only ever sees a tool *name*, an ACAP profile
+lets the gate look at the call's *arguments* too:
+
+```yaml
+agentId: crm-account-health-emea-01
+territory: EMEA
+scope:
+  read:
+    - resource: contacts
+      fields: [name, company, lifecycle_stage, last_activity, deal_ids]
+  writeAllowed: false
+```
+
+`read_<resource>` calls are checked against `territory` and `fields`;
+`update_*` calls are denied unless `writeAllowed`; `export_*` calls are
+always denied. It can only tighten a coarse ALLOW/HOLD into a DENY, never
+loosen one — an agent with no profile file behaves exactly as before this
+stage. Full schema and the ACAP-to-ZTeasy field mapping:
+[`docs/policy-schema.md`](docs/policy-schema.md#acap-scope-profiles-stage-3-adr-020).
+List what's loaded (each entry includes its current threshold usage, see
+below) / trigger a reload:
+
+```bash
+curl -sk https://localhost:8080/api/v1/admin/acap-profiles -H "Authorization: Bearer $ADMIN_TOKEN"
+curl -sk -X POST https://localhost:8080/api/v1/admin/acap-profiles/reload -H "Authorization: Bearer $ADMIN_TOKEN"
+```
+
+### ACAP agent metadata & usage thresholds (Stage 22 / ADR-022)
+
+Two more, purely additive, optional blocks on the same per-agent profile file:
+
+```yaml
+agent:
+  name: Account-Health Assistant
+  client: Nordwind Components
+  owner:
+    name: Sales Operations Lead
+    email: sales-ops@nordwind.example
+  deploymentDate: "2026-08-01"
+  reauthDue: "2026-02-01"
+risk:
+  euAiActClass: limited
+  internalTier: 2
+thresholds:
+  - metric: followup_drafts_per_day
+    toolName: draft_followup
+    limit: 30
+    onExceed: hold
+```
+
+`agent`/`risk` are **display-only** — shown in the Admin Console's
+**Governance** tab, new "ACAP Profiles" section (one card per agent: owner,
+deployment date, a red "OVERDUE" badge once `reauthDue` is in the past, risk
+tier) — no enforcement is tied to either, matching the demo's own framing
+("re-authorization is a human process, not a technical gate").
+
+`thresholds` *is* enforced, one step further than scope tightening: once a
+call gets past territory/field/write/bulk checks without being denied,
+`AcapThresholdTracker` (in-memory, resets daily) increments the matching
+metric's counter, and — only if the count now exceeds `limit` and the call
+was a plain ALLOW — escalates it to HOLD, same as an `agentMcpToolHolds`
+rule would. `toolName` (not part of the source ACAP schema) says explicitly
+which tool the metric counts, since a name like `followup_drafts_per_day`
+doesn't mechanically imply `draft_followup` by any convention worth trusting.
+Each profile card in the Governance tab shows live `used/limit` chips for
+its thresholds.
+
 ---
 
 ## Admin Console (ADR-012)
 
 A React/Vite/TypeScript SPA (`zt-admin-ui/`), built by `gateway-service`'s own Gradle
 build and served statically at `https://localhost:8080/admin/index.html` — no separate
-process to run. Shows the full active YAML policy set (all three categories) and a
-"Reload Policies" button.
+process to run. Tabs: **Policies** (the full active YAML policy set, all four categories
+as of ADR-019, and a "Reload Policies" button), **Audit Trail**, **Identities**,
+**Registry**, **Approvals** (ADR-019 — the 🟡 hold queue, see [MCP Proxy](#mcp-proxy)
+above), and **Governance** (ADR-021 — see below).
 
 **No client certificate needed here:** `/admin/**` and `/api/v1/admin/**` are both in
 `MtlsEnforcementWebFilter`'s excluded-path list (ADR-018) — the gateway is HTTPS-only as
@@ -691,3 +826,9 @@ curl -sk --cert certs/client.p12:zte-pass --cert-type P12 \
 | 16 | APIM inventory registry (`inventory_services`/`health_metrics`), auto-discovery on onboarding, periodic health polling, passive `last_successful_call` telemetry, Admin Console "Registry" tab | `c3fd7de` |
 | 17 | Dynamic inventory-driven routing (`InventoryRouteDefinitionLocator`, replacing hardcoded routes), REST/MCP audit unification into `request_logs`, strict `service2service` policy scenario (ADR-017) | `87d9976` |
 | 18 | Smart mTLS enforcement: gateway HTTPS (`gateway.p12`), `server.ssl.client-auth: want`, `MtlsEnforcementWebFilter` gating `/sse`/`/message`/`/api/v1/**` minus `/admin`/`/internal` (ADR-018) | `<commit>` |
+| 19 | HOLD decision outcome (🟡): `agentMcpToolHolds` policy category, `pending_approvals` table, `PendingApprovalService`, `POST /api/v1/admin/approvals/{id}/approve\|reject`, Admin Console "Approvals" tab, new `crm-account-health-emea-01` demo agent, plus a Stage 2 honest-deny/hold verification pass (specific deny reasons confirmed everywhere, MCP's always-202 transport reconciled with "honest deny," two Admin Console chip-coloring gaps fixed) — ACAP/DIGI-KAI governance demo Stages 1–2 of 6 (ADR-019) | `<commit>` |
+| 20 | ACAP scope profiles (🟢/🔴 by argument, not just tool name): `AcapProfile`/`AcapProfileStore`/`AcapScopeEvaluator`, territory + data-minimization field checks + read-only write-deny + bulk/export-deny, `GET/POST /api/v1/admin/acap-profiles[/reload]`, new `acap-profiles/crm-account-health-emea-01.yaml` — ACAP/DIGI-KAI governance demo Stage 3 of 6 (ADR-020) | `<commit>` |
+| 21 | Governance dashboard: `GovernanceService`, per-agent ALLOW/HOLD/DENY activity + out-of-policy-attempts feed + JSON export (`GET /api/v1/admin/governance/{agent-activity,out-of-policy,report}`), Admin Console "Governance" tab — read-only reporting over the existing `request_logs` audit trail — ACAP/DIGI-KAI governance demo Stage 4 of 6 (ADR-021) | `<commit>` |
+| — | CRM tool-surface alignment: `read_contacts`/`read_deals`/`read_activities`/`update_deal`/`export_contacts`/`send_email`/`draft_followup`/`escalate` added to `hubspot-mcp` (sibling repo, no ZTeasy commit) alongside agent-a/b's existing tools; `agent_simulator.py` extended to run the demo's full 🟢/🔴/🟡 script — ACAP/DIGI-KAI governance demo Stage 5 of 6 | n/a (`hubspot-mcp` repo) |
+| 22 | ACAP agent metadata + usage thresholds: `AcapProfile.agent`/`risk` (display-only), `thresholds` + `AcapThresholdTracker` (in-memory daily-reset counter escalating ALLOW to HOLD on limit exceedance), Admin Console Governance tab's new "ACAP Profiles" section (owner/deployment/reauth-overdue badge/risk tier/threshold usage chips) — ACAP/DIGI-KAI governance demo Stage 6 of 6, final stage (ADR-022) | `<commit>` |
+| 23 | `PolicyRule.mcpTarget`: scopes `agentMcpToolCalls`/`agentMcpToolHolds` rules to a specific MCP backend (matched against `mcp-backend.name`) so a rule can't silently keep matching a same-named tool if the gateway is repointed at a different backend; `zte-policies.yaml`'s per-agent grants scoped to `hubspot-mcp`, its name-shape safety nets deliberately left unscoped; `PolicyValidator`'s duplicate-detection fixed to treat `mcpTarget` as part of the uniqueness tuple (ADR-023) | `<commit>` |

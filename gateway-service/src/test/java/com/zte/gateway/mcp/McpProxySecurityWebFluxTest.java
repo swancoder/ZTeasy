@@ -3,8 +3,9 @@ package com.zte.gateway.mcp;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.zte.auth.SecurityConfig;
+import com.zte.gateway.mcp.approval.PendingApproval;
+import com.zte.gateway.mcp.approval.PendingApprovalService;
 import com.zte.gateway.mcp.audit.McpAuditService;
-import com.zte.gateway.mcp.mask.DataMaskingFilter;
 import com.zte.gateway.mcp.model.JsonRpcResponse;
 import com.zte.gateway.mcp.policy.McpPolicyEngine;
 import com.zte.gateway.mcp.policy.PolicyDecision;
@@ -22,7 +23,9 @@ import org.springframework.test.web.reactive.server.WebTestClient;
 import reactor.core.publisher.Flux;
 import reactor.core.publisher.Mono;
 
+import java.time.Instant;
 import java.util.Map;
+import java.util.UUID;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
@@ -40,8 +43,9 @@ import static org.springframework.security.test.web.reactive.server.SecurityMock
  * <p>Verifies that the shared, auto-configured {@code auth-library} SecurityConfig
  * (not a gateway-local one — see ADR-010's rationale for not adding a competing
  * chain) actually gates {@code GET /sse} and {@code POST /message}, and that an
- * authenticated call is now routed through {@link McpPolicyEngine} to either a
- * denial (backend never called) or {@link McpBackendClient} (allow path).
+ * authenticated call is now routed through {@link McpPolicyEngine} to a denial,
+ * a hold ({@link PendingApprovalService}, Stage 1/ADR-019), or {@link
+ * McpForwardService} (allow path).
  * Collaborators are Mockito mocks via {@code @MockBean}, so this runs without
  * Docker/Testcontainers — contrast with {@code McpProxyIT} in {@code src/it},
  * which exercises the same endpoints against a real Keycloak and the real
@@ -85,10 +89,10 @@ class McpProxySecurityWebFluxTest {
     private McpAuditService auditService;
 
     @MockBean
-    private DataMaskingFilter dataMaskingFilter;
+    private McpForwardService forwardService;
 
     @MockBean
-    private McpBackendClient backendClient;
+    private PendingApprovalService pendingApprovalService;
 
     // AdminAuthorizationFilter (ADR-012) and RequestAuditFilter (ADR-013) are both
     // plain WebFilters, so @WebFluxTest's type-based auto-detection pulls them into
@@ -153,7 +157,7 @@ class McpProxySecurityWebFluxTest {
                 .exchange()
                 .expectStatus().isBadRequest();
 
-        verifyNoInteractions(policyEngine, backendClient);
+        verifyNoInteractions(policyEngine, forwardService);
     }
 
     @Test
@@ -169,7 +173,7 @@ class McpProxySecurityWebFluxTest {
                 .exchange()
                 .expectStatus().isAccepted();
 
-        verifyNoInteractions(backendClient);
+        verifyNoInteractions(forwardService);
 
         @SuppressWarnings("unchecked")
         ArgumentCaptor<ServerSentEvent<String>> captor = ArgumentCaptor.forClass(ServerSentEvent.class);
@@ -187,8 +191,7 @@ class McpProxySecurityWebFluxTest {
         when(policyEngine.evaluate(eq("agent-a"), eq("get_deals"), any()))
                 .thenReturn(PolicyDecision.allow());
         JsonRpcResponse backendResponse = JsonRpcResponse.success(7, Map.of("content", "3 deals"));
-        when(backendClient.forward(any())).thenReturn(Mono.just(backendResponse));
-        when(dataMaskingFilter.mask(backendResponse)).thenReturn(backendResponse);
+        when(forwardService.execute(any())).thenReturn(Mono.just(backendResponse));
 
         webTestClient.mutateWith(mockJwt().jwt(jwt -> jwt.claim("azp", "agent-a")))
                 .post().uri("/message?sessionId=session-1")
@@ -197,7 +200,7 @@ class McpProxySecurityWebFluxTest {
                 .exchange()
                 .expectStatus().isAccepted();
 
-        verify(backendClient).forward(any());
+        verify(forwardService).execute(any());
 
         @SuppressWarnings("unchecked")
         ArgumentCaptor<ServerSentEvent<String>> captor = ArgumentCaptor.forClass(ServerSentEvent.class);
@@ -206,6 +209,36 @@ class McpProxySecurityWebFluxTest {
         JsonNode json = readTree(captor.getValue().data());
         assertThat(json.get("id").asInt()).isEqualTo(7);
         assertThat(json.get("result").get("content").asText()).isEqualTo("3 deals");
+    }
+
+    @Test
+    void message_heldByPolicy_persistsApproval_emitsHeldStatus_neverCallsBackend() {
+        when(sessionManager.exists("session-1")).thenReturn(true);
+        when(policyEngine.evaluate(eq("crm-account-health-emea-01"), eq("send_email"), any()))
+                .thenReturn(PolicyDecision.hold("held by test policy"));
+        PendingApproval approval = new PendingApproval(UUID.fromString("11111111-1111-1111-1111-111111111111"),
+                "session-1", "crm-account-health-emea-01", "send_email", "7", "{}", null, "held by test policy",
+                "PENDING", Instant.now(), null, null, null, null, null, null);
+        when(pendingApprovalService.hold(eq("session-1"), eq("crm-account-health-emea-01"), eq("send_email"), any(),
+                eq("held by test policy"), any(), any(), any(), any())).thenReturn(Mono.just(approval));
+
+        webTestClient.mutateWith(mockJwt().jwt(jwt -> jwt.claim("azp", "crm-account-health-emea-01")))
+                .post().uri("/message?sessionId=session-1")
+                .contentType(MediaType.APPLICATION_JSON)
+                .bodyValue(jsonRpcBody(7, "send_email"))
+                .exchange()
+                .expectStatus().isAccepted();
+
+        verifyNoInteractions(forwardService);
+
+        @SuppressWarnings("unchecked")
+        ArgumentCaptor<ServerSentEvent<String>> captor = ArgumentCaptor.forClass(ServerSentEvent.class);
+        verify(sessionManager).emit(eq("session-1"), captor.capture());
+
+        JsonNode json = readTree(captor.getValue().data());
+        assertThat(json.get("id").asInt()).isEqualTo(7);
+        assertThat(json.get("result").get("status").asText()).isEqualTo("held");
+        assertThat(json.get("result").get("approvalId").asText()).isEqualTo("11111111-1111-1111-1111-111111111111");
     }
 
     private String jsonRpcBody(int id, String toolName) {

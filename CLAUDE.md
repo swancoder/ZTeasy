@@ -23,7 +23,7 @@ This file should stay small enough to read in one pass.
 3. **ADR Requirement:** Every structural or architectural decision must be documented in `./docs/adr/ADR-XXX-name.md`. This is where implementation detail, alternatives, and self-critique live — not in this file.
 4. **Prompt History:** Save every major task prompt into `./prompts-hist/NNN_name.txt` (sequential number continuing from the last file in that directory).
 5. **Doc Sync:** After each completed task, update `README.md` (user-facing: quick start, feature how-tos) and `docs/SPECS.md` (technical reference: status table §2, component spec, data model, API reference, roadmap, known risks — whichever sections the change actually touches). Add one line to `CLAUDE.md`'s Stage Index below. Do not copy ADR content into any of these — link to it.
-6. **Git Workflow:** Each completed task must end with a successful test run and a commit to `main`.
+6. **Git Workflow:** Each completed task must end with a successful test run and a commit to `main`. When writing git commit messages, NEVER add any "Co-authored-by:" trailers or mention AI co-authorship under any circumstances.
 
 ## Build & Development Commands
 - **Build Project:** `./gradlew build` (requires `ANTHROPIC_API_KEY` env var for zt-agents, settable via `.env` — see ADR-008; also requires Node.js/npm, which builds the Admin Console — see ADR-012)
@@ -90,5 +90,12 @@ hashes — see `git log`): `docs/SPECS.md` §2. Reasoning/alternatives/self-crit
 | 16 | APIM Inventory Registry — Auto-Discovery + Health Telemetry | [ADR-016](docs/adr/ADR-016-inventory-and-health-registry.md) |
 | 17 | Dynamic Inventory-Driven Routing + Unified Audit Logging + Strict S2S Rules | [ADR-017](docs/adr/ADR-017-dynamic-routing-and-audit.md) |
 | 18 | Smart mTLS Enforcement (server.ssl client-auth: want + MtlsEnforcementWebFilter) | [ADR-018](docs/adr/ADR-018-smart-mtls-enforcement.md) |
+| 19 | HOLD Decision Outcome + Approval Queue (ACAP governance demo, Stage 1) | [ADR-019](docs/adr/ADR-019-hold-decision-and-approval-queue.md) |
+| — | Honest-Deny/Hold Verification (ACAP governance demo, Stage 2) | ADR-019 amendment, see docs/SPECS.md §5.4 |
+| 20 | ACAP Scope Profiles — Argument/Field-Level Policy Tightening (ACAP governance demo, Stage 3) | [ADR-020](docs/adr/ADR-020-acap-scope-profiles.md) |
+| 21 | Governance Dashboard — Per-Agent Activity and Out-of-Policy Feed (ACAP governance demo, Stage 4) | [ADR-021](docs/adr/ADR-021-governance-dashboard.md) |
+| — | CRM Tool-Surface Alignment (ACAP governance demo, Stage 5 — in the sibling `hubspot-mcp` repo, not this one) | see `hubspot-mcp/README.md` |
+| 22 | ACAP Agent Metadata and Usage Thresholds (ACAP governance demo, Stage 6 — final stage) | [ADR-022](docs/adr/ADR-022-acap-agent-metadata-and-thresholds.md) |
+| 23 | `mcpTarget` — Scoping agentMcpToolCalls/agentMcpToolHolds Rules to a Specific MCP Backend | [ADR-023](docs/adr/ADR-023-policy-rule-mcp-target.md) |
 
 **Backlog:** tracked in `docs/SPECS.md` §9 (Roadmap) — not duplicated here.

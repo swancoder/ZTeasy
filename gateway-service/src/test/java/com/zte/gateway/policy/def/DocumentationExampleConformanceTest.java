@@ -7,8 +7,9 @@ import static org.assertj.core.api.Assertions.assertThat;
 
 /**
  * Schema-conformance check for the documentation example (ADR-011 Task 1 AC:
- * "at least one example YAML file is provided demonstrating each of the three
- * policy categories"). Loads {@code docs/examples/zte-policies-example.yaml}
+ * "at least one example YAML file is provided demonstrating each of the
+ * policy categories" — extended from three to four categories by ADR-019's
+ * {@code agentMcpToolHolds}). Loads {@code docs/examples/zte-policies-example.yaml}
  * with the real loader/validator so the doc can't silently drift out of sync
  * with the schema it's meant to illustrate.
  */
@@ -28,5 +29,6 @@ class DocumentationExampleConformanceTest {
         assertThat(doc.users2service()).isNotEmpty();
         assertThat(doc.service2service()).isNotEmpty();
         assertThat(doc.agentMcpToolCalls()).isNotEmpty();
+        assertThat(doc.agentMcpToolHolds()).isNotEmpty();
     }
 }

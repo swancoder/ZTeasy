@@ -1,0 +1,4 @@
+territory: EMEA
+scope:
+  read: []
+  writeAllowed: false

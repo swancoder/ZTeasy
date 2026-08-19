@@ -1,6 +1,6 @@
 # Full annotated example of the ZTE YAML policy schema (ADR-011, IdP URN
-# sources ADR-014/ADR-015), demonstrating all three categories with both
-# ALLOW and DENY rules.
+# sources ADR-014/ADR-015, agentMcpToolHolds ADR-019, mcpTarget ADR-023),
+# demonstrating all four categories with ALLOW, DENY, and HOLD rules.
 #
 # This is documentation, not the file the gateway loads at runtime — the
 # running default is gateway-service/src/main/resources/zte-policies.yaml,
@@ -70,6 +70,8 @@ service2service:
 # ── agentMcpToolCalls: MCP agent identity (JWT azp) → MCP tool name ──
 # pathPattern/methods are not used by this category (left absent/null).
 agentMcpToolCalls:
+  # Name-shape safety nets: deliberately no mcpTarget (ADR-023) — this
+  # protection should hold regardless of which MCP backend is configured.
   - id: mcp-deny-delete-tools
     effect: DENY
     source: "*"
@@ -82,17 +84,39 @@ agentMcpToolCalls:
     target: export_all_data
     priority: 100
 
+  # mcpTarget (ADR-023): matched against the configured mcp-backend.name —
+  # these grants name real tools with real backend-specific semantics, so
+  # they must stop applying if the gateway is ever repointed at a different
+  # backend, rather than silently keep matching a same-named but different tool.
   - id: mcp-allow-agent-a-get-deals
     effect: ALLOW
     source: "client:agent-a"
     target: get_deals
     priority: 0
+    mcpTarget: hubspot-mcp
 
   - id: mcp-allow-agent-b-update-deal-stage
     effect: ALLOW
     source: "client:agent-b"
     target: update_deal_stage
     priority: 0
+    mcpTarget: hubspot-mcp
+
+# ── agentMcpToolHolds (ADR-019): tool calls routed to a human even when ──
+# agentMcpToolCalls above would ALLOW them — the demo's 🟡 outcome. Checked
+# only *after* agentMcpToolCalls resolves to ALLOW; can only tighten a call
+# into a HOLD, never loosen a DENY. Matched via PolicyMatcher.matchAny, not
+# evaluate() — effect is unused here (kept ALLOW by convention; see
+# docs/policy-schema.md's "Hold rules" section for why this isn't a third
+# RuleEffect value shared with users2service/service2service). mcpTarget
+# (ADR-023) scoped the same way as the grants above.
+agentMcpToolHolds:
+  - id: mcp-hold-agent-a-get-deals
+    effect: ALLOW
+    source: "client:agent-a"
+    target: get_deals
+    priority: 0
+    mcpTarget: hubspot-mcp
 
 # Anything not matched by an explicit rule above resolves to
 # zte.policy.default-effect (application.yml — default DENY).

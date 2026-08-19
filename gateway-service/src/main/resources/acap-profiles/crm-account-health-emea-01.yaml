@@ -1,0 +1,50 @@
+# ACAP scope profile (Stage 3, ADR-020; agent metadata/thresholds Stage 6,
+# ADR-022) for the demo's Account-Health Assistant agent — a simplified
+# subset of examples-from-vlad/acap-crm-account-health.json (client "Nordwind
+# Components"). See docs/policy-schema.md's "ACAP scope profiles" section for
+# the full shape and how this interacts with agentMcpToolCalls/
+# agentMcpToolHolds (ADR-011/ADR-019).
+#
+# Read-only, EMEA-scoped: read_contacts(EMEA)/read_deals(EMEA)/read_activities(EMEA) with
+# only the listed fields are the ONLY calls this tightens down to nothing (i.e. leaves the
+# coarse zte-policies.yaml decision — ALLOW or, for send_email/draft_followup, HOLD — as-is).
+# Anything outside that: wrong territory, a disallowed field, any update_*/export_* tool —
+# is denied here regardless of what zte-policies.yaml granted coarsely. draft_followup is
+# additionally capped at 30/day (Stage 6) — the 31st call in a day is escalated from ALLOW
+# to HOLD even though agentMcpToolCalls already grants it and agentMcpToolHolds already
+# holds it unconditionally today (so this threshold has no visible effect yet in THIS demo
+# config — it's here for schema completeness/future use, e.g. if draft_followup's coarse
+# hold rule is ever relaxed to plain ALLOW for a lower-risk variant).
+agentId: crm-account-health-emea-01
+territory: EMEA
+
+# Display-only in the Admin Console's Governance tab (ADR-022) — no enforcement.
+agent:
+  name: Account-Health Assistant
+  client: Nordwind Components
+  owner:
+    name: Sales Operations Lead
+    email: sales-ops@nordwind.example
+  deploymentDate: "2026-08-01"
+  reauthDue: "2026-02-01"
+
+# Display-only — no enforcement.
+risk:
+  euAiActClass: limited
+  internalTier: 2
+
+scope:
+  read:
+    - resource: contacts
+      fields: [name, company, lifecycle_stage, last_activity, deal_ids]
+    - resource: deals
+      fields: [name, stage, amount, close_date, risk_flag]
+    - resource: activities
+      fields: []   # no field restriction on activities
+  writeAllowed: false
+
+thresholds:
+  - metric: followup_drafts_per_day
+    toolName: draft_followup
+    limit: 30
+    onExceed: hold

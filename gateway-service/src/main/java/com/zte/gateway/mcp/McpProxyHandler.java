@@ -2,9 +2,9 @@ package com.zte.gateway.mcp;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.zte.gateway.audit.ClientIpResolver;
+import com.zte.gateway.mcp.approval.PendingApprovalService;
 import com.zte.gateway.mcp.audit.McpAuditEvent;
 import com.zte.gateway.mcp.audit.McpAuditService;
-import com.zte.gateway.mcp.mask.DataMaskingFilter;
 import com.zte.gateway.mcp.model.JsonRpcRequest;
 import com.zte.gateway.mcp.model.JsonRpcResponse;
 import com.zte.gateway.mcp.policy.McpPolicyEngine;
@@ -35,14 +35,18 @@ import java.util.UUID;
  * client's cue for where to POST subsequent JSON-RPC calls (this is the standard
  * MCP HTTP+SSE handshake, not a ZTeasy-specific invention). Every
  * {@code POST /message?sessionId=<id>} is evaluated by {@link McpPolicyEngine} and
- * its result — deny or (masked) backend response — is injected back into that same
- * SSE stream; the POST itself only ever returns 202 Accepted, since the real
- * answer travels over SSE.
+ * its result — deny, hold, or (masked) backend response — is injected back into
+ * that same SSE stream; the POST itself only ever returns 202 Accepted, since the
+ * real answer travels over SSE.
  *
  * <p><b>Stage 11 (ADR-011):</b> re-enables policy/backend enforcement, superseding
  * Stage 9 (ADR-010)'s dead-end stub — {@code McpPolicyEngine} is now
  * {@code YamlMcpPolicyEngine}, keyed on the per-agent grants in the YAML policy
  * document rather than a placeholder deny-list.
+ *
+ * <p><b>Stage 1 (ADR-019):</b> a HOLD decision doesn't forward to the backend at
+ * all — {@link PendingApprovalService} parks the call for a human decision;
+ * see {@link #process}.
  */
 @Component
 public class McpProxyHandler {
@@ -53,21 +57,21 @@ public class McpProxyHandler {
     private final McpSessionManager sessionManager;
     private final McpPolicyEngine policyEngine;
     private final McpAuditService auditService;
-    private final DataMaskingFilter dataMaskingFilter;
-    private final McpBackendClient backendClient;
+    private final McpForwardService forwardService;
+    private final PendingApprovalService pendingApprovalService;
     private final ObjectMapper objectMapper;
 
     public McpProxyHandler(McpSessionManager sessionManager,
                             McpPolicyEngine policyEngine,
                             McpAuditService auditService,
-                            DataMaskingFilter dataMaskingFilter,
-                            McpBackendClient backendClient,
+                            McpForwardService forwardService,
+                            PendingApprovalService pendingApprovalService,
                             ObjectMapper objectMapper) {
         this.sessionManager = sessionManager;
         this.policyEngine = policyEngine;
         this.auditService = auditService;
-        this.dataMaskingFilter = dataMaskingFilter;
-        this.backendClient = backendClient;
+        this.forwardService = forwardService;
+        this.pendingApprovalService = pendingApprovalService;
         this.objectMapper = objectMapper;
     }
 
@@ -119,9 +123,9 @@ public class McpProxyHandler {
     }
 
     /**
-     * Evaluates policy for one JSON-RPC call and emits the outcome (deny or
-     * backend result) into the caller's SSE session. Never surfaces an error to
-     * the {@code POST /message} response itself — everything travels via SSE.
+     * Evaluates policy for one JSON-RPC call and emits the outcome (deny, held,
+     * or backend result) into the caller's SSE session. Never surfaces an error
+     * to the {@code POST /message} response itself — everything travels via SSE.
      */
     private Mono<Void> process(String sessionId, CallerIdentity identity, HttpAuditContext httpContext,
                                 JsonRpcRequest rpc) {
@@ -130,23 +134,40 @@ public class McpProxyHandler {
         String argumentsJson = serializeArguments(rpc.toolArguments());
         PolicyDecision decision = policyEngine.evaluate(agentId, toolName, rpc.toolArguments());
 
-        if (!decision.allowed()) {
-            log.warn("MCP DENY sessionId={} agentId={} tool={} reason={}",
-                    sessionId, agentId, toolName, decision.reason());
-            auditService.record(new McpAuditEvent(PROCESS_ID, agentId, toolName, "DENIED", Instant.now(),
-                    sessionId, decision.reason(), httpContext.traceId(), httpContext.clientIp(),
-                    httpContext.userAgent(), identity.displayIdentity(), argumentsJson));
-            return emit(sessionId, JsonRpcResponse.denied(rpc.id(), decision.reason()));
-        }
-
-        log.debug("MCP ALLOW sessionId={} agentId={} tool={}", sessionId, agentId, toolName);
-        return backendClient.forward(rpc)
-                .map(dataMaskingFilter::mask)
-                .doOnNext(resp -> auditService.record(
-                        new McpAuditEvent(PROCESS_ID, agentId, toolName, "ALLOWED", Instant.now(), sessionId, null,
+        return switch (decision.outcome()) {
+            case DENY -> {
+                log.warn("MCP DENY sessionId={} agentId={} tool={} reason={}",
+                        sessionId, agentId, toolName, decision.reason());
+                auditService.record(new McpAuditEvent(PROCESS_ID, agentId, toolName, "DENIED", Instant.now(),
+                        sessionId, decision.reason(), httpContext.traceId(), httpContext.clientIp(),
+                        httpContext.userAgent(), identity.displayIdentity(), argumentsJson));
+                yield emit(sessionId, JsonRpcResponse.denied(rpc.id(), decision.reason()));
+            }
+            case HOLD -> {
+                log.info("MCP HOLD sessionId={} agentId={} tool={} reason={}",
+                        sessionId, agentId, toolName, decision.reason());
+                yield pendingApprovalService.hold(sessionId, agentId, toolName, rpc, decision.reason(),
                                 httpContext.traceId(), httpContext.clientIp(), httpContext.userAgent(),
-                                identity.displayIdentity(), argumentsJson)))
-                .flatMap(resp -> emit(sessionId, resp));
+                                identity.displayIdentity())
+                        .flatMap(approval -> {
+                            auditService.record(new McpAuditEvent(PROCESS_ID, agentId, toolName, "HELD",
+                                    Instant.now(), sessionId, decision.reason(), httpContext.traceId(),
+                                    httpContext.clientIp(), httpContext.userAgent(), identity.displayIdentity(),
+                                    argumentsJson));
+                            return emit(sessionId,
+                                    JsonRpcResponse.held(rpc.id(), approval.id().toString(), decision.reason()));
+                        });
+            }
+            case ALLOW -> {
+                log.debug("MCP ALLOW sessionId={} agentId={} tool={}", sessionId, agentId, toolName);
+                yield forwardService.execute(rpc)
+                        .doOnNext(resp -> auditService.record(
+                                new McpAuditEvent(PROCESS_ID, agentId, toolName, "ALLOWED", Instant.now(), sessionId,
+                                        null, httpContext.traceId(), httpContext.clientIp(), httpContext.userAgent(),
+                                        identity.displayIdentity(), argumentsJson)))
+                        .flatMap(resp -> emit(sessionId, resp));
+            }
+        };
     }
 
     /**

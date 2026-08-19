@@ -14,8 +14,9 @@ import reactor.core.publisher.Mono;
 
 /**
  * Purely observational check (ADR-014; extended to {@code service2service}/
- * {@code agentMcpToolCalls} by ADR-015): for every rule in all three
- * categories whose {@code source} parses to a concrete {@link IdentityUrn}
+ * {@code agentMcpToolCalls} by ADR-015, {@code agentMcpToolHolds} by
+ * ADR-019): for every rule in all four categories whose {@code source}
+ * parses to a concrete {@link IdentityUrn}
  * (wildcard sources are skipped — not checkable against a fixed identity
  * list), warns via SLF4J when no matching identity exists in the local
  * {@code idp_identities} cache. {@code users2service} sources default a
@@ -65,6 +66,8 @@ public class OrphanedRuleChecker {
                         Flux.fromIterable(document.service2service())
                                 .flatMap(rule -> checkRule(rule, IdentityType.CLIENT)),
                         Flux.fromIterable(document.agentMcpToolCalls())
+                                .flatMap(rule -> checkRule(rule, IdentityType.CLIENT)),
+                        Flux.fromIterable(document.agentMcpToolHolds())
                                 .flatMap(rule -> checkRule(rule, IdentityType.CLIENT)))
                 .subscribe(v -> {}, ex -> log.error("[ZTE-ORPHANED-RULE-CHECK] check stream failed", ex));
     }

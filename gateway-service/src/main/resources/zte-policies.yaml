@@ -1,16 +1,20 @@
 # ZTE YAML policy definitions (Stage 10 / ADR-011, Stage 11 / ADR-012,
 # Stage 14 / ADR-015 — client:<clientId> URN sources for service2service/
-# agentMcpToolCalls).
+# agentMcpToolCalls, Stage 1 / ADR-019 — agentMcpToolHolds, ADR-023 —
+# mcpTarget).
 #
-# Schema: docs/policy-schema.md — full annotated example covering all three
+# Schema: docs/policy-schema.md — full annotated example covering all four
 # categories: docs/examples/zte-policies-example.yaml
 #
 # This is the file the running gateway actually loads by default
 # (zte.policy.file, classpath:zte-policies.yaml). As of ADR-012, YAML is the
-# sole source of truth for all three categories — there is no DB fallback for
+# sole source of truth for all four categories — there is no DB fallback for
 # users2service anymore (the access_policies table/PolicyService were
 # retired). No YAML match => deny for users2service/service2service, and
 # zte.policy.default-effect for agentMcpToolCalls, same as before.
+# agentMcpToolCalls/agentMcpToolHolds can be further tightened per-agent by
+# an ACAP scope profile (Stage 3 / ADR-020, gateway-service/src/main/resources/acap-profiles/)
+# — additive, never able to loosen what's granted here.
 schemaVersion: 1
 
 users2service:
@@ -53,6 +57,10 @@ service2service:
 agentMcpToolCalls:
   # Destructive/bulk-export shaped tool names are denied for every agent,
   # regardless of any ALLOW rule below — DENY always wins (see PolicyMatcher).
+  # Deliberately NOT scoped to mcpTarget (ADR-023): this is a name-shape
+  # safety net that should hold regardless of which MCP backend the gateway
+  # is pointed at — a rule you want to keep protecting even if the backend
+  # changes, unlike the specific per-agent grants below.
   - id: mcp-deny-delete-tools
     effect: DENY
     source: "*"
@@ -72,14 +80,89 @@ agentMcpToolCalls:
   # Explicit per-agent grants — everything else falls through to
   # zte.policy.default-effect (DENY). client:<clientId> URN form (ADR-015) —
   # validated against idp_identities (synced OIDC clients) on load/reload,
-  # same as users2service sources already are.
+  # same as users2service sources already are. mcpTarget: hubspot-mcp
+  # (ADR-023, matched against mcp-backend.name) on every grant below —
+  # unlike the safety nets above, these name real tools with real
+  # hubspot-mcp-specific semantics; if the gateway is ever repointed at a
+  # different backend that happens to expose a same-named but different
+  # tool, these grants must stop applying rather than silently keep firing.
   - id: mcp-allow-agent-a-get-deals
     effect: ALLOW
     source: "client:agent-a"
     target: get_deals
     priority: 10
+    mcpTarget: hubspot-mcp
   - id: mcp-allow-agent-b-update-deal-stage
     effect: ALLOW
     source: "client:agent-b"
     target: update_deal_stage
     priority: 10
+    mcpTarget: hubspot-mcp
+
+  # Account-Health Assistant (ACAP demo — Nordwind Components,
+  # docs/adr/ADR-019-hold-decision-and-approval-queue.md,
+  # docs/adr/ADR-020-acap-scope-profiles.md). This coarse layer only grants
+  # by tool name — the argument/field-level tightening (territory, allowed
+  # fields, read-only) comes from this agent's ACAP profile
+  # (gateway-service/src/main/resources/acap-profiles/crm-account-health-emea-01.yaml),
+  # applied on top of whatever's granted here (ADR-020). Every read_* grant
+  # below is coarse-only; a call with the wrong territory or a disallowed
+  # field is still denied, just by the ACAP layer instead of this one.
+  - id: mcp-allow-crm-account-health-read-contacts
+    effect: ALLOW
+    source: "client:crm-account-health-emea-01"
+    target: read_contacts
+    priority: 10
+    mcpTarget: hubspot-mcp
+  - id: mcp-allow-crm-account-health-read-deals
+    effect: ALLOW
+    source: "client:crm-account-health-emea-01"
+    target: read_deals
+    priority: 10
+    mcpTarget: hubspot-mcp
+  - id: mcp-allow-crm-account-health-read-activities
+    effect: ALLOW
+    source: "client:crm-account-health-emea-01"
+    target: read_activities
+    priority: 10
+    mcpTarget: hubspot-mcp
+  - id: mcp-allow-crm-account-health-send-email
+    effect: ALLOW
+    source: "client:crm-account-health-emea-01"
+    target: send_email
+    priority: 10
+    mcpTarget: hubspot-mcp
+  - id: mcp-allow-crm-account-health-draft-followup
+    effect: ALLOW
+    source: "client:crm-account-health-emea-01"
+    target: draft_followup
+    priority: 10
+    mcpTarget: hubspot-mcp
+  # Deliberately granted coarsely (ADR-020) even though the agent's ACAP
+  # profile is read-only and will always deny it — demonstrates the RED
+  # point from the demo script ("update_deal -> write.deny") as a genuine
+  # two-layer interaction, not just an absence of any grant at all.
+  - id: mcp-allow-crm-account-health-update-deal
+    effect: ALLOW
+    source: "client:crm-account-health-emea-01"
+    target: update_deal
+    priority: 10
+    mcpTarget: hubspot-mcp
+
+# Stage 1 (ADR-019): tool calls that must be routed to a human even when
+# agentMcpToolCalls above would ALLOW them — the demo's 🟡 outcome. A
+# separate list, not a third agentMcpToolCalls effect (see PolicyMatcher.matchAny's
+# Javadoc for why). effect is unused here (matched via matchAny, not
+# evaluate) but kept ALLOW by convention for readability. mcpTarget
+# (ADR-023) scoped the same way as the grants above.
+agentMcpToolHolds:
+  - id: mcp-hold-crm-account-health-send-email
+    effect: ALLOW
+    source: "client:crm-account-health-emea-01"
+    target: send_email
+    mcpTarget: hubspot-mcp
+  - id: mcp-hold-crm-account-health-draft-followup
+    effect: ALLOW
+    source: "client:crm-account-health-emea-01"
+    target: draft_followup
+    mcpTarget: hubspot-mcp

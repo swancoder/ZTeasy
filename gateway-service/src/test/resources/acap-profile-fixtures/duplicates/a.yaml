@@ -1,0 +1,5 @@
+agentId: dup-agent
+territory: EMEA
+scope:
+  read: []
+  writeAllowed: false

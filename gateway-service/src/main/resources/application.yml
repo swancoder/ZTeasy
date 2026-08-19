@@ -121,6 +121,12 @@ zte:
     default-effect: ${ZTE_POLICY_DEFAULT_EFFECT:DENY}
     user-client-id: ${ZTE_POLICY_USER_CLIENT_ID:zte-gateway}
 
+  # ── ACAP per-agent scope profiles (Stage 3 / ADR-020) — additive, opt-in ──
+  # tightening on top of agentMcpToolCalls/agentMcpToolHolds above. Unlike
+  # policy.file, a location matching zero files is normal, not an error.
+  acap:
+    profiles-location: ${ZTE_ACAP_PROFILES_LOCATION:classpath:acap-profiles/*.yaml}
+
   # ── IdP identity sync (Stage 13 / ADR-014) ──
   idp:
     provider: ${ZTE_IDP_PROVIDER:keycloak}

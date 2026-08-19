@@ -46,15 +46,24 @@ interface Category {
   // CLIENT for service2service/agentMcpToolCalls (ADR-015), since every rule
   // in those two categories predates URN sources and was already a client id.
   defaultSourceType: IdentityTypeName
+  // agentMcpToolHolds rows' `effect` field is unused (kept ALLOW by YAML
+  // convention — see PolicyDocument's Javadoc) since matching doesn't go
+  // through evaluate()'s ALLOW/DENY precedence at all (ADR-019). Showing the
+  // literal field there would read as "this rule ALLOWs," which is backwards
+  // for a category that exists to hold, not allow — Stage 2's "honest, not
+  // just technically-correct" pass caught this. Set to override every row's
+  // displayed effect regardless of the JSON field.
+  effectOverride?: 'HOLD'
 }
 
 const CATEGORIES: Category[] = [
   { key: 'users2service', title: 'User → Service', description: 'Human user (realm role) → gateway REST service', defaultSourceType: 'ROLE' },
   { key: 'service2service', title: 'Service → Service', description: 'Calling service/agent (JWT azp) → gateway REST service', defaultSourceType: 'CLIENT' },
   { key: 'agentMcpToolCalls', title: 'Agent → MCP Tool', description: 'MCP agent (JWT azp) → MCP tool name', defaultSourceType: 'CLIENT' },
+  { key: 'agentMcpToolHolds', title: 'Agent → MCP Tool (Hold)', description: 'MCP tool calls routed to a human for approval, even when Agent → MCP Tool above would ALLOW them (Stage 1, ADR-019)', defaultSourceType: 'CLIENT', effectOverride: 'HOLD' },
 ]
 
-function RuleTable({ rules, identitySet, defaultSourceType }: { rules: PolicyRule[]; identitySet?: Set<string>; defaultSourceType: IdentityTypeName }) {
+function RuleTable({ rules, identitySet, defaultSourceType, effectOverride }: { rules: PolicyRule[]; identitySet?: Set<string>; defaultSourceType: IdentityTypeName; effectOverride?: 'HOLD' }) {
   if (rules.length === 0) {
     return (
       <Typography color="text.secondary" sx={{ p: 2 }}>
@@ -92,8 +101,8 @@ function RuleTable({ rules, identitySet, defaultSourceType }: { rules: PolicyRul
                 <TableCell>{rule.id}</TableCell>
                 <TableCell>
                   <Chip
-                    label={rule.effect}
-                    color={rule.effect === 'DENY' ? 'error' : 'success'}
+                    label={effectOverride ?? rule.effect}
+                    color={effectOverride === 'HOLD' ? 'warning' : rule.effect === 'DENY' ? 'error' : 'success'}
                     size="small"
                   />
                 </TableCell>
@@ -105,7 +114,7 @@ function RuleTable({ rules, identitySet, defaultSourceType }: { rules: PolicyRul
                     </Tooltip>
                   )}
                 </TableCell>
-                <TableCell>{rule.target}</TableCell>
+                <TableCell>{rule.mcpTarget ? `${rule.mcpTarget}:${rule.target}` : rule.target}</TableCell>
                 <TableCell>{rule.pathPattern ?? '—'}</TableCell>
                 <TableCell>{rule.methods ?? '—'}</TableCell>
                 <TableCell>{rule.priority}</TableCell>
@@ -228,7 +237,12 @@ export default function PolicyDashboard({ accessToken }: Props) {
                 </Box>
               </AccordionSummary>
               <AccordionDetails sx={{ p: 0 }}>
-                <RuleTable rules={rules} identitySet={identitySet} defaultSourceType={category.defaultSourceType} />
+                <RuleTable
+                  rules={rules}
+                  identitySet={identitySet}
+                  defaultSourceType={category.defaultSourceType}
+                  effectOverride={category.effectOverride}
+                />
               </AccordionDetails>
             </Accordion>
           )

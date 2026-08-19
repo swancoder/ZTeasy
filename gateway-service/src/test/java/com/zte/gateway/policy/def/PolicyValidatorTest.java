@@ -100,4 +100,32 @@ class PolicyValidatorTest {
         assertThat(result.isValid()).isFalse();
         assertThat(result.errors()).anyMatch(e -> e.contains("methods"));
     }
+
+    /** ADR-023: same source/target scoped to *different* backends is a legitimate, non-duplicate pair. */
+    @Test
+    void sameSourceAndTarget_differentMcpTarget_isNotFlaggedAsDuplicateOrConflicting() {
+        PolicyRule allowOnHubspot = new PolicyRule("a1", RuleEffect.ALLOW, "client:agent-x", "get_deals",
+                null, null, 0, "hubspot-mcp");
+        PolicyRule denyOnSalesforce = new PolicyRule("d1", RuleEffect.DENY, "client:agent-x", "get_deals",
+                null, null, 0, "salesforce-mcp");
+        PolicyDocument doc = new PolicyDocument(1, List.of(), List.of(), List.of(allowOnHubspot, denyOnSalesforce));
+
+        PolicyValidationResult result = validator.validate(doc);
+
+        assertThat(result.isValid()).isTrue();
+        assertThat(result.warnings()).isEmpty();
+    }
+
+    /** Same source/target/effect and the *same* mcpTarget is still a real duplicate. */
+    @Test
+    void sameSourceTargetAndMcpTarget_sameEffect_isStillRejectedAsDuplicate() {
+        PolicyRule a = new PolicyRule("a1", RuleEffect.ALLOW, "client:agent-x", "get_deals", null, null, 0, "hubspot-mcp");
+        PolicyRule b = new PolicyRule("a2", RuleEffect.ALLOW, "client:agent-x", "get_deals", null, null, 0, "hubspot-mcp");
+        PolicyDocument doc = new PolicyDocument(1, List.of(), List.of(), List.of(a, b));
+
+        PolicyValidationResult result = validator.validate(doc);
+
+        assertThat(result.isValid()).isFalse();
+        assertThat(result.errors()).anyMatch(e -> e.contains("duplicate rule"));
+    }
 }
