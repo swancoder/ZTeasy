@@ -14,8 +14,9 @@ import Identities from './Identities'
 import Inventory from './Inventory'
 import Approvals from './Approvals'
 import Governance from './Governance'
+import Documentation from './Documentation'
 
-type View = 'policies' | 'audit' | 'identities' | 'inventory' | 'approvals' | 'governance'
+type View = 'policies' | 'audit' | 'identities' | 'inventory' | 'approvals' | 'governance' | 'documentation'
 
 export default function App() {
   const auth = useAuth()
@@ -87,6 +88,7 @@ export default function App() {
           <Tab value="inventory" label="Registry" />
           <Tab value="approvals" label="Approvals" />
           <Tab value="governance" label="Governance" />
+          <Tab value="documentation" label="Documentation" />
         </Tabs>
       </AppBar>
       {view === 'policies' && <PolicyDashboard accessToken={accessToken} />}
@@ -95,6 +97,7 @@ export default function App() {
       {view === 'inventory' && <Inventory accessToken={accessToken} />}
       {view === 'approvals' && <Approvals accessToken={accessToken} />}
       {view === 'governance' && <Governance accessToken={accessToken} />}
+      {view === 'documentation' && <Documentation />}
     </Box>
   )
 }

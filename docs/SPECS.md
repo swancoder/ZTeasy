@@ -65,7 +65,8 @@ auditable — the opposite of a mesh's "hide it in the sidecar" approach. See
 | 23 | ACAP agent metadata + usage thresholds (ACAP demo Stage 6 of 6, final stage): `AcapProfile.agent`/`risk` (display-only, Admin Console "Governance" tab's new ACAP Profiles section), `thresholds` + `AcapThresholdTracker` (in-memory, daily-reset per-agent-per-metric counter that can escalate ALLOW to HOLD) | [022](adr/ADR-022-acap-agent-metadata-and-thresholds.md) |
 | 24 | `mcpTarget` — scopes `agentMcpToolCalls`/`agentMcpToolHolds` rules to a specific MCP backend (matched against `mcp-backend.name`), so a rule authored against one backend's tool semantics can't silently keep matching if the gateway is repointed at a different one | [023](adr/ADR-023-policy-rule-mcp-target.md) |
 | — | Internal engineering notes (`CLAUDE.md`, `prompts-hist/`) untracked from the public repo — kept and maintained locally, gitignored; note that pre-existing git history still contains them | [024](adr/ADR-024-untrack-internal-engineering-notes.md) |
-| 25+ | Backlog (rate limiting, ABAC…) | see §9 |
+| 25 | Gateway OpenAPI documentation: `springdoc-openapi` on `gateway-service` itself (`/v3/api-docs`, `/swagger-ui.html`, both `permitAll` via `ApiDocsSecurityConfig`), Admin Console "Documentation" tab rendering the spec via the existing `swagger-ui-react` dependency (`SchemaDrawer.tsx`'s pattern reused, not duplicated) | [025](adr/ADR-025-gateway-openapi-documentation.md) |
+| 26+ | Backlog (rate limiting, ABAC…) | see §9 |
 
 **Testing:** `./gradlew test` (unit — every package below has direct
 coverage for its pure decision logic; I/O-calling code that has no
@@ -653,6 +654,8 @@ target_id, relation_type)`.
 | `/api/v1/admin/governance/out-of-policy` | GET | JWT + `ADMIN` | gateway | Latest 50 MCP-agent denials, newest first (ADR-021) |
 | `/api/v1/admin/governance/report` | GET | JWT + `ADMIN` | gateway | Combined JSON export of the above two (`?hours=`) (ADR-021) |
 | `/admin/**` | GET | none (SPA handles its own login) | gateway | Admin Console static bundle |
+| `/v3/api-docs` | GET | none (`ApiDocsSecurityConfig`, ADR-025) | gateway | OpenAPI spec, auto-generated from every `@RestController`; feeds Admin Console "Documentation" tab |
+| `/swagger-ui.html`, `/swagger-ui/**` | GET | none (`ApiDocsSecurityConfig`, ADR-025) | gateway | springdoc's own bundled standalone Swagger UI |
 | `/sse` | GET | JWT + client cert | gateway (MCP proxy) | Opens an MCP session; SSE stream |
 | `/message?sessionId=<id>` | POST | JWT + client cert | gateway (MCP proxy) | JSON-RPC `tools/call`; result via SSE |
 | `/api/v1/service-a/hello` | GET | JWT + YAML policy + client cert | service-a | Demo endpoint, calls service-b |
@@ -885,6 +888,7 @@ automatically instead of needing its own `WebFilter` (ADR-012).
 | [022](adr/ADR-022-acap-agent-metadata-and-thresholds.md) | ACAP Agent Metadata and Usage Thresholds |
 | [023](adr/ADR-023-policy-rule-mcp-target.md) | `mcpTarget` — Scoping agentMcpToolCalls/agentMcpToolHolds Rules to a Specific MCP Backend |
 | [024](adr/ADR-024-untrack-internal-engineering-notes.md) | Untracking Internal Engineering Notes (`CLAUDE.md`, `prompts-hist/`) from the Public Repo |
+| [025](adr/ADR-025-gateway-openapi-documentation.md) | OpenAPI Documentation for the Gateway's Own API + Admin Console "Documentation" Tab |
 
 ---
 

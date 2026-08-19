@@ -81,6 +81,12 @@ dependencies {
     // OBO token creation — JJWT (api on compile path; impl+jackson at runtime via auth-library)
     implementation(libs.jjwt.api)
 
+    // OpenAPI/Swagger docs for the gateway's own API (Stage 25 / ADR-025).
+    // Same artifact+version already used by service-a/service-b since ADR-016's
+    // amendment (there, to make their own /v3/api-docs discoverable by this
+    // gateway's Inventory auto-discovery — here, for the gateway's own API).
+    implementation(libs.springdoc.openapi.webflux.ui)
+
     // Unit test
     testImplementation(libs.spring.test)
     testImplementation(libs.spring.security.test)

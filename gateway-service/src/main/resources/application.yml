@@ -156,6 +156,8 @@ zte:
       - /api/v1/internal/  # zt-agents/ops internal endpoints — network-perimeter
                             # tooling traffic, not proxied-service traffic
       - /actuator/         # health checks — same class of noise
+      - /v3/api-docs       # springdoc's self-served OpenAPI spec + bundled Swagger UI
+      - /swagger-ui        # (Stage 25 / ADR-025) — same class of noise as /admin/
       - /sse               # MCP proxy (ADR-017 unification) — LoggingMcpAuditService
       - /message           # already writes one enriched request_logs row per tool call
                             # (HTTP context + MCP semantics together); this filter's own
