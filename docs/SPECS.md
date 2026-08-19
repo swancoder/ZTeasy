@@ -7,8 +7,9 @@ policy engine and one audit trail.
 This document describes the system **as it currently behaves** — what
 exists, how it fits together, what's configurable, what's tested, and what's
 left. It deliberately does not re-narrate *how* each decision was reached or
-*how* each bug was found — that's what the ADRs and `prompts-hist/` are for
-(§11 links every one). If you're extending this system, read §8
+*how* each bug was found — that's what the ADRs are for (§11 links every
+one; the verbatim task-prompt log, `prompts-hist/`, is maintainer-local and
+no longer in the repo — ADR-024). If you're extending this system, read §8
 ("Conventions for Future Development") first — it distills the patterns this
 codebase has converged on, so new work matches the existing shape instead of
 inventing a parallel one.
@@ -63,6 +64,7 @@ auditable — the opposite of a mesh's "hide it in the sidecar" approach. See
 | 22 | CRM tool-surface alignment (ACAP demo Stage 5 of 6, in the sibling `hubspot-mcp` repo, not this one — no ADR here): `read_contacts`/`read_deals`/`read_activities`/`update_deal`/`export_contacts`/`send_email`/`draft_followup`/`escalate`, matching `demo-case-A-crm-hubspot.pdf`'s exact tool names/arguments, added alongside (not replacing) agent-a/b's existing tools; `agent_simulator.py` extended to run the full 🟢/🔴/🟡 script for `crm-account-health-emea-01` | see `hubspot-mcp/README.md` |
 | 23 | ACAP agent metadata + usage thresholds (ACAP demo Stage 6 of 6, final stage): `AcapProfile.agent`/`risk` (display-only, Admin Console "Governance" tab's new ACAP Profiles section), `thresholds` + `AcapThresholdTracker` (in-memory, daily-reset per-agent-per-metric counter that can escalate ALLOW to HOLD) | [022](adr/ADR-022-acap-agent-metadata-and-thresholds.md) |
 | 24 | `mcpTarget` — scopes `agentMcpToolCalls`/`agentMcpToolHolds` rules to a specific MCP backend (matched against `mcp-backend.name`), so a rule authored against one backend's tool semantics can't silently keep matching if the gateway is repointed at a different one | [023](adr/ADR-023-policy-rule-mcp-target.md) |
+| — | Internal engineering notes (`CLAUDE.md`, `prompts-hist/`) untracked from the public repo — kept and maintained locally, gitignored; note that pre-existing git history still contains them | [024](adr/ADR-024-untrack-internal-engineering-notes.md) |
 | 25+ | Backlog (rate limiting, ABAC…) | see §9 |
 
 **Testing:** `./gradlew test` (unit — every package below has direct
@@ -882,6 +884,7 @@ automatically instead of needing its own `WebFilter` (ADR-012).
 | [021](adr/ADR-021-governance-dashboard.md) | Governance Dashboard — Per-Agent Activity and Out-of-Policy Feed |
 | [022](adr/ADR-022-acap-agent-metadata-and-thresholds.md) | ACAP Agent Metadata and Usage Thresholds |
 | [023](adr/ADR-023-policy-rule-mcp-target.md) | `mcpTarget` — Scoping agentMcpToolCalls/agentMcpToolHolds Rules to a Specific MCP Backend |
+| [024](adr/ADR-024-untrack-internal-engineering-notes.md) | Untracking Internal Engineering Notes (`CLAUDE.md`, `prompts-hist/`) from the Public Repo |
 
 ---
 
@@ -891,5 +894,6 @@ identity, named MCP target, captured call arguments — §5.5/§8) and
 `304269d` (Admin Console polish). Restructured from a chronological
 per-stage narrative into a current-state reference plus §8's conventions —
 the per-stage investigation narrative this replaced still lives in each
-linked ADR and `prompts-hist/`; nothing was deleted, only moved to where it
-belongs. Keep this in sync the same way as README/CLAUDE.md.*
+linked ADR and the maintainer-local `prompts-hist/` (untracked as of
+ADR-024); nothing was deleted, only moved to where it belongs. Keep this in
+sync the same way as README (CLAUDE.md is likewise maintainer-local now).*

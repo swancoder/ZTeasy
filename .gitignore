@@ -85,3 +85,7 @@ certs/*.srl
 
 # ── Claude Code local settings (machine-specific permissions) ──
 .claude/settings.local.json
+
+# ── Internal engineering notes (not for public repo history) ──
+CLAUDE.md
+prompts-hist/

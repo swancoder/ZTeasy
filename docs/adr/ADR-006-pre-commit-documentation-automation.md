@@ -1,6 +1,6 @@
 # ADR-006 — Pre-Commit Documentation Automation via Claude Code Slash Command
 
-**Status:** Accepted
+**Status:** Accepted — amended by [ADR-024](ADR-024-untrack-internal-engineering-notes.md): `CLAUDE.md` and `prompts-hist/` are now untracked/gitignored, so the checklist's updates to those two files are local-only (never staged or committed)
 **Date:** 2026-05-22
 
 ---
