@@ -75,6 +75,40 @@ inside the perimeter; only the MCP bridge has HubSpot egress.
    agent-runner Job; approve/decline the held `send_email` from the
    Approval Center; check the Governance tab counts.
 
+## What the first live run taught us (2026-08-25)
+
+Every one of these is now encoded in `deploy/azure/deploy.sh`; they are the
+non-obvious constraints, not generic advice:
+
+1. **Region**: `westeurope` refused this subscription outright ("not
+   accepting new customers"). `northeurope` works — hence the new default.
+2. **External TCP ingress requires a custom VNET.** A Consumption
+   environment without one rejects the gateway app with
+   `ContainerAppTcpRequiresVnet`, and a VNET cannot be added afterwards —
+   the environment must be created with `--infrastructure-subnet-resource-id`
+   from the start, and that subnet must be **delegated** to
+   `Microsoft.App/environments`.
+3. **Intra-environment addressing uses the app's bare name**
+   (`postgres:5432`, `keycloak:8080`). The `<app>.internal.<domain>` FQDN
+   form times out for TCP-transport apps — this is what silently kept the
+   gateway's Flyway migration hanging on startup.
+4. **`az containerapp create --yaml` is unusable against this RP**: it
+   builds its envelope for a preview api-version the service rejects with a
+   bare `System.Boolean` validation error. Apps needing a volume mount are
+   created with a raw ARM `PUT` (`az rest`, api-version `2024-03-01`).
+5. **Image-before-app**: the Keycloak image (realm baked in) must be pushed
+   before phase 1 creates the app, otherwise the pull fails
+   `MANIFEST_UNKNOWN` — phase 2 rebuilds it against the real origin anyway.
+6. **Keycloak's H2 import is strict**: a client `description` longer than
+   255 chars hard-fails realm import; `make-cloud-realm.py` truncates.
+
+Verified live on the deployed stack: both pages return 200, login through
+the `/auth` proxy issues tokens with the external issuer, the approver API
+answers 200 for a `USER` token, `/sse` without a client certificate is 401,
+the `agent-runner` job replays the full 🟢/🔴/🟡 script from inside the
+perimeter, and a held `send_email` approved from the Approval Center shows
+up in the Governance counts (7 allow / 3 deny / 1 hold for the CRM agent).
+
 ## Known limitations (accepted for the demo)
 
 - Browser shows a self-signed-CA warning (`ZTE-CA`) — no public cert on the

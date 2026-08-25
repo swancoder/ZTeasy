@@ -16,10 +16,33 @@
 set -euo pipefail
 cd "$(dirname "${BASH_SOURCE[0]}")/../.."
 
-AZ="${AZ:-az}"
+AZ_BIN="${AZ:-az}"
+# Retry wrapper: transient local DNS failures were seen killing long-running
+# az polls mid-deploy; every az call goes through this. Exported so the
+# create-app-with-certs.sh / attach-certs-to-job.sh children use it too.
+azr() {
+  local n=0
+  until "$AZ_BIN" "$@"; do
+    n=$((n + 1)); [ "$n" -ge 3 ] && return 1
+    echo "azr: retry $n after failure: az $1 ${2:-}" >&2; sleep 10
+  done
+}
+export AZ_BIN
+export -f azr
+AZ=azr
+export AZ
 RG="${RG:-zteasy-demo-rg}"
-LOC="${LOC:-westeurope}"
-ENV_NAME="${ENV_NAME:-zteasy-env}"
+# westeurope rejected this subscription ("not accepting new customers");
+# northeurope verified working 2026-08-25.
+LOC="${LOC:-northeurope}"
+# The create-app-with-certs.sh / attach-certs-to-job.sh children read these
+export RG ENV_NAME LOC GHCR_USER GHCR_PAT
+# -v2: the first environment was created without a custom VNET, but external
+# TCP ingress (the gateway's mTLS-preserving entry, ADR-027) is only allowed
+# on VNET-backed environments — discovered live; a VNET can't be added to an
+# existing environment.
+ENV_NAME="${ENV_NAME:-zteasy-env-v2}"
+VNET="${VNET:-zteasy-vnet}"
 STORAGE="${STORAGE:-zteasycerts$RANDOM}"
 REGISTRY="ghcr.io"
 IMG="${IMG:-ghcr.io/${GHCR_USER:?set GHCR_USER}}"
@@ -27,11 +50,35 @@ TAG="${TAG:-azure-1}"
 OBO_SECRET="${ZTE_OBO_SECRET:-zte-obo-dev-secret-change-in-production}"
 
 echo "── resource group + environment ──"
-$AZ group create -n "$RG" -l "$LOC" -o none
-$AZ containerapp env create -n "$ENV_NAME" -g "$RG" -l "$LOC" -o none 2>/dev/null || true
+$AZ config set extension.use_dynamic_install=yes_without_prompt -o none 2>/dev/null || true
+$AZ extension add --name containerapp -o none 2>/dev/null || true
+# Fresh subscriptions have no resource providers registered
+for provider in Microsoft.App Microsoft.OperationalInsights Microsoft.Storage Microsoft.Network; do
+  $AZ provider register -n "$provider" --wait -o none
+done
+# RG location is metadata only — keep an existing group wherever it was made
+$AZ group show -n "$RG" -o none 2>/dev/null || $AZ group create -n "$RG" -l "$LOC" -o none
+# Custom VNET — required for the gateway's external TCP ingress (see above)
+if ! $AZ network vnet show -g "$RG" -n "$VNET" -o none 2>/dev/null; then
+  $AZ network vnet create -g "$RG" -n "$VNET" -l "$LOC" \
+      --address-prefix 10.0.0.0/16 \
+      --subnet-name aca-infra --subnet-prefixes 10.0.0.0/23 -o none
+fi
+# A workload-profiles environment requires its infrastructure subnet to be
+# delegated to Microsoft.App/environments (enforced live, 2026-08-25)
+$AZ network vnet subnet update -g "$RG" --vnet-name "$VNET" -n aca-infra \
+    --delegations Microsoft.App/environments -o none
+SUBNET_ID=$($AZ network vnet subnet show -g "$RG" --vnet-name "$VNET" -n aca-infra --query id -o tsv)
+if ! $AZ containerapp env show -n "$ENV_NAME" -g "$RG" -o none 2>/dev/null; then
+  $AZ containerapp env create -n "$ENV_NAME" -g "$RG" -l "$LOC" \
+      --infrastructure-subnet-resource-id "$SUBNET_ID" -o none
+fi
 DOMAIN=$($AZ containerapp env show -n "$ENV_NAME" -g "$RG" --query properties.defaultDomain -o tsv)
-INTERNAL="internal.${DOMAIN}"
 echo "environment domain: $DOMAIN"
+# Intra-environment addressing uses the app's BARE NAME (postgres:5432,
+# keycloak:8080, …), not the `<app>.internal.<domain>` FQDN — the FQDN form
+# times out for TCP-transport apps (verified live 2026-08-25: the gateway's
+# Flyway connect hung until DB_HOST was switched to the bare name).
 
 echo "── certs file share ──"
 EXISTING_STORAGE=$($AZ storage account list -g "$RG" --query "[?starts_with(name,'zteasycerts')].name | [0]" -o tsv)
@@ -70,6 +117,13 @@ $AZ containerapp create -n postgres -g "$RG" --environment "$ENV_NAME" \
     --env-vars POSTGRES_DB=zte_db POSTGRES_USER=zte_user POSTGRES_PASSWORD=zte_pass -o none
 
 echo "── keycloak (phase-1: placeholder origin ok, updated in phase 2) ──"
+# The phase-1 keycloak image must exist in the registry BEFORE the app
+# create pulls it (phase 2 rebuilds it against the real origin anyway).
+if ! docker manifest inspect "$IMG/zteasy-keycloak:$TAG" >/dev/null 2>&1; then
+  python3 deploy/azure/make-cloud-realm.py "https://placeholder.invalid"
+  docker build -f deploy/azure/Dockerfile.keycloak -t "$IMG/zteasy-keycloak:$TAG" .
+  docker push "$IMG/zteasy-keycloak:$TAG"
+fi
 create_tcp_app keycloak "$IMG/zteasy-keycloak:$TAG" 8080 \
     --env-vars KC_DB=dev-file KEYCLOAK_ADMIN=admin KEYCLOAK_ADMIN_PASSWORD=admin \
       KC_HTTP_PORT=8080 KC_HTTP_RELATIVE_PATH=/auth KC_HOSTNAME_STRICT=false \
@@ -80,7 +134,7 @@ echo "── service-b / service-a (mTLS, certs volume via YAML) ──"
 bash deploy/azure/create-app-with-certs.sh service-b "$IMG/zteasy-service-b:$TAG" 8082 \
     "ZTE_CERTS_DIR=/app/certs ZTE_OBO_SECRET=$OBO_SECRET"
 bash deploy/azure/create-app-with-certs.sh service-a "$IMG/zteasy-service-a:$TAG" 8081 \
-    "ZTE_CERTS_DIR=/app/certs ZTE_OBO_SECRET=$OBO_SECRET SERVICE_B_URI=https://service-b.$INTERNAL:8082"
+    "ZTE_CERTS_DIR=/app/certs ZTE_OBO_SECRET=$OBO_SECRET SERVICE_B_URI=https://service-b:8082"
 
 echo "── mcp bridge ──"
 $AZ containerapp create -n mcp-bridge -g "$RG" --environment "$ENV_NAME" \
@@ -95,17 +149,17 @@ if [ -n "${ANTHROPIC_API_KEY:-}" ]; then
   create_tcp_app zt-agents "$IMG/zteasy-zt-agents:$TAG" 8083 \
       --secrets "anthropic-key=$ANTHROPIC_API_KEY" \
       --env-vars "ANTHROPIC_API_KEY=secretref:anthropic-key" \
-        "GATEWAY_INTERNAL_URI=https://gateway.$INTERNAL:8080"
+        "GATEWAY_INTERNAL_URI=https://gateway:8080"
 fi
 
 echo "── gateway (phase-1 create → learn FQDN) ──"
 bash deploy/azure/create-app-with-certs.sh gateway "$IMG/zteasy-gateway:$TAG" 8080 \
-    "DB_HOST=postgres.$INTERNAL DB_PORT=5432 DB_NAME=zte_db DB_USER=zte_user DB_PASSWORD=zte_pass \
-     KEYCLOAK_JWKS_URI=http://keycloak.$INTERNAL:8080/auth/realms/zte-realm/protocol/openid-connect/certs \
-     ZTE_AUTH_PROXY_ENABLED=true ZTE_AUTH_PROXY_URI=http://keycloak.$INTERNAL:8080 \
-     ZTE_IDP_KEYCLOAK_BASE_URI=http://keycloak.$INTERNAL:8080/auth \
-     SERVICE_A_URI=https://service-a.$INTERNAL:8081 SERVICE_B_URI=https://service-b.$INTERNAL:8082 \
-     MCP_BACKEND_URI=http://mcp-bridge.$INTERNAL:9090 \
+    "DB_HOST=postgres DB_PORT=5432 DB_NAME=zte_db DB_USER=zte_user DB_PASSWORD=zte_pass \
+     KEYCLOAK_JWKS_URI=http://keycloak:8080/auth/realms/zte-realm/protocol/openid-connect/certs \
+     ZTE_AUTH_PROXY_ENABLED=true ZTE_AUTH_PROXY_URI=http://keycloak:8080 \
+     ZTE_IDP_KEYCLOAK_BASE_URI=http://keycloak:8080/auth \
+     SERVICE_A_URI=https://service-a:8081 SERVICE_B_URI=https://service-b:8082 \
+     MCP_BACKEND_URI=http://mcp-bridge:9090 \
      ZTE_CERTS_DIR=/app/certs ZTE_OBO_SECRET=$OBO_SECRET \
      KEYCLOAK_ISSUER_URI=https://placeholder.invalid/auth/realms/zte-realm \
      ZTE_UI_OIDC_AUTHORITY=https://placeholder.invalid/auth/realms/zte-realm" \
@@ -138,8 +192,8 @@ $AZ containerapp job create -n agent-runner -g "$RG" --environment "$ENV_NAME" \
     --trigger-type Manual --replica-timeout 600 --replica-retry-limit 0 \
     --image "$IMG/hubspot-mcp-agents:$TAG" --cpu 0.25 --memory 0.5Gi \
     "${REG_ARGS[@]}" \
-    --env-vars "KEYCLOAK_TOKEN_URL=http://keycloak.$INTERNAL:8080/auth/realms/zte-realm/protocol/openid-connect/token" \
-      "GATEWAY_URL=https://gateway.$INTERNAL:8080" \
+    --env-vars "KEYCLOAK_TOKEN_URL=http://keycloak:8080/auth/realms/zte-realm/protocol/openid-connect/token" \
+      "GATEWAY_URL=https://gateway:8080" \
       GATEWAY_CLIENT_CERT=/app/certs/client.pem \
       AGENT_A_CLIENT_ID=agent-a AGENT_A_CLIENT_SECRET=agent-a-secret-dev-only \
       AGENT_B_CLIENT_ID=agent-b AGENT_B_CLIENT_SECRET=agent-b-secret-dev-only \

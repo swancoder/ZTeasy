@@ -91,6 +91,30 @@ pages exposed."
   auth on everything sensitive, and by the flag defaulting off outside the
   cloud profile.
 
+## Amendment (2026-08-25) — what the first live deployment changed
+
+The design above survived contact with Azure; five mechanical constraints
+did not appear in any planning and are now encoded in the scripts (full
+list with symptoms: `docs/azure-deployment-plan.md`, "What the first live
+run taught us"). The two that changed *decisions* rather than just code:
+
+- **The environment must be VNET-backed from creation.** External TCP
+  ingress — the mechanism this ADR chose specifically to preserve inbound
+  mTLS — is only permitted on an environment with a custom VNET whose
+  infrastructure subnet is delegated to `Microsoft.App/environments`, and a
+  VNET cannot be retrofitted. So the "one ACA environment = the perimeter"
+  decision now also implies a VNET + delegated subnet; `ENV_NAME` moved to
+  `zteasy-env-v2` after the first, VNET-less environment had to be
+  destroyed.
+- **Apps address each other by bare name, not by `internal` FQDN.** The
+  plan's internal URLs (`postgres.internal.<domain>`) time out for
+  TCP-transport apps; every internal URI is now `postgres:5432`-shaped.
+  This is invisible in a compose mirror (where bare names always worked),
+  so it only surfaced in the cloud.
+
+Deployed and verified end to end (both SPAs, `/auth` login, approver API,
+cert-less `/sse` → 401, in-perimeter agent job, approve-then-Governance).
+
 ## Consequences
 
 - One public URL serves both human surfaces and the login flow; everything
