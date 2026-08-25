@@ -212,9 +212,22 @@ Reusable security config imported by every service.
 
 ### 5.2 `gateway-service` — REST/Admin path (filter order)
 
+0a. **`InternalEndpointGuardFilter`** (`HIGHEST_PRECEDENCE+40`, ADR-027
+   amendment) — `403` on `/api/v1/internal/**` unless the request carries
+   `X-ZTE-Internal-Key` matching `zte.internal.api-key`. No key configured
+   (the default) = no check, i.e. the pre-existing local-dev behavior.
+   Exists because those endpoints' "only reachable on the Docker bridge"
+   premise (`InternalSecurityConfig`) is false the moment the gateway has a
+   public ingress.
+0b. **`KeycloakAdminSurfaceGuardFilter`** (`HIGHEST_PRECEDENCE+45`, ADR-027
+   amendment, active only with `zte.auth-proxy.enabled`) — `404` on
+   `/auth/admin/**`, `/auth/realms/master/**`, `/auth/metrics`,
+   `/auth/health/**` so the `/auth` reverse proxy (§5.12) publishes only the
+   product realm's login surface.
 1. **`MtlsEnforcementWebFilter`** (`filter`, `HIGHEST_PRECEDENCE+50`, ADR-018)
    — `401` on a missing/empty peer-cert array for `/sse`, `/message`,
-   `/api/v1/**` except `/api/v1/admin/`/`/api/v1/internal/`. Runs before
+   `/api/v1/**` except `/api/v1/admin/`, `/api/v1/internal/` and
+   `/api/v1/approver/` (ADR-026 — browser traffic). Runs before
    Spring Security's own JWT check. Gated by `zte.mtls.enabled`.
 2. Spring Security's `WebFilterChainProxy` (JWT validation, from
    `auth-library`).
@@ -252,7 +265,23 @@ YAML rule via `AdminAuthorizationFilter`, since they're local
   different prefix from the API above) and serves it from
   `classpath:/static/admin/`.
 
-Internal (network-perimeter-only, no JWT, `InternalSecurityConfig`):
+Approver-facing (`approver` package, ADR-026) — same
+`AdminAuthorizationFilter`, whose path check covers both gateway-local API
+prefixes, but gated by the broader `u2s-approver-api-*` rules (`USER` or
+`ADMIN`, never a role-less agent JWT):
+
+- **`ApproverApprovalsController`** — `GET /api/v1/approver/approvals`,
+  `POST .../{id}/approve|reject`, delegating to the same
+  `PendingApprovalService` as the admin controller (one decision path, one
+  audit trail).
+- **`ApproverUiConfig`** — permits and serves `/approver/**` from
+  `classpath:/static/approver/`, plus `/ui-config.js`.
+- **`UiConfigController`** — `GET /ui-config.js`, a one-line snippet
+  defining `window.ZTE_OIDC_AUTHORITY` from `zte.ui.oidc-authority` so both
+  SPAs pick up their OIDC authority at runtime instead of at build time.
+
+Internal (no JWT, `InternalSecurityConfig`; shared-secret-gated by
+`InternalEndpointGuardFilter` above when `zte.internal.api-key` is set):
 **`InternalPolicyController`** (`GET /api/v1/internal/policies`, feeds
 `zt-agents`) and **`PolicyReloadController`** (`POST
 /api/v1/internal/policies/reload`).
@@ -551,6 +580,46 @@ Keycloak login (client `zte-admin-ui`, authorization code + PKCE). Built by
   anchors" (hit live during the ADR-027 deployment, which is why the reuse
   behavior exists). `GATEWAY_EXTRA_SANS` adds SANs to the gateway's server
   cert (used to put the Azure FQDN in it).
+
+### 5.12 `zt-approver-ui` — Approval Center (ADR-026)
+
+A second, independent Vite/React/TS/MUI SPA served at `/approver/`, with its
+own Keycloak client (`zte-approver-ui`, PKCE) and its own login screen — for
+business approvers who shouldn't hold the Admin Console's `ADMIN` role. One
+card per held call (agent, tool, arguments, hold reason) with
+**Approve**/**Decline** and a 15s poll. Reads and writes the same
+`pending_approvals` queue as the Admin Console's Approvals tab (§5.4) via
+`/api/v1/approver/**` (§5.2). `types.ts`/`ConfirmDialog.tsx`/`index.css` are
+copied from `zt-admin-ui`, not shared — the two are separate npm projects,
+both built by `gateway-service`'s Gradle build.
+
+### 5.13 Cloud deployment (ADR-027, ADR-028)
+
+Not part of the runtime, but part of how this system is operated. Full plan,
+topology and the live-run findings: `docs/azure-deployment-plan.md`.
+
+- **`docker-compose.cloud.yml`** — a local mirror of the cloud topology
+  (single external origin on `https://localhost:8443`, Keycloak reverse
+  proxied under `/auth`, everything else internal), used to prove images and
+  configuration before touching Azure.
+- **`zte.auth-proxy.*`** (`KeycloakAuthProxyConfig`) — off by default; when
+  enabled, routes `/auth/**` to Keycloak so one external origin serves the
+  SPAs and their OIDC login. Requires Keycloak to run with
+  `KC_HTTP_RELATIVE_PATH=/auth` and a fixed `KC_HOSTNAME_URL`, so every
+  token's issuer is the external URL regardless of the path it was fetched
+  over.
+- **`deploy/azure/`** — `deploy.sh` (two-phase provisioning),
+  `push-images.sh`, `make-cloud-realm.py` (cloud realm import; accepts
+  several origins), `create-app-with-certs.sh` / `attach-certs-to-job.sh`
+  (raw ARM `PUT`, since the CLI's `--yaml` path is rejected by this
+  resource provider), `bind-custom-domain.sh` (custom domain + managed
+  certificate + issuer repoint), `power.sh` (`stop`/`start`/`status` —
+  deactivates or reactivates every app's revision so the stack can be parked
+  overnight), `Dockerfile.keycloak`.
+- **Two front doors** (ADR-028): `gateway-web` (HTTP ingress, custom domain,
+  Azure managed certificate) for browsers, and `gateway` (TCP passthrough)
+  for agent traffic that must keep its client certificate all the way to the
+  gate. Same image, same database, same Keycloak.
 
 ---
 
@@ -853,6 +922,11 @@ automatically instead of needing its own `WebFilter` (ADR-012).
 | Medium | Shared HMAC secret for OBO tokens | `ZTE_OBO_SECRET` env var; RS256 upgrade deferred (§9) |
 | Medium | Server-side TLS cert rotation requires a restart (no hot-reload API) | 1-year dev certs; production needs cert-manager + rolling restart |
 | Medium | mTLS transport-layer enforcement untested in the IT suite (WireMock has no TLS) | Backlog (§9) |
+| High (prod) | Any `USER`-role account can approve any held call — no APPROVER role, no `route_to` enforcement, no notification, no expiry (ADR-026) | Deliberate for this stage; first item of the agreed next-work list alongside the gateway→MCP-backend hop |
+| Medium | `/api/v1/internal/**` is protected by a shared header secret, not authentication (ADR-027 amendment) | Closes the accidental public exposure a public ingress created; a service account + policy rule is still the real fix (ADR-007) |
+| Medium (cloud) | Two gateway apps run the same background jobs (health polling, IdP sync, route refresh) against shared state, and MCP session state — already in-memory — is now split between them (ADR-028) | Harmless at demo scale since agents only use the TCP app; needs leader election or a jobs-disabled flag before scaling |
+| Medium (cloud) | The custom domain's managed certificate renews only while its CNAME keeps pointing at `gateway-web`; a repoint fails renewal silently | Named in ADR-028; no monitoring on it today |
+| Medium (cloud) | Postgres and Keycloak state is ephemeral (in-container), so any restart — including `power.sh stop`/`start` — wipes the audit trail and approval queue and re-imports the realm | Deliberate demo tradeoff; `DB_HOST` is the seam to a managed database |
 | Medium | MCP session state in-memory, single-instance | Needs sticky routing or a shared store before scaling out |
 | Medium | True-`401` requests aren't captured in `request_logs` | Named; doesn't affect any existing test |
 | Medium | `idp_identities`/`idp_identity_relations` can be stale up to the sync interval (15 min default) | Deliberate tradeoff to keep policy evaluation zero-I/O; manual sync gives an immediate override |
@@ -861,7 +935,8 @@ automatically instead of needing its own `WebFilter` (ADR-012).
 | Medium | Passive `last_successful_call` telemetry depends on an exact name match with no validation at onboarding time | Documented; backlog (§9) |
 | Low | `decision_effect` is status-code-derived, not per-filter provenance | Named; backlog (§9) |
 | Low | `PolicyMatcher` is a full linear scan per category per request | Fine at `<100`-rule MVP scale |
-| Low | `POST /api/v1/internal/policies/reload` has network-perimeter-only auth | Acceptable for MVP (Docker-bridge only); ADR-012 adds an ADMIN-gated counterpart |
+| Low | `POST /api/v1/internal/policies/reload` has network-perimeter-only auth | Acceptable for MVP (Docker-bridge only); ADR-012 adds an ADMIN-gated counterpart, and ADR-027's amendment adds the shared-secret guard for ingress-exposed deployments |
+| Low (cloud) | In Container Apps, `/actuator/health` is served on each service's mTLS API port (`MANAGEMENT_PORT` == API port) because an app publishes only one port — the management port's "no client cert needed" property is lost there | Only affects the cloud topology; the gateway's poll already carries the client cert |
 | Low | `LoggingMcpAuditService`/`RequestLogAuditService` buffers are both unbounded | Backlog (§9) |
 | Low | `OrphanedRuleChecker`'s startup check can race `IdentitySyncService`'s first sync, a transient false-positive | Self-corrects within one sync interval; observational only |
 | Low | No IT test exercises `group:`-scoped `users2service` matching end-to-end | `zte-realm` has no groups defined yet; backlog (§9) |

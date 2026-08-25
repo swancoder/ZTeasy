@@ -126,6 +126,15 @@ zte-lightweight/
 │   ├── AnthropicClient               WebClient wrapper for Anthropic Messages API
 │   └── GatewayClient                 Fetches /api/v1/internal/policies from gateway
 │
+├── approver/              Approval Center API + hosting (see ADR-026)
+│   ├── ApproverApprovalsController  /api/v1/approver/approvals[/{id}/approve|reject]
+│   │                                (USER or ADMIN role; same PendingApprovalService
+│   │                                as the admin tab — one decision path, one audit trail)
+│   ├── ApproverUiConfig             permitAll + static serving for /approver/**
+│   └── UiConfigController           GET /ui-config.js — runtime OIDC authority for both SPAs
+│
+├── zt-approver-ui/        Approval Center SPA (Vite/TS/MUI) — see ADR-026
+│
 ├── zt-admin-ui/           React Admin Console (Vite/TS/MUI) — see ADR-012
 │   ├── src/App.tsx        Login gate (react-oidc-context) + dashboard shell
 │   ├── src/PolicyDashboard.tsx  Fetches/renders policies, "Reload Policies" button
@@ -139,6 +148,16 @@ zte-lightweight/
 │
 ├── scripts/
 │   └── install-hooks.sh   Installs .githooks/pre-commit into local .git/hooks/
+│
+├── deploy/azure/          Azure Container Apps deployment (see ADR-027, ADR-028)
+│   ├── deploy.sh          Two-phase provisioning (env + VNET, apps, certs share, phase-2 origin)
+│   ├── push-images.sh     Builds and pushes every image to GHCR (private)
+│   ├── bind-custom-domain.sh  Prints the required DNS records; binds domain + managed cert
+│   ├── power.sh           stop / start / status — park the whole stack overnight
+│   ├── make-cloud-realm.py    Cloud realm import (multi-origin redirect URIs)
+│   └── Dockerfile.keycloak    Keycloak image with that realm baked in
+│
+├── docker-compose.cloud.yml   Local mirror of the cloud topology (single external origin)
 │
 ├── .claude/commands/
 │   └── pre-commit-docs.md /pre-commit-docs slash command — docs guardian pre-commit check
@@ -802,6 +821,44 @@ curl -s --max-time 150 -X POST http://localhost:8083/api/v1/agents/auditor/run |
 - The gateway's internal endpoint (`GET /api/v1/internal/policies`) is network-restricted
   (Docker bridge) and requires no JWT for MVP. See ADR-007 for the production upgrade path.
 - Never commit `ANTHROPIC_API_KEY`. Use `.env` files (gitignored) or Vault in production.
+
+---
+
+## Running in Azure (ADR-027, ADR-028)
+
+The stack also runs as containers in Azure Container Apps — full plan,
+topology, live-run gotchas and the security review:
+[docs/azure-deployment-plan.md](docs/azure-deployment-plan.md).
+
+| Audience | URL | TLS |
+|---|---|---|
+| People — Admin Console, Approval Center, login | `https://demo.zteasy.tech/admin/index.html`, `/approver/index.html` | Azure managed certificate, auto-renewing |
+| Agents — MCP over mTLS | `https://gateway.<env>.northeurope.azurecontainerapps.io:8080` | dev ZTE-CA, client certificate required |
+
+Two front doors onto one system: a browser-facing app (HTTP ingress, custom
+domain) and the agent-facing one (TCP passthrough, so the client certificate
+survives to the gate). Same image, same Postgres/Keycloak/MCP backend.
+
+```bash
+# Provision from scratch (needs GHCR_USER/GHCR_PAT, HUBSPOT_TOKEN; see the plan)
+./deploy/azure/deploy.sh
+
+# Park it overnight / bring it back / see what's running
+./deploy/azure/power.sh stop
+./deploy/azure/power.sh start
+./deploy/azure/power.sh status
+
+# Attach a custom domain + free managed certificate (prints the DNS records first)
+./deploy/azure/bind-custom-domain.sh
+./deploy/azure/bind-custom-domain.sh demo.zteasy.tech
+```
+
+Deployment-only settings worth knowing: `ZTE_INTERNAL_API_KEY` (shared secret
+for `/api/v1/internal/**` — mandatory once the gateway has a public ingress),
+`ZTE_AUTH_PROXY_ENABLED` (serve Keycloak's login under `/auth`),
+`ZTE_UI_OIDC_AUTHORITY` (what both SPAs get from `/ui-config.js`), and
+`MANAGEMENT_PORT` set equal to each service's API port (a Container App
+publishes only one port).
 
 ---
 
