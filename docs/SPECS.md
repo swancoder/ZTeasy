@@ -67,7 +67,8 @@ auditable — the opposite of a mesh's "hide it in the sidecar" approach. See
 | — | Internal engineering notes (`CLAUDE.md`, `prompts-hist/`) untracked from the public repo — kept and maintained locally, gitignored; note that pre-existing git history still contains them | [024](adr/ADR-024-untrack-internal-engineering-notes.md) |
 | 25 | Gateway OpenAPI documentation: `springdoc-openapi` on `gateway-service` itself (`/v3/api-docs`, `/swagger-ui.html`, both `permitAll` via `ApiDocsSecurityConfig`), Admin Console "Documentation" tab rendering the spec via the existing `swagger-ui-react` dependency (`SchemaDrawer.tsx`'s pattern reused, not duplicated) | [025](adr/ADR-025-gateway-openapi-documentation.md) |
 | 26 | Standalone Approval Center: second SPA (`zt-approver-ui`) at `/approver/` with its own Keycloak client (`zte-approver-ui`), `/api/v1/approver/approvals[/{id}/approve\|reject]` open to any interactive user (`USER`/`ADMIN` role — never role-less agent JWTs), runtime OIDC authority via `GET /ui-config.js` for both SPAs | [026](adr/ADR-026-standalone-approver-ui.md) |
-| 27+ | Backlog (rate limiting, ABAC…) | see §9 |
+| 27 | Azure Container Apps deployment: `zte.auth-proxy.*` (`/auth/**` → Keycloak, off by default), gateway/zt-agents/bridge/agents Dockerfiles, `docker-compose.cloud.yml` local mirror, `deploy/azure/` provisioning scripts, plan in `docs/azure-deployment-plan.md` | [027](adr/ADR-027-azure-container-apps-deployment.md) |
+| 28+ | Backlog (rate limiting, ABAC…) | see §9 |
 
 **Testing:** `./gradlew test` (unit — every package below has direct
 coverage for its pure decision logic; I/O-calling code that has no
@@ -894,6 +895,7 @@ automatically instead of needing its own `WebFilter` (ADR-012).
 | [024](adr/ADR-024-untrack-internal-engineering-notes.md) | Untracking Internal Engineering Notes (`CLAUDE.md`, `prompts-hist/`) from the Public Repo |
 | [025](adr/ADR-025-gateway-openapi-documentation.md) | OpenAPI Documentation for the Gateway's Own API + Admin Console "Documentation" Tab |
 | [026](adr/ADR-026-standalone-approver-ui.md) | Standalone Approval Center — a Second UI Surface for the HOLD Queue |
+| [027](adr/ADR-027-azure-container-apps-deployment.md) | Azure Deployment — Container Apps, Single External Origin, `/auth` Reverse Proxy |
 
 ---
 

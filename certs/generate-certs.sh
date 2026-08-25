@@ -127,7 +127,7 @@ openssl req -newkey rsa:2048 \
 openssl x509 -req \
     -in gateway.csr -CA ca.crt -CAkey ca.key -CAcreateserial \
     -out gateway.crt -days $DAYS_SVC \
-    -extfile <(printf "subjectAltName=DNS:gateway,DNS:localhost,IP:127.0.0.1\nextendedKeyUsage=serverAuth")
+    -extfile <(printf "subjectAltName=DNS:gateway,DNS:localhost,IP:127.0.0.1%s\nextendedKeyUsage=serverAuth" "${GATEWAY_EXTRA_SANS:+,${GATEWAY_EXTRA_SANS}}")
 
 openssl pkcs12 -export \
     -in gateway.crt -inkey gateway.key \

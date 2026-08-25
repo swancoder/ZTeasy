@@ -1,0 +1,8 @@
+# Keycloak with the cloud realm import baked in (ADR-027) — built from the
+# ZTeasy repo root AFTER deploy/azure/make-cloud-realm.py has generated
+# deploy/azure/out/realm-cloud.json for the real gateway origin.
+# Contains demo credentials — push only to a PRIVATE registry.
+FROM quay.io/keycloak/keycloak:24.0.4
+COPY deploy/azure/out/realm-cloud.json /opt/keycloak/data/import/realm-cloud.json
+ENTRYPOINT ["/opt/keycloak/bin/kc.sh"]
+CMD ["start-dev", "--import-realm"]

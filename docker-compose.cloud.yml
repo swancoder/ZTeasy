@@ -1,0 +1,203 @@
+# ============================================================
+# ZTeasy — cloud-topology mirror (ADR-027)
+# ============================================================
+# Runs the SAME containers the Azure Container Apps deployment runs, wired
+# the same way, so the cloud topology is verifiable locally before pushing
+# a single image:
+#   - one external origin: the gateway on https://localhost:8443
+#     (Azure: https://<gateway-fqdn>:8443, TCP-passthrough ingress)
+#   - Keycloak reverse-proxied under {origin}/auth (KC_HTTP_RELATIVE_PATH)
+#     — never exposed directly
+#   - service-a/service-b/mcp-bridge/zt-agents: internal-only
+#   - agent simulator: on-demand one-shot job (profile "demo")
+#
+# Prereqs:
+#   python3 deploy/azure/make-cloud-realm.py https://localhost:8443
+#   ./certs/generate-certs.sh                     (once)
+#   HUBSPOT_TOKEN in ../hubspot-mcp/.env, ANTHROPIC_API_KEY in ./.env
+#
+#   docker compose -f docker-compose.cloud.yml up -d --build
+#   open https://localhost:8443/admin/index.html   (zte-admin / Admin@123!)
+#   open https://localhost:8443/approver/index.html (zte-test-user / User@123!)
+#   docker compose -f docker-compose.cloud.yml --profile demo run --rm agent-runner
+# ============================================================
+
+x-external-origin: &external-origin ${ZTE_EXTERNAL_ORIGIN:-https://localhost:8443}
+
+services:
+
+  postgres:
+    image: postgres:16-alpine
+    container_name: ztec-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB:       zte_db
+      POSTGRES_USER:     zte_user
+      POSTGRES_PASSWORD: zte_pass
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U zte_user -d zte_db"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 15s
+    networks: [zte-cloud]
+
+  keycloak:
+    image: quay.io/keycloak/keycloak:24.0.4
+    container_name: ztec-keycloak
+    restart: unless-stopped
+    command: start-dev --import-realm
+    environment:
+      KC_DB:                    dev-file
+      KEYCLOAK_ADMIN:           admin
+      KEYCLOAK_ADMIN_PASSWORD:  ${KEYCLOAK_ADMIN_PASSWORD:-admin}
+      KC_HTTP_PORT:             8080
+      # Serve everything under /auth so the gateway proxies /auth/** verbatim
+      # (ADR-027) — no path rewriting anywhere.
+      KC_HTTP_RELATIVE_PATH:    /auth
+      # Fixed frontend URL: the issuer in EVERY token (browser- or
+      # agent-fetched) is {origin}/auth/realms/..., matching what the
+      # gateway validates. Backchannel (internal) calls stay dynamic.
+      KC_HOSTNAME_URL:          ${ZTE_EXTERNAL_ORIGIN:-https://localhost:8443}/auth
+      KC_HOSTNAME_STRICT:       "false"
+      KC_LOG_LEVEL:             INFO
+      KC_HEALTH_ENABLED:        "true"
+      KC_PROXY:                 edge
+    volumes:
+      - ./deploy/azure/out:/opt/keycloak/data/import:ro
+    healthcheck:
+      test: ["CMD-SHELL", "exec 3<>/dev/tcp/127.0.0.1/8080 && printf 'GET /auth/health/ready HTTP/1.1\\r\\nHost: localhost\\r\\nConnection: close\\r\\n\\r\\n' >&3 && grep -q '\"status\": \"UP\"' <&3"]
+      interval: 15s
+      timeout: 10s
+      retries: 10
+      start_period: 60s
+    networks: [zte-cloud]
+
+  gateway:
+    build:
+      context: .
+      dockerfile: gateway-service/Dockerfile
+    container_name: ztec-gateway
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+      keycloak:
+        condition: service_healthy
+    environment:
+      DB_HOST:                 postgres
+      DB_PORT:                 5432
+      DB_NAME:                 zte_db
+      DB_USER:                 zte_user
+      DB_PASSWORD:             zte_pass
+      # Issuer = the fixed external frontend URL Keycloak stamps into tokens;
+      # JWKS fetched over the internal network (no dependency on the external
+      # origin resolving from inside the perimeter).
+      KEYCLOAK_ISSUER_URI:     ${ZTE_EXTERNAL_ORIGIN:-https://localhost:8443}/auth/realms/zte-realm
+      KEYCLOAK_JWKS_URI:       http://keycloak:8080/auth/realms/zte-realm/protocol/openid-connect/certs
+      ZTE_AUTH_PROXY_ENABLED:  "true"
+      ZTE_AUTH_PROXY_URI:      http://keycloak:8080
+      ZTE_UI_OIDC_AUTHORITY:   ${ZTE_EXTERNAL_ORIGIN:-https://localhost:8443}/auth/realms/zte-realm
+      ZTE_IDP_KEYCLOAK_BASE_URI: http://keycloak:8080/auth
+      SERVICE_A_URI:           https://service-a:8081
+      SERVICE_B_URI:           https://service-b:8082
+      MCP_BACKEND_URI:         http://mcp-bridge:9090
+      ZTE_CERTS_DIR:           /app/certs
+      ZTE_OBO_SECRET:          ${ZTE_OBO_SECRET:-zte-obo-dev-secret-change-in-production}
+    ports:
+      - "8443:8080"   # the ONLY externally published port in this topology
+    volumes:
+      - ./certs:/app/certs:ro
+    networks: [zte-cloud]
+
+  service-a:
+    build:
+      context: .
+      dockerfile: service-a/Dockerfile
+    container_name: ztec-service-a
+    restart: unless-stopped
+    environment:
+      ZTE_CERTS_DIR:  /app/certs
+      ZTE_OBO_SECRET: ${ZTE_OBO_SECRET:-zte-obo-dev-secret-change-in-production}
+      SERVICE_B_URI:  https://service-b:8082
+    volumes:
+      - ./certs:/app/certs:ro
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://localhost:9081/actuator/health || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+    depends_on: [service-b]
+    networks: [zte-cloud]
+
+  service-b:
+    build:
+      context: .
+      dockerfile: service-b/Dockerfile
+    container_name: ztec-service-b
+    restart: unless-stopped
+    environment:
+      ZTE_CERTS_DIR:  /app/certs
+      ZTE_OBO_SECRET: ${ZTE_OBO_SECRET:-zte-obo-dev-secret-change-in-production}
+    volumes:
+      - ./certs:/app/certs:ro
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://localhost:9082/actuator/health || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+    networks: [zte-cloud]
+
+  mcp-bridge:
+    build:
+      context: ../hubspot-mcp
+      dockerfile: Dockerfile.bridge
+    container_name: ztec-mcp-bridge
+    restart: unless-stopped
+    env_file:
+      - ../hubspot-mcp/.env   # HUBSPOT_TOKEN — the only component with HubSpot egress
+    networks: [zte-cloud]
+
+  zt-agents:
+    build:
+      context: .
+      dockerfile: zt-agents/Dockerfile
+    container_name: ztec-zt-agents
+    restart: unless-stopped
+    env_file:
+      - .env                  # ANTHROPIC_API_KEY
+    environment:
+      # Known limitation (ADR-027 critique): the gateway is HTTPS-only with
+      # the dev ZTE-CA; zt-agents' WebClient doesn't trust it yet, so the
+      # auditor's policy fetch fails TLS validation until a truststore is
+      # wired in. Deployed anyway to keep the container inventory complete.
+      GATEWAY_INTERNAL_URI: https://gateway:8080
+    networks: [zte-cloud]
+
+  # On-demand demo job — not started by default; run with:
+  #   docker compose -f docker-compose.cloud.yml --profile demo run --rm agent-runner
+  agent-runner:
+    build:
+      context: ../hubspot-mcp
+      dockerfile: Dockerfile.agents
+    profiles: [demo]
+    environment:
+      KEYCLOAK_TOKEN_URL:  http://keycloak:8080/auth/realms/zte-realm/protocol/openid-connect/token
+      GATEWAY_URL:         https://gateway:8080
+      GATEWAY_CLIENT_CERT: /app/certs/client.pem
+      AGENT_A_CLIENT_ID:   agent-a
+      AGENT_A_CLIENT_SECRET: ${AGENT_A_CLIENT_SECRET:-agent-a-secret-dev-only}
+      AGENT_B_CLIENT_ID:   agent-b
+      AGENT_B_CLIENT_SECRET: ${AGENT_B_CLIENT_SECRET:-agent-b-secret-dev-only}
+      AGENT_CRM_CLIENT_ID: crm-account-health-emea-01
+      AGENT_CRM_CLIENT_SECRET: ${AGENT_CRM_CLIENT_SECRET:-crm-account-health-emea-01-secret-dev-only}
+    volumes:
+      - ./certs:/app/certs:ro
+    networks: [zte-cloud]
+
+networks:
+  zte-cloud:
+    name: zte-cloud-network
+    driver: bridge

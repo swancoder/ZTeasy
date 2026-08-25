@@ -89,3 +89,8 @@ certs/*.srl
 # ── Internal engineering notes (not for public repo history) ──
 CLAUDE.md
 prompts-hist/
+
+# deploy/azure/out/ holds GENERATED SECRETS (cloud realm with baked demo
+# passwords, app YAMLs embedding the GHCR PAT) — never commit, even if the
+# generic out/ rule above is ever removed.
+deploy/azure/out/
