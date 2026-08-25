@@ -131,10 +131,16 @@ create_tcp_app keycloak "$IMG/zteasy-keycloak:$TAG" 8080 \
       "KC_HOSTNAME_URL=https://placeholder.invalid/auth"
 
 echo "── service-b / service-a (mTLS, certs volume via YAML) ──"
+# MANAGEMENT_PORT == the service's own API port on purpose: a Container App
+# publishes exactly one port, so the separate plain-HTTP management ports
+# (9081/9082) are unreachable here and the gateway's health poll would flip
+# both services to DOWN — which also drops their inventory-driven routes.
+# On the shared port, Spring serves /actuator/health from the main context,
+# and the poll reaches it over mTLS like every other gateway call.
 bash deploy/azure/create-app-with-certs.sh service-b "$IMG/zteasy-service-b:$TAG" 8082 \
-    "ZTE_CERTS_DIR=/app/certs ZTE_OBO_SECRET=$OBO_SECRET"
+    "ZTE_CERTS_DIR=/app/certs ZTE_OBO_SECRET=$OBO_SECRET MANAGEMENT_PORT=8082"
 bash deploy/azure/create-app-with-certs.sh service-a "$IMG/zteasy-service-a:$TAG" 8081 \
-    "ZTE_CERTS_DIR=/app/certs ZTE_OBO_SECRET=$OBO_SECRET SERVICE_B_URI=https://service-b:8082"
+    "ZTE_CERTS_DIR=/app/certs ZTE_OBO_SECRET=$OBO_SECRET SERVICE_B_URI=https://service-b:8082 MANAGEMENT_PORT=8081"
 
 echo "── mcp bridge ──"
 $AZ containerapp create -n mcp-bridge -g "$RG" --environment "$ENV_NAME" \
@@ -180,12 +186,17 @@ $AZ containerapp update -n keycloak -g "$RG" \
 $AZ containerapp update -n gateway -g "$RG" \
     --set-env-vars "KEYCLOAK_ISSUER_URI=$ORIGIN/auth/realms/zte-realm" \
       "ZTE_UI_OIDC_AUTHORITY=$ORIGIN/auth/realms/zte-realm" -o none
-# restart both so keycloak re-imports the origin-correct realm and the
-# gateway reloads the FQDN-SAN server cert
-$AZ containerapp revision restart -n keycloak -g "$RG" \
-    --revision "$($AZ containerapp revision list -n keycloak -g "$RG" --query '[0].name' -o tsv)" -o none || true
-$AZ containerapp revision restart -n gateway -g "$RG" \
-    --revision "$($AZ containerapp revision list -n gateway -g "$RG" --query '[0].name' -o tsv)" -o none || true
+# generate-certs.sh mints a brand-new CA every run, so every cert-holding
+# app must restart to pick it up — service-a/service-b included. Skipping
+# them leaves the gateway trusting a CA they don't present, which surfaces
+# as "PKIX path validation failed / does not chain" on every mTLS call
+# (schema fetch, health poll, proxied REST). Keycloak restarts to re-import
+# the origin-correct realm; the gateway, to load the FQDN-SAN server cert.
+for app in keycloak gateway service-a service-b; do
+  REV=$($AZ containerapp revision list -n "$app" -g "$RG" \
+        --query 'sort_by([],&properties.createdTime)[-1].name' -o tsv)
+  $AZ containerapp revision restart -n "$app" -g "$RG" --revision "$REV" -o none || true
+done
 
 echo "── agent-runner job (manual trigger) ──"
 $AZ containerapp job create -n agent-runner -g "$RG" --environment "$ENV_NAME" \
@@ -202,6 +213,31 @@ $AZ containerapp job create -n agent-runner -g "$RG" --environment "$ENV_NAME" \
     -o none 2>/dev/null || echo "(job exists — leaving as is)"
 # attach the certs volume to the job (client.pem) — YAML-only operation
 bash deploy/azure/attach-certs-to-job.sh agent-runner
+
+echo "── register the MCP bridge in the APIM inventory ──"
+# InventoryBootstrapSeeder only seeds service-a/service-b, so the bridge
+# would otherwise be missing from the Registry tab entirely (its MCP proxy
+# traffic works regardless — mcp-backend.uri is separate config — but the
+# operator sees no entry and no tool schema). Idempotent: a repeat POST
+# returns 409, which we treat as success.
+for attempt in $(seq 1 10); do
+  ADMIN_TOKEN=$(curl -sk -m 30 -X POST \
+      "$ORIGIN/auth/realms/zte-realm/protocol/openid-connect/token" \
+      -d "grant_type=password&client_id=zte-gateway&client_secret=zte-gateway-secret" \
+      -d "username=zte-admin&password=${ZTE_ADMIN_PASSWORD:-Admin@123!}" \
+      | python3 -c "import sys,json; print(json.load(sys.stdin).get('access_token',''))" 2>/dev/null || true)
+  [ -n "$ADMIN_TOKEN" ] && break
+  sleep 20
+done
+if [ -n "$ADMIN_TOKEN" ]; then
+  CODE=$(curl -sk -m 60 -o /dev/null -w '%{http_code}' -X POST \
+      -H "Authorization: Bearer $ADMIN_TOKEN" -H "Content-Type: application/json" \
+      "$ORIGIN/api/v1/admin/inventory" \
+      -d '{"name":"hubspot-mcp","targetType":"MCP","baseUrl":"http://mcp-bridge:9090"}')
+  echo "inventory onboard hubspot-mcp -> $CODE"
+else
+  echo "WARN: could not obtain an admin token — onboard hubspot-mcp manually via the Registry tab" >&2
+fi
 
 echo
 echo "══════════════════════════════════════════════════════"

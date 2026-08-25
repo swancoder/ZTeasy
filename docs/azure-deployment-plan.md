@@ -101,6 +101,27 @@ non-obvious constraints, not generic advice:
    `MANIFEST_UNKNOWN` — phase 2 rebuilds it against the real origin anyway.
 6. **Keycloak's H2 import is strict**: a client `description` longer than
    255 chars hard-fails realm import; `make-cloud-realm.py` truncates.
+7. **Every cert-holding app must restart after phase 2.**
+   `generate-certs.sh` mints a *new CA* on each run, so restarting only the
+   gateway leaves service-a/service-b presenting certs from the previous CA
+   — every mTLS call then fails `PKIX path validation failed … does not
+   chain with any of the trust anchors` (schema fetch, health poll, proxied
+   REST). Phase 2 now restarts keycloak, gateway, service-a and service-b.
+8. **One published port per app**, so the services' separate plain-HTTP
+   management ports (9081/9082) don't exist here. `MANAGEMENT_PORT` is set
+   equal to each service's API port, putting `/actuator/health` on the mTLS
+   port where the gateway's poll (which already carries the client cert)
+   reaches it. Without this both services sit at `DOWN`, which silently
+   removes their inventory-driven routes.
+9. **The MCP bridge needs onboarding into the registry** —
+   `InventoryBootstrapSeeder` seeds only service-a/service-b. `deploy.sh`
+   now POSTs the `hubspot-mcp` entry (`http://mcp-bridge:9090`) at the end.
+10. **Bridge fixes in the sibling repo** (`hubspot-mcp`, committed there):
+   it bound to `localhost` — unreachable from another container, so no
+   tool call ever reached HubSpot — and spoke HTTP/1.0, which broke the
+   gateway's pooled Netty connections with "Connection prematurely closed
+   BEFORE response". Now `MCP_BACKEND_HOST` (0.0.0.0 in the image),
+   HTTP/1.1 keep-alive, and a threaded server.
 
 Verified live on the deployed stack: both pages return 200, login through
 the `/auth` proxy issues tokens with the external issuer, the approver API
@@ -108,6 +129,10 @@ answers 200 for a `USER` token, `/sse` without a client certificate is 401,
 the `agent-runner` job replays the full 🟢/🔴/🟡 script from inside the
 perimeter, and a held `send_email` approved from the Approval Center shows
 up in the Governance counts (7 allow / 3 deny / 1 hold for the CRM agent).
+After items 7–10 above: all three registry entries are `ACTIVE` with a
+captured schema (the bridge reporting all 12 tools), and a real
+`read_contacts(territory=EMEA)` round trip over `/sse` + `/message` returns
+live HubSpot data (9 contacts) to the agent.
 
 ## Known limitations (accepted for the demo)
 

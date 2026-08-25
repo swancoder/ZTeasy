@@ -112,8 +112,21 @@ run taught us"). The two that changed *decisions* rather than just code:
   This is invisible in a compose mirror (where bare names always worked),
   so it only surfaced in the cloud.
 
+A second round of live findings (same day) covered the registry/mTLS side:
+`generate-certs.sh` mints a new CA per run, so phase 2 must restart *every*
+cert-holding app or the gateway stops trusting service-a/service-b; ACA
+publishes one port per app, so `/actuator/health` moves onto each service's
+mTLS port (`MANAGEMENT_PORT`) or both go `DOWN` and lose their routes; and
+the MCP bridge is now onboarded into the APIM registry by the deploy script
+(the bootstrap seeder only covers service-a/service-b). The bridge itself
+needed two fixes in its own repo — it bound to `localhost` (unreachable
+across containers, so no tool call reached HubSpot) and spoke HTTP/1.0,
+breaking the gateway's pooled connections.
+
 Deployed and verified end to end (both SPAs, `/auth` login, approver API,
-cert-less `/sse` → 401, in-perimeter agent job, approve-then-Governance).
+cert-less `/sse` → 401, in-perimeter agent job, approve-then-Governance,
+all registry entries ACTIVE with schemas, and a live `read_contacts(EMEA)`
+returning real HubSpot data through the proxy).
 
 ## Consequences
 
