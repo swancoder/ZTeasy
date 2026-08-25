@@ -101,12 +101,16 @@ non-obvious constraints, not generic advice:
    `MANIFEST_UNKNOWN` — phase 2 rebuilds it against the real origin anyway.
 6. **Keycloak's H2 import is strict**: a client `description` longer than
    255 chars hard-fails realm import; `make-cloud-realm.py` truncates.
-7. **Every cert-holding app must restart after phase 2.**
-   `generate-certs.sh` mints a *new CA* on each run, so restarting only the
-   gateway leaves service-a/service-b presenting certs from the previous CA
-   — every mTLS call then fails `PKIX path validation failed … does not
-   chain with any of the trust anchors` (schema fetch, health poll, proxied
-   REST). Phase 2 now restarts keycloak, gateway, service-a and service-b.
+7. **Cert regeneration used to break the trust chain.**
+   `generate-certs.sh` minted a *new CA* on every run, so phase 2 (which
+   reissues the gateway cert with the FQDN SAN) left service-a/service-b
+   presenting certs from the previous CA — every mTLS call then failed
+   `PKIX path validation failed … does not chain with any of the trust
+   anchors` (schema fetch, health poll, proxied REST). Fixed at the source:
+   the script now **reuses an existing CA** and only reissues leaf certs
+   (`ZTE_REGENERATE_CA=1` forces a full PKI swap). Phase 2 still restarts
+   keycloak, gateway, service-a and service-b so they load the reissued
+   leaves.
 8. **One published port per app**, so the services' separate plain-HTTP
    management ports (9081/9082) don't exist here. `MANAGEMENT_PORT` is set
    equal to each service's API port, putting `/actuator/health` on the mTLS

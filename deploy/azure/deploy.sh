@@ -186,12 +186,12 @@ $AZ containerapp update -n keycloak -g "$RG" \
 $AZ containerapp update -n gateway -g "$RG" \
     --set-env-vars "KEYCLOAK_ISSUER_URI=$ORIGIN/auth/realms/zte-realm" \
       "ZTE_UI_OIDC_AUTHORITY=$ORIGIN/auth/realms/zte-realm" -o none
-# generate-certs.sh mints a brand-new CA every run, so every cert-holding
-# app must restart to pick it up — service-a/service-b included. Skipping
-# them leaves the gateway trusting a CA they don't present, which surfaces
-# as "PKIX path validation failed / does not chain" on every mTLS call
-# (schema fetch, health poll, proxied REST). Keycloak restarts to re-import
-# the origin-correct realm; the gateway, to load the FQDN-SAN server cert.
+# Every cert-holding app restarts: the phase-2 run above reissues the
+# gateway's server cert (now with the FQDN SAN) and, since certs are shared
+# files, refreshes the others too. The CA itself is reused across runs, so a
+# re-deploy no longer invalidates certs held by anything that isn't
+# restarted here — set ZTE_REGENERATE_CA=1 only when you intend a full PKI
+# swap. Keycloak restarts to re-import the origin-correct realm.
 for app in keycloak gateway service-a service-b; do
   REV=$($AZ containerapp revision list -n "$app" -g "$RG" \
         --query 'sort_by([],&properties.createdTime)[-1].name' -o tsv)

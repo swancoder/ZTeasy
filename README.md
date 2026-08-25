@@ -134,6 +134,8 @@ zte-lightweight/
 │
 ├── certs/
 │   └── generate-certs.sh  Generates ZTE-CA, client.p12/.pem, service-a.p12, service-b.p12, gateway.p12
+│                          (re-run safe: reuses an existing CA, reissues leaf certs;
+│                           ZTE_REGENERATE_CA=1 forces a new CA, GATEWAY_EXTRA_SANS adds SANs)
 │
 ├── scripts/
 │   └── install-hooks.sh   Installs .githooks/pre-commit into local .git/hooks/

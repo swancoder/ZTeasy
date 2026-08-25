@@ -113,8 +113,10 @@ run taught us"). The two that changed *decisions* rather than just code:
   so it only surfaced in the cloud.
 
 A second round of live findings (same day) covered the registry/mTLS side:
-`generate-certs.sh` mints a new CA per run, so phase 2 must restart *every*
-cert-holding app or the gateway stops trusting service-a/service-b; ACA
+`generate-certs.sh` minted a new CA per run, so phase 2's cert reissue left
+the gateway distrusting service-a/service-b — fixed in the script itself
+(the CA is now reused unless `ZTE_REGENERATE_CA=1`, leaf certs are still
+reissued) and phase 2 restarts every cert-holding app regardless; ACA
 publishes one port per app, so `/actuator/health` moves onto each service's
 mTLS port (`MANAGEMENT_PORT`) or both go `DOWN` and lose their routes; and
 the MCP bridge is now onboarded into the APIM registry by the deploy script

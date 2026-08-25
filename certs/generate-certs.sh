@@ -24,6 +24,13 @@
 # Usage:
 #   chmod +x certs/generate-certs.sh
 #   ./certs/generate-certs.sh
+#
+# Re-running is safe: an existing CA (ca.crt/ca.key) is reused and only the
+# service/client certs are reissued, so peers already trusting that CA keep
+# working. Set ZTE_REGENERATE_CA=1 to mint a new CA instead — that
+# invalidates every previously issued cert, so restart every service
+# afterwards. GATEWAY_EXTRA_SANS adds SANs to the gateway's server cert
+# (e.g. GATEWAY_EXTRA_SANS=DNS:my-host.example.com).
 # =============================================================================
 set -euo pipefail
 
@@ -51,11 +58,28 @@ for cmd in openssl keytool; do
 done
 
 # ── 1. ZTE Root CA ──────────────────────────────────────────────────────────
-info "1/6  Generating ZTE Root CA (${DAYS_CA}d) ..."
-openssl req -x509 -newkey rsa:4096 \
-    -keyout ca.key -out ca.crt \
-    -days $DAYS_CA -nodes \
-    -subj "${SUBJ_BASE}/CN=ZTE-CA"
+# Reused when it already exists. Re-running this script is a normal thing to
+# do — reissuing one service cert (a new SAN, an expiry) shouldn't invalidate
+# every other cert already deployed elsewhere. A fresh CA silently breaks
+# every peer still holding the old one, which surfaces far away from here as
+# "PKIX path validation failed: Path does not chain with any of the trust
+# anchors" (hit live on the Azure deployment, ADR-027). Force a brand-new CA
+# with ZTE_REGENERATE_CA=1 — then every service holding a cert must be
+# restarted with the regenerated files.
+if [[ -f ca.crt && -f ca.key && "${ZTE_REGENERATE_CA:-0}" != "1" ]]; then
+    CA_EXPIRY=$(openssl x509 -in ca.crt -noout -enddate | cut -d= -f2)
+    info "1/6  Reusing existing ZTE Root CA (expires ${CA_EXPIRY}; ZTE_REGENERATE_CA=1 to replace)"
+else
+    if [[ -f ca.crt ]]; then
+        warn "Replacing the existing ZTE Root CA — every service holding a cert signed by"
+        warn "the old CA must be restarted with the newly generated files, or mTLS will fail."
+    fi
+    info "1/6  Generating ZTE Root CA (${DAYS_CA}d) ..."
+    openssl req -x509 -newkey rsa:4096 \
+        -keyout ca.key -out ca.crt \
+        -days $DAYS_CA -nodes \
+        -subj "${SUBJ_BASE}/CN=ZTE-CA"
+fi
 
 # ── 2. Internal Client Certificate ─────────────────────────────────────────
 # Used by gateway (outbound to service-a/b) and service-a (outbound to service-b)

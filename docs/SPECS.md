@@ -537,11 +537,19 @@ Keycloak login (client `zte-admin-ui`, authorization code + PKCE). Built by
   up` (destroys Keycloak's dev-mode state) or a live Admin REST API update;
   this has bitten real deployments of this repo (a role grant silently
   present in the file but not the running realm).
-- **Certs** — `certs/generate-certs.sh` builds a one-off ZTE-CA and issues
+- **Certs** — `certs/generate-certs.sh` builds a ZTE-CA and issues
   `client.p12`/`.pem` (shared internal client cert — `.pem` for non-JVM
   clients, e.g. this repo's `hubspot-mcp` sibling), `service-a.p12`/
   `service-b.p12`/`gateway.p12` (server certs), `truststore.p12` (CA-only
-  trust anchor).
+  trust anchor). **Re-running reuses an existing CA** and reissues only the
+  leaf certs, so peers that already trust that CA keep working; a leaf
+  reissue still requires restarting whatever loaded the old file (server
+  keystores are read at startup — §10's cert-rotation risk).
+  `ZTE_REGENERATE_CA=1` forces a new CA — every service must then be
+  restarted, or mTLS fails with "Path does not chain with any of the trust
+  anchors" (hit live during the ADR-027 deployment, which is why the reuse
+  behavior exists). `GATEWAY_EXTRA_SANS` adds SANs to the gateway's server
+  cert (used to put the Azure FQDN in it).
 
 ---
 
