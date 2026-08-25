@@ -10,17 +10,27 @@ import reactor.core.publisher.Flux
 /**
  * Fetches ZTE access policies from the gateway's internal REST endpoint.
  *
- * The endpoint is network-restricted (Docker bridge only) and requires no JWT for MVP.
- * Production upgrade path: Keycloak client_credentials grant → Bearer token header.
+ * The endpoint requires no JWT for MVP. Where the gateway is reachable from
+ * outside its own network (any real deployment — see ZTeasy ADR-027), it also
+ * demands a shared secret: set the same value in both processes'
+ * `ZTE_INTERNAL_API_KEY` and it is sent as `X-ZTE-Internal-Key` on every call.
+ * Unset (local dev on the Docker bridge) means no header and no check, exactly
+ * as before. Production upgrade path: Keycloak client_credentials grant →
+ * Bearer token header.
  */
 @Component
 class GatewayClient(
-    @Value("\${zte.gateway.internal-uri:http://localhost:8080}") gatewayUri: String
+    @Value("\${zte.gateway.internal-uri:http://localhost:8080}") gatewayUri: String,
+    @Value("\${zte.internal.api-key:}") internalApiKey: String
 ) {
     private val log = LoggerFactory.getLogger(GatewayClient::class.java)
 
     private val webClient = WebClient.builder()
         .baseUrl(gatewayUri)
+        .apply { builder ->
+            internalApiKey.trim().takeIf { it.isNotEmpty() }
+                ?.let { builder.defaultHeader("X-ZTE-Internal-Key", it) }
+        }
         .build()
 
     fun fetchPolicies(): Flux<PolicyDto> {

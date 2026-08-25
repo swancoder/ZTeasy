@@ -52,6 +52,20 @@ inside the perimeter; only the MCP bridge has HubSpot egress.
   mounted read-only into gateway/service-a/service-b/agent-runner. Never
   baked into images.
 
+## Running costs — stopping overnight
+
+`deploy/azure/power.sh {stop|start|status}` deactivates or reactivates every
+app's current revision. Container Apps has no `stop` verb; a deactivated
+revision runs zero replicas, so compute billing stops while the environment,
+the storage account and the gateway's public FQDN (and therefore both URLs)
+survive untouched — `start` needs no redeploy. `start` walks the dependency
+order (Postgres and Keycloak first, with a pause, then the services, then
+the gateway); `stop` walks it backwards so the front door goes first.
+
+Because state is deliberately ephemeral (below), a stop/start cycle also
+wipes the audit trail, the approval queue and Keycloak's sessions, and
+re-imports the realm.
+
 ## Steps
 
 1. **Local mirror first** — `docker-compose.cloud.yml` runs the exact cloud
@@ -137,6 +151,54 @@ After items 7–10 above: all three registry entries are `ACTIVE` with a
 captured schema (the bridge reporting all 12 tools), and a real
 `read_contacts(territory=EMEA)` round trip over `/sse` + `/message` returns
 live HubSpot data (9 contacts) to the agent.
+
+## Security review of the deployed stack (2026-08-25)
+
+Probed the live deployment rather than reasoning from the config. Ports were
+clean — `gateway` is the only app with external ingress, the other six are
+`internal: false`, the certs storage account has public blob access
+disabled. Two findings were real and are now fixed and re-verified; the rest
+are accepted demo posture.
+
+**Fixed — internal endpoints were public and unauthenticated.**
+`GET /api/v1/internal/policies` returned the full policy document to an
+anonymous caller off the internet, and `POST .../reload` was accepted. Their
+"protected at the network level" premise (`InternalSecurityConfig`) simply
+does not survive a public ingress. Now guarded by a shared secret
+(`zte.internal.api-key` / `ZTE_INTERNAL_API_KEY`, sent as
+`X-ZTE-Internal-Key`; `zt-agents` sends it automatically). Blank by default,
+so local dev is unchanged. *An IP-based guard was tried first and measurably
+failed*: with TCP-passthrough ingress nothing terminates HTTP in front of
+the gateway, so there is no `X-Forwarded-For` and every request looks
+internal — the endpoint still answered 200 from outside. Verified after the
+fix: 403 without the key, 200 with it.
+
+**Fixed — Keycloak's admin console was published.**
+`/auth/admin/master/console/` answered 200 through the public `/auth` proxy,
+with the deployment's Keycloak admin credentials as the only barrier.
+`KeycloakAdminSurfaceGuardFilter` now 404s `/auth/admin/**`,
+`/auth/realms/master/**`, `/auth/metrics` and `/auth/health/**` on that
+proxy; the product realm's login, token and static-resource paths are
+untouched (in-cluster callers still reach Keycloak directly). The admin
+password was also rotated off `admin/admin` to a random one held as a
+Container Apps secret, and `deploy.sh` generates one per deployment.
+
+**Accepted, with eyes open:**
+- `/v3/api-docs` and `/swagger-ui/**` are public by design (ADR-025) — they
+  describe route shapes, not data, but on a public host they do advertise
+  the admin API surface. Turn off with `SPRINGDOC_API_DOCS_ENABLED=false` /
+  `SPRINGDOC_SWAGGER_UI_ENABLED=false` if that matters (the Admin Console's
+  Documentation tab goes blank).
+- Demo passwords (`zte-admin` / `zte-test-user`) are known and published in
+  this repo — rotate before showing the URL to anyone outside the team.
+- Both SPAs are served unauthenticated; that's intended (each redirects to
+  Keycloak and every API call behind them is JWT+policy gated).
+- The gateway presents the dev ZTE-CA certificate, so browsers warn and any
+  client can be MITM'd by anyone who has that CA — dev PKI, not a public
+  one.
+- The MCP bridge still has no authentication of its own; it is unreachable
+  from outside the environment, which is the compensating control until the
+  gateway→bridge hop is authenticated (first item of the agreed backlog).
 
 ## Known limitations (accepted for the demo)
 

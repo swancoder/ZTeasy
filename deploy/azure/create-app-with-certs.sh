@@ -24,6 +24,17 @@ import json, os
 envs = [{"name": kv.split("=", 1)[0], "value": kv.split("=", 1)[1]}
         for kv in os.environ["ENVS"].split()]
 port = int(os.environ["PORT"])
+
+# An env value written as "secretref:<name>" is stored as a Container Apps
+# secret instead of a plain value — used for the internal-endpoint shared key
+# (ADR-027 amendment) so it never appears in `az containerapp show` output.
+secrets = [{"name": "ghcr-pat", "value": os.environ["GHCR_PAT"]}]
+for env in envs:
+    if env["value"].startswith("secretref:"):
+        name = env["value"].split(":", 1)[1]
+        secrets.append({"name": name, "value": os.environ[f"SECRET_{name.replace('-', '_').upper()}"]})
+        env["secretRef"] = name
+        del env["value"]
 doc = {
     "location": os.environ["LOC"],
     "properties": {
@@ -40,7 +51,7 @@ doc = {
                 "username": os.environ["GHCR_USER"],
                 "passwordSecretRef": "ghcr-pat",
             }],
-            "secrets": [{"name": "ghcr-pat", "value": os.environ["GHCR_PAT"]}],
+            "secrets": secrets,
         },
         "template": {
             "containers": [{

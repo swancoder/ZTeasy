@@ -121,6 +121,15 @@ zte:
     default-effect: ${ZTE_POLICY_DEFAULT_EFFECT:DENY}
     user-client-id: ${ZTE_POLICY_USER_CLIENT_ID:zte-gateway}
 
+  # ── Internal endpoints (/api/v1/internal/**) shared secret (ADR-027
+  #    amendment). Blank = open, matching the original "reachable only on the
+  #    Docker bridge" assumption for local dev. Set it (ZTE_INTERNAL_API_KEY,
+  #    same value in zt-agents) for any deployment whose gateway is reachable
+  #    from outside its own network — an ingress makes these endpoints public
+  #    otherwise, policy document and reload included.
+  internal:
+    api-key: ${ZTE_INTERNAL_API_KEY:}
+
   # ── Keycloak reverse proxy (ADR-027): expose Keycloak's login surface under
   #    the gateway's own origin at /auth/** — for single-external-host
   #    deployments (Azure). Requires Keycloak to run with

@@ -125,6 +125,24 @@ needed two fixes in its own repo — it bound to `localhost` (unreachable
 across containers, so no tool call reached HubSpot) and spoke HTTP/1.0,
 breaking the gateway's pooled connections.
 
+A security review of the running deployment then found two genuine holes,
+both created by the same mistake — carrying a local-network assumption onto
+a public ingress. `/api/v1/internal/**` (unauthenticated by design, on the
+premise of being Docker-bridge-only) served the policy document to the
+internet and accepted `reload`; and proxying `/auth/**` wholesale published
+Keycloak's admin console. Fixed by `InternalEndpointGuardFilter` (shared
+secret, `zte.internal.api-key`) and `KeycloakAdminSurfaceGuardFilter`
+(404s the admin/master/ops surface), plus rotating Keycloak's admin password
+to a generated per-deployment secret. Worth recording *how* the first fix
+failed: an IP-based "is the caller internal" check is useless behind
+TCP-passthrough ingress — nothing terminates HTTP there, so no
+`X-Forwarded-For` exists and every caller looks internal. Measured, not
+assumed. Full review: `docs/azure-deployment-plan.md`.
+
+Operations: `deploy/azure/power.sh {stop|start|status}` deactivates or
+reactivates every app's revision (Container Apps has no `stop`), so the
+stack can be parked overnight without losing the environment or the URLs.
+
 Deployed and verified end to end (both SPAs, `/auth` login, approver API,
 cert-less `/sse` → 401, in-perimeter agent job, approve-then-Governance,
 all registry entries ACTIVE with schemas, and a live `read_contacts(EMEA)`

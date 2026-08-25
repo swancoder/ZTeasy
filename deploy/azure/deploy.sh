@@ -35,7 +35,8 @@ RG="${RG:-zteasy-demo-rg}"
 # westeurope rejected this subscription ("not accepting new customers");
 # northeurope verified working 2026-08-25.
 LOC="${LOC:-northeurope}"
-# The create-app-with-certs.sh / attach-certs-to-job.sh children read these
+# The create-app-with-certs.sh / attach-certs-to-job.sh children read these.
+# SECRET_* carries the value behind an env written as "secretref:<name>".
 export RG ENV_NAME LOC GHCR_USER GHCR_PAT
 # -v2: the first environment was created without a custom VNET, but external
 # TCP ingress (the gateway's mTLS-preserving entry, ADR-027) is only allowed
@@ -48,6 +49,14 @@ REGISTRY="ghcr.io"
 IMG="${IMG:-ghcr.io/${GHCR_USER:?set GHCR_USER}}"
 TAG="${TAG:-azure-1}"
 OBO_SECRET="${ZTE_OBO_SECRET:-zte-obo-dev-secret-change-in-production}"
+# Shared secret for /api/v1/internal/** (ADR-027 amendment): with a public
+# ingress those endpoints would otherwise serve the policy document — and
+# accept reload — to anyone. Random per deployment unless pinned.
+INTERNAL_KEY="${ZTE_INTERNAL_API_KEY:-$(python3 -c 'import secrets; print(secrets.token_urlsafe(32))')}"
+# Keycloak's own admin account: never leave it at admin/admin on a
+# deployment whose gateway is public.
+KC_ADMIN_PASSWORD="${KEYCLOAK_ADMIN_PASSWORD:-$(python3 -c 'import secrets; print(secrets.token_urlsafe(24))')}"
+export SECRET_INTERNAL_API_KEY="$INTERNAL_KEY"
 
 echo "── resource group + environment ──"
 $AZ config set extension.use_dynamic_install=yes_without_prompt -o none 2>/dev/null || true
@@ -125,7 +134,9 @@ if ! docker manifest inspect "$IMG/zteasy-keycloak:$TAG" >/dev/null 2>&1; then
   docker push "$IMG/zteasy-keycloak:$TAG"
 fi
 create_tcp_app keycloak "$IMG/zteasy-keycloak:$TAG" 8080 \
-    --env-vars KC_DB=dev-file KEYCLOAK_ADMIN=admin KEYCLOAK_ADMIN_PASSWORD=admin \
+    --secrets "kc-admin-password=$KC_ADMIN_PASSWORD" \
+    --env-vars KC_DB=dev-file KEYCLOAK_ADMIN=admin \
+      "KEYCLOAK_ADMIN_PASSWORD=secretref:kc-admin-password" \
       KC_HTTP_PORT=8080 KC_HTTP_RELATIVE_PATH=/auth KC_HOSTNAME_STRICT=false \
       KC_HEALTH_ENABLED=true KC_PROXY=edge \
       "KC_HOSTNAME_URL=https://placeholder.invalid/auth"
@@ -153,8 +164,9 @@ $AZ containerapp create -n mcp-bridge -g "$RG" --environment "$ENV_NAME" \
 if [ -n "${ANTHROPIC_API_KEY:-}" ]; then
   echo "── zt-agents ──"
   create_tcp_app zt-agents "$IMG/zteasy-zt-agents:$TAG" 8083 \
-      --secrets "anthropic-key=$ANTHROPIC_API_KEY" \
+      --secrets "anthropic-key=$ANTHROPIC_API_KEY" "internal-api-key=$INTERNAL_KEY" \
       --env-vars "ANTHROPIC_API_KEY=secretref:anthropic-key" \
+        "ZTE_INTERNAL_API_KEY=secretref:internal-api-key" \
         "GATEWAY_INTERNAL_URI=https://gateway:8080"
 fi
 
@@ -167,6 +179,7 @@ bash deploy/azure/create-app-with-certs.sh gateway "$IMG/zteasy-gateway:$TAG" 80
      SERVICE_A_URI=https://service-a:8081 SERVICE_B_URI=https://service-b:8082 \
      MCP_BACKEND_URI=http://mcp-bridge:9090 \
      ZTE_CERTS_DIR=/app/certs ZTE_OBO_SECRET=$OBO_SECRET \
+     ZTE_INTERNAL_API_KEY=secretref:internal-api-key \
      KEYCLOAK_ISSUER_URI=https://placeholder.invalid/auth/realms/zte-realm \
      ZTE_UI_OIDC_AUTHORITY=https://placeholder.invalid/auth/realms/zte-realm" \
     external

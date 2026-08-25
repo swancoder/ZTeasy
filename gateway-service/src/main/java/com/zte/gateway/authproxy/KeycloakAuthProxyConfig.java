@@ -46,6 +46,8 @@ public class KeycloakAuthProxyConfig {
     @Bean
     public RouteLocator keycloakAuthProxyRoutes(RouteLocatorBuilder builder,
                                                 @Value("${zte.auth-proxy.uri}") String keycloakUri) {
+        // Everything except the administrative surface — see
+        // KeycloakAdminSurfaceGuardFilter for what's excluded and why.
         return builder.routes()
                 .route("keycloak-auth-proxy", r -> r.path("/auth/**").uri(keycloakUri))
                 .build();
