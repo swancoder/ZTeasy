@@ -24,7 +24,7 @@ AZ="${AZ:-az}"
 RG="${RG:-zteasy-demo-rg}"
 
 # Dependency order for start; stop walks it backwards.
-APPS=(postgres keycloak service-b service-a mcp-bridge zt-agents gateway)
+APPS=(postgres keycloak service-b service-a mcp-bridge zt-agents gateway gateway-web)
 
 latest_revision() {
   $AZ containerapp revision list -n "$1" -g "$RG" \
@@ -60,11 +60,16 @@ case "${1:-status}" in
       # connect to them at startup (Flyway, JWKS) — those fail fast otherwise.
       case "$app" in postgres|keycloak) sleep 30 ;; esac
     done
-    FQDN=$($AZ containerapp show -n gateway -g "$RG" --query properties.configuration.ingress.fqdn -o tsv 2>/dev/null)
+    # The browser-facing app's custom domain (ADR-028), falling back to its
+    # Azure FQDN if no domain is bound.
+    WEB=$($AZ containerapp show -n gateway-web -g "$RG" \
+          --query 'properties.configuration.ingress.customDomains[0].name' -o tsv 2>/dev/null)
+    [ -z "$WEB" ] && WEB=$($AZ containerapp show -n gateway-web -g "$RG" \
+          --query properties.configuration.ingress.fqdn -o tsv 2>/dev/null)
     echo
     echo "Give it a minute, then:"
-    echo "  Admin Console:   https://${FQDN}:8080/admin/index.html"
-    echo "  Approval Center: https://${FQDN}:8080/approver/index.html"
+    echo "  Admin Console:   https://${WEB}/admin/index.html"
+    echo "  Approval Center: https://${WEB}/approver/index.html"
     ;;
 
   status)

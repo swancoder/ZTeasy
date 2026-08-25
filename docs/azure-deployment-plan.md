@@ -52,6 +52,21 @@ inside the perimeter; only the MCP bridge has HubSpot egress.
   mounted read-only into gateway/service-a/service-b/agent-runner. Never
   baked into images.
 
+## Public URLs (ADR-028)
+
+| Audience | URL | TLS |
+|---|---|---|
+| People (Admin Console, Approval Center, login) | `https://demo.zteasy.tech/admin/index.html`, `/approver/index.html` | Azure managed certificate (DigiCert), auto-renewing |
+| Agents (MCP over mTLS) | `https://gateway.<env>.northeurope.azurecontainerapps.io:8080` | dev ZTE-CA, client cert required |
+
+Two front doors onto one system: `gateway-web` (HTTP ingress, custom domain)
+for browsers, `gateway` (TCP passthrough) for agent traffic that must keep
+its client certificate. Both run the same image against the same Postgres,
+Keycloak and MCP bridge. Keycloak's issuer is the custom domain in both
+cases. See ADR-028 for why a single ingress can't do both, and
+`deploy/azure/bind-custom-domain.sh` for the DNS records and the binding
+procedure. `power.sh` covers `gateway-web` too.
+
 ## Running costs — stopping overnight
 
 `deploy/azure/power.sh {stop|start|status}` deactivates or reactivates every

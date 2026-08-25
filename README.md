@@ -180,6 +180,7 @@ zte-lightweight/
 | [ADR-025](docs/adr/ADR-025-gateway-openapi-documentation.md) | OpenAPI Documentation for the Gateway's Own API + Admin Console "Documentation" Tab | Accepted |
 | [ADR-026](docs/adr/ADR-026-standalone-approver-ui.md) | Standalone Approval Center — a Second UI Surface for the HOLD Queue | Accepted |
 | [ADR-027](docs/adr/ADR-027-azure-container-apps-deployment.md) | Azure Deployment — Container Apps, Single External Origin, `/auth` Reverse Proxy | Accepted |
+| [ADR-028](docs/adr/ADR-028-custom-domain-and-trusted-certificate.md) | Custom Domain with a Publicly-Trusted Certificate — a Second, Browser-Facing Ingress | Accepted |
 
 ---
 

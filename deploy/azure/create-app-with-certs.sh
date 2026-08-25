@@ -10,14 +10,14 @@
 # Expects: AZ, RG, ENV_NAME, LOC, GHCR_USER, GHCR_PAT in the environment.
 set -euo pipefail
 
-NAME=$1 IMAGE=$2 PORT=$3 ENVS=$4 EXTERNAL=${5:-internal}
+NAME=$1 IMAGE=$2 PORT=$3 ENVS=$4 EXTERNAL=${5:-internal} TRANSPORT=${6:-tcp}
 AZ="${AZ:-az}"
 ENV_ID=$($AZ containerapp env show -n "$ENV_NAME" -g "$RG" --query id -o tsv)
 SUB_ID=$($AZ account show --query id -o tsv)
 OUT="$(dirname "${BASH_SOURCE[0]}")/out/app-${NAME}.json"
 mkdir -p "$(dirname "$OUT")"
 
-NAME="$NAME" IMAGE="$IMAGE" PORT="$PORT" ENVS="$ENVS" EXTERNAL="$EXTERNAL" \
+NAME="$NAME" IMAGE="$IMAGE" PORT="$PORT" ENVS="$ENVS" EXTERNAL="$EXTERNAL" TRANSPORT="$TRANSPORT" \
 ENV_ID="$ENV_ID" LOC="${LOC:-northeurope}" OUT="$OUT" python3 - <<'EOF'
 import json, os
 
@@ -40,11 +40,16 @@ doc = {
     "properties": {
         "environmentId": os.environ["ENV_ID"],
         "configuration": {
+            # TCP keeps the client's TLS (and therefore its certificate) intact
+            # all the way to the app — that's why the agent-facing gateway uses
+            # it. HTTP lets Azure terminate TLS, which is what a managed
+            # certificate for a custom domain requires (ADR-028); `exposedPort`
+            # exists only in the TCP form.
             "ingress": {
                 "external": os.environ["EXTERNAL"] == "external",
-                "transport": "tcp",
+                "transport": os.environ["TRANSPORT"],
                 "targetPort": port,
-                "exposedPort": port,
+                **({"exposedPort": port} if os.environ["TRANSPORT"] == "tcp" else {}),
             },
             "registries": [{
                 "server": "ghcr.io",

@@ -38,7 +38,11 @@ PASSWORDS = {
 def main() -> None:
     if len(sys.argv) < 2:
         sys.exit(__doc__)
-    origin = sys.argv[1].rstrip("/")
+    # Several origins may be given, comma-separated: the deployment serves the
+    # SPAs from both the custom domain (browser-facing app) and the Azure FQDN
+    # (agent-facing app, ADR-028), and a browser can legitimately arrive at
+    # either. The issuer stays single — that's KC_HOSTNAME_URL, not this file.
+    origins = [o.rstrip("/") for o in sys.argv[1].split(",") if o.strip()]
     out_path = sys.argv[2] if len(sys.argv) > 2 else os.path.join(
         os.path.dirname(__file__), "out", "realm-cloud.json")
 
@@ -49,8 +53,8 @@ def main() -> None:
     for client in realm.get("clients", []):
         path = BROWSER_CLIENT_PATHS.get(client["clientId"])
         if path is not None:
-            client["redirectUris"] = [f"{origin}{path}"]
-            client["webOrigins"] = [origin]
+            client["redirectUris"] = [f"{origin}{path}" for origin in origins]
+            client["webOrigins"] = list(origins)
         # Keycloak's CLIENT.DESCRIPTION column is VARCHAR(255); the H2
         # dev-file import hard-fails on longer values (seen live with the
         # crm-account-health client's 271-char description).
@@ -65,7 +69,7 @@ def main() -> None:
     os.makedirs(os.path.dirname(out_path), exist_ok=True)
     with open(out_path, "w") as f:
         json.dump(realm, f, indent=2)
-    print(f"wrote {out_path} (origin={origin})")
+    print(f"wrote {out_path} (origins={', '.join(origins)})")
 
 
 if __name__ == "__main__":
