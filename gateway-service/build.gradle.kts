@@ -24,10 +24,36 @@ val buildAdminUi by tasks.registering(com.github.gradle.node.npm.task.NpmTask::c
     outputs.dir(file("${rootDir}/zt-admin-ui/dist"))
 }
 
+// ── Approval Center (ADR-026) — a second, independent npm project
+// (zt-approver-ui/), same pattern as zt-admin-ui above. The node {} extension
+// only points at one project dir, so these tasks override workingDir
+// explicitly instead of relying on the extension default.
+val npmInstallApproverUi by tasks.registering(com.github.gradle.node.npm.task.NpmTask::class) {
+    description = "Installs zt-approver-ui npm dependencies"
+    workingDir.set(file("${rootDir}/zt-approver-ui"))
+    args.set(listOf("install"))
+    inputs.file(file("${rootDir}/zt-approver-ui/package.json"))
+    outputs.dir(file("${rootDir}/zt-approver-ui/node_modules"))
+}
+
+val buildApproverUi by tasks.registering(com.github.gradle.node.npm.task.NpmTask::class) {
+    description = "Builds the Approval Center SPA (zt-approver-ui) via npm run build"
+    dependsOn(npmInstallApproverUi)
+    workingDir.set(file("${rootDir}/zt-approver-ui"))
+    args.set(listOf("run", "build"))
+    inputs.dir(file("${rootDir}/zt-approver-ui/src"))
+    inputs.file(file("${rootDir}/zt-approver-ui/package.json"))
+    outputs.dir(file("${rootDir}/zt-approver-ui/dist"))
+}
+
 tasks.named<ProcessResources>("processResources") {
     dependsOn(buildAdminUi)
+    dependsOn(buildApproverUi)
     from(file("${rootDir}/zt-admin-ui/dist")) {
         into("static/admin")
+    }
+    from(file("${rootDir}/zt-approver-ui/dist")) {
+        into("static/approver")
     }
 }
 

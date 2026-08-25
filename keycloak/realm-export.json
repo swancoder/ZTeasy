@@ -172,6 +172,59 @@
       "authorizationServicesEnabled": false
     },
     {
+      "clientId": "zte-approver-ui",
+      "name": "ZTE Approval Center",
+      "description": "Public OIDC client (PKCE) for the standalone approver SPA (ADR-026), served statically by the gateway at /approver/. Any authenticated realm user (USER or ADMIN role) may decide held calls — deliberately broader than zte-admin-ui's ADMIN-only API surface.",
+      "enabled": true,
+      "protocol": "openid-connect",
+      "publicClient": true,
+      "bearerOnly": false,
+      "standardFlowEnabled": true,
+      "implicitFlowEnabled": false,
+      "directAccessGrantsEnabled": false,
+      "serviceAccountsEnabled": false,
+      "authorizationServicesEnabled": false,
+      "redirectUris": [
+        "https://localhost:8080/approver/*"
+      ],
+      "webOrigins": [
+        "+"
+      ],
+      "attributes": {
+        "pkce.code.challenge.method": "S256"
+      },
+      "protocolMappers": [
+        {
+          "name": "realm-roles-mapper",
+          "protocol": "openid-connect",
+          "protocolMapper": "oidc-usermodel-realm-role-mapper",
+          "consentRequired": false,
+          "config": {
+            "claim.name": "realm_access.roles",
+            "jsonType.label": "String",
+            "multivalued": "true",
+            "userinfo.token.claim": "true",
+            "id.token.claim": "true",
+            "access.token.claim": "true"
+          }
+        },
+        {
+          "name": "username-mapper",
+          "protocol": "openid-connect",
+          "protocolMapper": "oidc-usermodel-property-mapper",
+          "consentRequired": false,
+          "config": {
+            "userinfo.token.claim": "true",
+            "user.attribute": "username",
+            "id.token.claim": "true",
+            "access.token.claim": "true",
+            "claim.name": "preferred_username",
+            "jsonType.label": "String"
+          }
+        }
+      ]
+    },
+    {
       "clientId": "zte-admin-ui",
       "name": "ZTE Admin Console",
       "description": "Public OIDC client (PKCE) for the React admin SPA (ADR-012), served statically by the gateway at /admin/.",

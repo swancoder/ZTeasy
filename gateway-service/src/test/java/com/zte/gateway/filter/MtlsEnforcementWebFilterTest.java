@@ -98,6 +98,18 @@ class MtlsEnforcementWebFilterTest {
     }
 
     @Test
+    void approverApi_noSslInfo_isExcludedAndPassesThrough() {
+        // ADR-026: Approval Center browser traffic is cert-free, same as /api/v1/admin/.
+        when(chain.filter(any())).thenReturn(Mono.empty());
+        MockServerWebExchange ex = exchange("/api/v1/approver/approvals", null);
+
+        StepVerifier.create(new MtlsEnforcementWebFilter(true).filter(ex, chain)).verifyComplete();
+
+        verify(chain).filter(ex);
+        assertThat(ex.getResponse().getStatusCode()).isNull();
+    }
+
+    @Test
     void internalApi_noSslInfo_isExcludedAndPassesThrough() {
         when(chain.filter(any())).thenReturn(Mono.empty());
         MockServerWebExchange ex = exchange("/api/v1/internal/policies", null);

@@ -135,6 +135,49 @@ class AdminAuthorizationFilterTest {
         assertThat(ex.getResponse().getStatusCode()).isEqualTo(HttpStatus.FORBIDDEN);
     }
 
+    /**
+     * ADR-026: the Approval Center API prefix is covered by this same filter,
+     * with its own role-scoped rules — a plain USER may decide held calls.
+     */
+    @Test
+    void approverPath_userRole_matchingYamlAllow_callsChain() {
+        when(chain.filter(any())).thenReturn(Mono.empty());
+        withYamlRules(new PolicyRule("ap1", RuleEffect.ALLOW, "USER", "approver", "/api/v1/approver/**", "*", 0));
+
+        MockServerWebExchange  ex   = exchange("/api/v1/approver/approvals");
+        JwtAuthenticationToken auth = jwtAuth(List.of("USER"));
+
+        StepVerifier.create(
+                filter.filter(ex, chain)
+                      .contextWrite(ReactiveSecurityContextHolder.withAuthentication(auth)))
+                .verifyComplete();
+
+        verify(chain).filter(ex);
+    }
+
+    /**
+     * ADR-026: an agent's client-credentials JWT carries no realm role, so the
+     * role-scoped approver rules can never match it — agents cannot approve
+     * their own held calls.
+     */
+    @Test
+    void approverPath_roleLessAgentJwt_returns403() {
+        withYamlRules(
+                new PolicyRule("ap1", RuleEffect.ALLOW, "USER", "approver", "/api/v1/approver/**", "*", 0),
+                new PolicyRule("ap2", RuleEffect.ALLOW, "ADMIN", "approver", "/api/v1/approver/**", "*", 0));
+
+        MockServerWebExchange  ex   = exchange("/api/v1/approver/approvals");
+        JwtAuthenticationToken auth = jwtAuth(List.of());
+
+        StepVerifier.create(
+                filter.filter(ex, chain)
+                      .contextWrite(ReactiveSecurityContextHolder.withAuthentication(auth)))
+                .verifyComplete();
+
+        verify(chain, never()).filter(any());
+        assertThat(ex.getResponse().getStatusCode()).isEqualTo(HttpStatus.FORBIDDEN);
+    }
+
     @Test
     void explicitYamlDeny_returns403() {
         withYamlRules(new PolicyRule("d1", RuleEffect.DENY, "ADMIN", "admin", "/api/v1/admin/**", "*", 0));

@@ -176,6 +176,7 @@ zte-lightweight/
 | [ADR-023](docs/adr/ADR-023-policy-rule-mcp-target.md) | `mcpTarget` — Scoping agentMcpToolCalls/agentMcpToolHolds Rules to a Specific MCP Backend | Accepted |
 | [ADR-024](docs/adr/ADR-024-untrack-internal-engineering-notes.md) | Untracking Internal Engineering Notes (`CLAUDE.md`, `prompts-hist/`) from the Public Repo | Accepted |
 | [ADR-025](docs/adr/ADR-025-gateway-openapi-documentation.md) | OpenAPI Documentation for the Gateway's Own API + Admin Console "Documentation" Tab | Accepted |
+| [ADR-026](docs/adr/ADR-026-standalone-approver-ui.md) | Standalone Approval Center — a Second UI Surface for the HOLD Queue | Accepted |
 
 ---
 
@@ -247,6 +248,33 @@ pushing the result into that *specific* live connection is best-effort (see ADR-
 Self-Criticism). The demo `crm-account-health-emea-01` agent (`zte-policies.yaml`) holds on
 `send_email`/`draft_followup` — try it: open an SSE session as that agent, call one of those
 tools, then approve or reject it from this tab.
+
+### Approval Center — standalone approver UI (ADR-026)
+
+A second, separate UI surface over the same hold queue, for business
+approvers who shouldn't get the full Admin Console:
+`https://localhost:8080/approver/index.html` — its own SPA
+(`zt-approver-ui/`), its own Keycloak client (`zte-approver-ui`, PKCE), its
+own login screen, one card per held call with **Approve**/**Decline**.
+
+Open to **any authenticated interactive user** (`USER` or `ADMIN` realm
+role — `u2s-approver-api-user`/`-admin` rules on the new
+`/api/v1/approver/**` API), deliberately *not* `source: "*"`: an agent's
+client-credentials JWT carries no realm role, so an agent can never approve
+its own held call. Decisions go through the exact same
+`PendingApprovalService` as the Admin Console tab — one decision path, one
+audit trail (`decided_by` = the approver's username).
+
+```bash
+# Try it: log in as zte-test-user / User@123! (set-keycloak-password.sh sets
+# both users' passwords) and decide a held send_email from the demo agent.
+open https://localhost:8080/approver/index.html
+```
+
+Both SPAs now load their OIDC authority at runtime from `GET /ui-config.js`
+(`zte.ui.oidc-authority`, env `ZTE_UI_OIDC_AUTHORITY`) — the same built
+bundle works against local Keycloak (`localhost:8180`, the default) or a
+reverse-proxied `/auth` deployment (ADR-027).
 
 ### Governance Dashboard (ADR-021)
 

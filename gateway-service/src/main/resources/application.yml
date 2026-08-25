@@ -121,6 +121,12 @@ zte:
     default-effect: ${ZTE_POLICY_DEFAULT_EFFECT:DENY}
     user-client-id: ${ZTE_POLICY_USER_CLIENT_ID:zte-gateway}
 
+  # ── UI runtime config (ADR-026): OIDC authority served to both SPAs via
+  #    GET /ui-config.js — override with ZTE_UI_OIDC_AUTHORITY when Keycloak
+  #    is reverse-proxied under the gateway's own origin (ADR-027, Azure) ──
+  ui:
+    oidc-authority: ${ZTE_UI_OIDC_AUTHORITY:http://localhost:8180/realms/zte-realm}
+
   # ── ACAP per-agent scope profiles (Stage 3 / ADR-020) — additive, opt-in ──
   # tightening on top of agentMcpToolCalls/agentMcpToolHolds above. Unlike
   # policy.file, a location matching zero files is normal, not an error.
@@ -153,6 +159,11 @@ zte:
       - /api/v1/admin/     # Admin Console's own API — would otherwise create a
                             # self-referential noise loop (viewing the audit trail
                             # generates more audit trail)
+      - /approver/         # Approval Center SPA assets (ADR-026) — same class as /admin/
+      - /api/v1/approver/  # Approval Center API — the decision itself is already audited
+                            # as an APPROVED/REJECTED MCP row by PendingApprovalService;
+                            # a transport row per poll would just be noise
+      - /ui-config.js      # runtime OIDC-authority snippet (ADR-026) — static config, no decision
       - /api/v1/internal/  # zt-agents/ops internal endpoints — network-perimeter
                             # tooling traffic, not proxied-service traffic
       - /actuator/         # health checks — same class of noise

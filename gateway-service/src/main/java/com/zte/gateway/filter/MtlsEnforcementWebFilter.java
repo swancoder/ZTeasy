@@ -110,7 +110,10 @@ public class MtlsEnforcementWebFilter implements WebFilter, Ordered {
         if (path.startsWith("/sse") || path.startsWith("/message")) {
             return true;
         }
-        if (path.startsWith("/api/v1/admin/") || path.startsWith("/api/v1/internal/")) {
+        // /api/v1/approver/ (ADR-026): browser traffic from the Approval Center
+        // SPA — cert-free for the same reason /api/v1/admin/ is.
+        if (path.startsWith("/api/v1/admin/") || path.startsWith("/api/v1/internal/")
+                || path.startsWith("/api/v1/approver/")) {
             return false;
         }
         return path.startsWith("/api/v1/");

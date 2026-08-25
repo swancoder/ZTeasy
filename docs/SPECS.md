@@ -66,7 +66,8 @@ auditable — the opposite of a mesh's "hide it in the sidecar" approach. See
 | 24 | `mcpTarget` — scopes `agentMcpToolCalls`/`agentMcpToolHolds` rules to a specific MCP backend (matched against `mcp-backend.name`), so a rule authored against one backend's tool semantics can't silently keep matching if the gateway is repointed at a different one | [023](adr/ADR-023-policy-rule-mcp-target.md) |
 | — | Internal engineering notes (`CLAUDE.md`, `prompts-hist/`) untracked from the public repo — kept and maintained locally, gitignored; note that pre-existing git history still contains them | [024](adr/ADR-024-untrack-internal-engineering-notes.md) |
 | 25 | Gateway OpenAPI documentation: `springdoc-openapi` on `gateway-service` itself (`/v3/api-docs`, `/swagger-ui.html`, both `permitAll` via `ApiDocsSecurityConfig`), Admin Console "Documentation" tab rendering the spec via the existing `swagger-ui-react` dependency (`SchemaDrawer.tsx`'s pattern reused, not duplicated) | [025](adr/ADR-025-gateway-openapi-documentation.md) |
-| 26+ | Backlog (rate limiting, ABAC…) | see §9 |
+| 26 | Standalone Approval Center: second SPA (`zt-approver-ui`) at `/approver/` with its own Keycloak client (`zte-approver-ui`), `/api/v1/approver/approvals[/{id}/approve\|reject]` open to any interactive user (`USER`/`ADMIN` role — never role-less agent JWTs), runtime OIDC authority via `GET /ui-config.js` for both SPAs | [026](adr/ADR-026-standalone-approver-ui.md) |
+| 27+ | Backlog (rate limiting, ABAC…) | see §9 |
 
 **Testing:** `./gradlew test` (unit — every package below has direct
 coverage for its pure decision logic; I/O-calling code that has no
@@ -648,6 +649,9 @@ target_id, relation_type)`.
 | `/api/v1/admin/approvals` | GET | JWT + `ADMIN` | gateway | Pending 🟡 HOLD queue (ADR-019) |
 | `/api/v1/admin/approvals/{id}/approve` | POST | JWT + `ADMIN` | gateway | Forwards the original held call; audits `APPROVED` |
 | `/api/v1/admin/approvals/{id}/reject` | POST | JWT + `ADMIN` | gateway | Honest denial; audits `REJECTED` |
+| `/api/v1/approver/approvals[/{id}/approve\|reject]` | GET/POST | JWT + `USER` or `ADMIN` | gateway | Approval Center API (ADR-026) — same `PendingApprovalService` as the admin rows above; role-scoped so role-less agent JWTs can never decide |
+| `/approver/**` | GET | none (SPA handles its own login) | gateway | Approval Center static bundle (ADR-026) |
+| `/ui-config.js` | GET | none | gateway | Runtime OIDC authority snippet for both SPAs (`zte.ui.oidc-authority`, ADR-026) |
 | `/api/v1/admin/acap-profiles` | GET | JWT + `ADMIN` | gateway | Loaded ACAP profiles + current threshold usage (`AcapProfileView`, ADR-020/ADR-022) — Admin Console "Governance" tab's ACAP Profiles section |
 | `/api/v1/admin/acap-profiles/reload` | POST | JWT + `ADMIN` | gateway | Re-reads `zte.acap.profiles-location`; always 200 (best-effort, see ADR-020) |
 | `/api/v1/admin/governance/agent-activity` | GET | JWT + `ADMIN` | gateway | Per-agent ALLOW/HOLD/DENY counts (`?hours=`, default 24) (ADR-021) |
@@ -889,6 +893,7 @@ automatically instead of needing its own `WebFilter` (ADR-012).
 | [023](adr/ADR-023-policy-rule-mcp-target.md) | `mcpTarget` — Scoping agentMcpToolCalls/agentMcpToolHolds Rules to a Specific MCP Backend |
 | [024](adr/ADR-024-untrack-internal-engineering-notes.md) | Untracking Internal Engineering Notes (`CLAUDE.md`, `prompts-hist/`) from the Public Repo |
 | [025](adr/ADR-025-gateway-openapi-documentation.md) | OpenAPI Documentation for the Gateway's Own API + Admin Console "Documentation" Tab |
+| [026](adr/ADR-026-standalone-approver-ui.md) | Standalone Approval Center — a Second UI Surface for the HOLD Queue |
 
 ---
 

@@ -5,16 +5,15 @@ import CssBaseline from '@mui/material/CssBaseline'
 import App from './App'
 import './index.css'
 
-// Keycloak client "zte-admin-ui" (ADR-012) — public client, authorization
-// code + PKCE. redirect_uri must exactly match a Valid Redirect URI on that
-// client (keycloak/realm-export.json: http://localhost:8080/admin/*). Points
-// at the exact served file (not a bare "/admin/" directory path) — Spring
-// Boot's static-resource serving only auto-resolves index.html at the
-// context root, not nested paths.
-// The authority comes from the gateway-served /ui-config.js (ADR-026): the
+// Keycloak client "zte-approver-ui" (ADR-026) — public client, authorization
+// code + PKCE, mirroring zt-admin-ui's flow but with its own client id so
+// approver logins are distinguishable from Admin Console logins in Keycloak
+// and in the pending_approvals.decided_by audit trail.
+//
+// The authority comes from the gateway-served /ui-config.js (ADR-027): the
 // same built bundle works whether Keycloak is reached directly
-// (http://localhost:8180, local dev — the fallback below) or reverse-proxied
-// under the gateway's own origin (/auth, Azure deployment — ADR-027).
+// (http://localhost:8180, local dev) or reverse-proxied under the gateway's
+// own origin (/auth, Azure deployment).
 declare global {
   interface Window {
     ZTE_OIDC_AUTHORITY?: string
@@ -23,8 +22,8 @@ declare global {
 
 const oidcConfig = {
   authority: window.ZTE_OIDC_AUTHORITY ?? 'http://localhost:8180/realms/zte-realm',
-  client_id: 'zte-admin-ui',
-  redirect_uri: `${window.location.origin}/admin/index.html`,
+  client_id: 'zte-approver-ui',
+  redirect_uri: `${window.location.origin}/approver/index.html`,
   response_type: 'code',
   scope: 'openid profile email',
   // Strip the ?code=...&state=... query string the Keycloak redirect leaves

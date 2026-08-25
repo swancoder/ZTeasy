@@ -39,5 +39,15 @@ docker exec zte-keycloak /opt/keycloak/bin/kcadm.sh set-password \
   --username "${TARGET_USER}" \
   --new-password "${TARGET_PASS}"
 
-echo "[zte-init] Done. Login: username=${TARGET_USER}, password=${TARGET_PASS}"
+# zte-test-user (USER role) — needed since ADR-026: any interactive user may
+# log in to the Approval Center (/approver/), not just zte-admin.
+TEST_USER="zte-test-user"
+TEST_PASS="${2:-User@123!}"
+echo "[zte-init] Setting password for user '${TEST_USER}' in realm '${REALM}' ..."
+docker exec zte-keycloak /opt/keycloak/bin/kcadm.sh set-password \
+  --target-realm "${REALM}" \
+  --username "${TEST_USER}" \
+  --new-password "${TEST_PASS}"
+
+echo "[zte-init] Done. Logins: ${TARGET_USER}/${TARGET_PASS}, ${TEST_USER}/${TEST_PASS}"
 echo "[zte-init] Token endpoint: ${KEYCLOAK_URL}/realms/${REALM}/protocol/openid-connect/token"

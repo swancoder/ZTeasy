@@ -35,6 +35,25 @@ users2service:
     pathPattern: /api/v1/admin/**
     methods: "*"
 
+  # Approval Center API (ADR-026) — any interactive user may decide held
+  # calls for now (USER or ADMIN realm role). Two role-scoped rules rather
+  # than one source "*" rule, deliberately: an agent's client-credentials JWT
+  # carries no realm role, so agents can never reach this API to approve
+  # their own held calls — only humans hold these roles. Tightening later to
+  # a dedicated APPROVER role means editing these two rules, nothing else.
+  - id: u2s-approver-api-user
+    effect: ALLOW
+    source: USER
+    target: approver
+    pathPattern: /api/v1/approver/**
+    methods: "*"
+  - id: u2s-approver-api-admin
+    effect: ALLOW
+    source: ADMIN
+    target: approver
+    pathPattern: /api/v1/approver/**
+    methods: "*"
+
 # When adding a rule, prefer the client:<clientId> URN form for source
 # (ADR-015) — matches an OIDC client id synced into idp_identities, same as
 # the bare form still does for backward compatibility.

@@ -69,7 +69,11 @@ public class AdminAuthorizationFilter implements WebFilter {
     @Override
     public Mono<Void> filter(ServerWebExchange exchange, WebFilterChain chain) {
         String path = exchange.getRequest().getPath().value();
-        if (!path.startsWith("/api/v1/admin/")) {
+        // /api/v1/approver/** (ADR-026) is the second gateway-local, non-routed
+        // API surface needing users2service enforcement — same GlobalFilter
+        // caveat as /api/v1/admin/** (see class Javadoc), same filter, its own
+        // YAML rules (u2s-approver-api-*: USER or ADMIN, vs. admin's ADMIN-only).
+        if (!path.startsWith("/api/v1/admin/") && !path.startsWith("/api/v1/approver/")) {
             return chain.filter(exchange);
         }
 
