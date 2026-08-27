@@ -15,19 +15,53 @@
   "ssoSessionIdleTimeout": 1800,
   "ssoSessionMaxLifespan": 36000,
   "offlineSessionIdleTimeout": 2592000,
-
   "roles": {
     "realm": [
       {
         "name": "ADMIN",
-        "description": "ZTE Administrator — full access to all gateway-protected resources",
+        "description": "ZTE Administrator \u2014 full access to all gateway-protected resources",
         "composite": false,
         "clientRole": false,
         "containerId": "zte-realm"
       },
       {
         "name": "USER",
-        "description": "Standard ZTE user — read-only access to gateway-protected resources",
+        "description": "Standard ZTE user \u2014 read-only access to gateway-protected resources",
+        "composite": false,
+        "clientRole": false,
+        "containerId": "zte-realm"
+      },
+      {
+        "name": "CEO",
+        "description": "Executive overview \u2014 governance posture across all agents",
+        "composite": false,
+        "clientRole": false,
+        "containerId": "zte-realm"
+      },
+      {
+        "name": "CFO",
+        "description": "Cost view \u2014 LLM spend and token metering",
+        "composite": false,
+        "clientRole": false,
+        "containerId": "zte-realm"
+      },
+      {
+        "name": "CTO",
+        "description": "Operational view \u2014 agent activity, registry and health",
+        "composite": false,
+        "clientRole": false,
+        "containerId": "zte-realm"
+      },
+      {
+        "name": "BOARD",
+        "description": "Board/Risk view \u2014 risk tiers, overdue re-authorizations, out-of-policy attempts",
+        "composite": false,
+        "clientRole": false,
+        "containerId": "zte-realm"
+      },
+      {
+        "name": "DPO",
+        "description": "Data-protection view \u2014 data scopes, PII fields and holds involving personal data",
         "composite": false,
         "clientRole": false,
         "containerId": "zte-realm"
@@ -35,7 +69,6 @@
     ],
     "client": {}
   },
-
   "clients": [
     {
       "clientId": "zte-gateway",
@@ -110,7 +143,7 @@
     {
       "clientId": "agent-a",
       "name": "MCP Agent A",
-      "description": "Confidential OIDC client for Agent A (hubspot-mcp). Client Credentials grant only — no interactive user flow.",
+      "description": "Confidential OIDC client for Agent A (hubspot-mcp). Client Credentials grant only \u2014 no interactive user flow.",
       "enabled": true,
       "protocol": "openid-connect",
       "clientAuthenticatorType": "client-secret",
@@ -126,7 +159,7 @@
     {
       "clientId": "agent-b",
       "name": "MCP Agent B",
-      "description": "Confidential OIDC client for Agent B (hubspot-mcp). Client Credentials grant only — no interactive user flow.",
+      "description": "Confidential OIDC client for Agent B (hubspot-mcp). Client Credentials grant only \u2014 no interactive user flow.",
       "enabled": true,
       "protocol": "openid-connect",
       "clientAuthenticatorType": "client-secret",
@@ -158,7 +191,7 @@
     {
       "clientId": "crm-account-health-emea-01",
       "name": "Account-Health Assistant (Nordwind Components demo)",
-      "description": "Confidential OIDC client (Stage 1, ADR-019) for the ACAP CRM demo's Account-Health Assistant agent — read-only, EMEA territory. Client Credentials grant only, matching agent-a/agent-b's shape. See examples-from-vlad/acap-crm-account-health.json for its full ACAP profile.",
+      "description": "Account-Health Assistant agent for the ACAP CRM demo (ADR-019/ADR-020): read-only, EMEA. Client Credentials only. Full ACAP profile: examples-from-vlad/acap-crm-account-health.json",
       "enabled": true,
       "protocol": "openid-connect",
       "clientAuthenticatorType": "client-secret",
@@ -174,7 +207,7 @@
     {
       "clientId": "zte-approver-ui",
       "name": "ZTE Approval Center",
-      "description": "Public OIDC client (PKCE) for the standalone approver SPA (ADR-026), served statically by the gateway at /approver/. Any authenticated realm user (USER or ADMIN role) may decide held calls — deliberately broader than zte-admin-ui's ADMIN-only API surface.",
+      "description": "Public OIDC client (PKCE) for the standalone Approval Center SPA at /approver/ (ADR-026). Any authenticated realm user may decide held calls.",
       "enabled": true,
       "protocol": "openid-connect",
       "publicClient": true,
@@ -278,7 +311,6 @@
       ]
     }
   ],
-
   "users": [
     {
       "username": "zte-admin",
@@ -313,8 +345,87 @@
       "serviceAccountClientId": "zte-gateway",
       "enabled": true,
       "clientRoles": {
-        "realm-management": ["view-users", "view-realm", "view-clients"]
+        "realm-management": [
+          "view-users",
+          "view-realm",
+          "view-clients"
+        ]
       }
+    },
+    {
+      "username": "zte-ceo",
+      "email": "zte-ceo@zte.local",
+      "firstName": "Nordwind",
+      "lastName": "CEO",
+      "enabled": true,
+      "emailVerified": true,
+      "credentials": [],
+      "requiredActions": [],
+      "realmRoles": [
+        "CEO",
+        "USER"
+      ],
+      "clientRoles": {}
+    },
+    {
+      "username": "zte-cfo",
+      "email": "zte-cfo@zte.local",
+      "firstName": "Nordwind",
+      "lastName": "CFO",
+      "enabled": true,
+      "emailVerified": true,
+      "credentials": [],
+      "requiredActions": [],
+      "realmRoles": [
+        "CFO",
+        "USER"
+      ],
+      "clientRoles": {}
+    },
+    {
+      "username": "zte-cto",
+      "email": "zte-cto@zte.local",
+      "firstName": "Nordwind",
+      "lastName": "CTO",
+      "enabled": true,
+      "emailVerified": true,
+      "credentials": [],
+      "requiredActions": [],
+      "realmRoles": [
+        "CTO",
+        "USER"
+      ],
+      "clientRoles": {}
+    },
+    {
+      "username": "zte-board",
+      "email": "zte-board@zte.local",
+      "firstName": "Nordwind",
+      "lastName": "Board",
+      "enabled": true,
+      "emailVerified": true,
+      "credentials": [],
+      "requiredActions": [],
+      "realmRoles": [
+        "BOARD",
+        "USER"
+      ],
+      "clientRoles": {}
+    },
+    {
+      "username": "zte-dpo",
+      "email": "zte-dpo@zte.local",
+      "firstName": "Nordwind",
+      "lastName": "DPO",
+      "enabled": true,
+      "emailVerified": true,
+      "credentials": [],
+      "requiredActions": [],
+      "realmRoles": [
+        "DPO",
+        "USER"
+      ],
+      "clientRoles": {}
     }
   ]
 }

@@ -119,7 +119,7 @@ function ApprovalQueue({ accessToken, username, onSignOut }: QueueProps) {
       })
       if (res.ok) {
         setSnackbar({
-          message: `${approval.toolName} (${approval.displayIdentity ?? approval.agentId}) ${action === 'approve' ? 'approved' : 'declined'}`,
+          message: `${approval.toolName} (${approval.displayIdentity ?? approval.agentId}) ${action === 'approve' ? 'allowed' : 'denied'}`,
           severity: 'success',
         })
         await fetchApprovals()
@@ -135,7 +135,7 @@ function ApprovalQueue({ accessToken, username, onSignOut }: QueueProps) {
   }
 
   return (
-    <Box>
+    <Box sx={{ bgcolor: 'background.default', minHeight: '100vh' }}>
       <AppBar position="static">
         <Toolbar sx={{ gap: 2 }}>
           <Typography variant="h6" sx={{ flexGrow: 1 }}>
@@ -169,7 +169,13 @@ function ApprovalQueue({ accessToken, username, onSignOut }: QueueProps) {
         ) : (
           <Stack spacing={2}>
             {approvals.map((approval) => (
-              <Card key={approval.id} variant="outlined">
+              <Card
+                key={approval.id}
+                sx={{
+                  borderColor: 'warning.main',
+                  bgcolor: 'rgba(245, 166, 35, 0.04)',
+                }}
+              >
                 <CardContent>
                   <Stack direction="row" spacing={1} sx={{ alignItems: 'center', mb: 1 }}>
                     <Chip label="HELD" color="warning" size="small" />
@@ -213,7 +219,7 @@ function ApprovalQueue({ accessToken, username, onSignOut }: QueueProps) {
                     disabled={decidingId === approval.id}
                     onClick={() => setDeclineTarget(approval)}
                   >
-                    Decline
+                    Deny
                   </Button>
                   <Button
                     variant="contained"
@@ -221,7 +227,7 @@ function ApprovalQueue({ accessToken, username, onSignOut }: QueueProps) {
                     disabled={decidingId === approval.id}
                     onClick={() => decide(approval, 'approve')}
                   >
-                    Approve
+                    Allow
                   </Button>
                 </CardActions>
               </Card>
@@ -232,11 +238,11 @@ function ApprovalQueue({ accessToken, username, onSignOut }: QueueProps) {
 
       <ConfirmDialog
         open={declineTarget !== null}
-        title="Decline this call?"
-        confirmLabel="Decline"
+        title="Deny this call?"
+        confirmLabel="Deny"
         message={
           declineTarget
-            ? `Decline "${declineTarget.toolName}" from ${declineTarget.displayIdentity ?? declineTarget.agentId}? The agent (if still connected) receives an honest denial.`
+            ? `Deny "${declineTarget.toolName}" from ${declineTarget.displayIdentity ?? declineTarget.agentId}? The agent (if still connected) receives an honest denial.`
             : ''
         }
         onConfirm={() => {

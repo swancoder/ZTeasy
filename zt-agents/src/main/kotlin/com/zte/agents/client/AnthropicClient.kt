@@ -2,6 +2,7 @@ package com.zte.agents.client
 
 import com.zte.agents.client.model.AnthropicRequest
 import com.zte.agents.client.model.AnthropicResponse
+import com.zte.agents.metering.MeteringReporter
 import org.slf4j.LoggerFactory
 import org.springframework.beans.factory.annotation.Value
 import org.springframework.http.MediaType
@@ -21,6 +22,7 @@ import java.time.Duration
  */
 @Component
 class AnthropicClient(
+    private val metering: MeteringReporter,
     @Value("\${anthropic.api-key}") private val apiKey: String,
     @Value("\${anthropic.model:claude-sonnet-4-6}") private val model: String,
     @Value("\${anthropic.max-tokens:4096}") private val maxTokens: Int,
@@ -49,6 +51,13 @@ class AnthropicClient(
             .retrieve()
             .bodyToMono(AnthropicResponse::class.java)
             .timeout(Duration.ofSeconds(timeoutSeconds))
+            // Report token spend before mapping the body away — the usage
+            // block is the only place the real numbers exist (ZTeasy ADR-029).
+            .doOnNext { response ->
+                response.usage?.let {
+                    metering.report(model, it.inputTokens, it.outputTokens, "policy-audit")
+                }
+            }
             .map { it.textContent() }
             .doOnSuccess { log.info("Anthropic audit complete ({} chars)", it.length) }
     }

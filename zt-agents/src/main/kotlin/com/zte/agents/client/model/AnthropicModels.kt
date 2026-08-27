@@ -14,9 +14,18 @@ data class AnthropicRequest(
 data class AnthropicResponse(
     val id: String,
     val type: String,
-    val content: List<ContentBlock>
+    val content: List<ContentBlock>,
+    // Token counts the API reports for this call — the source of the real
+    // figures behind ZTeasy's spend dashboard (ADR-029). Nullable because
+    // this client must keep working against any response shape that omits it.
+    val usage: Usage? = null
 ) {
     data class ContentBlock(val type: String, val text: String?)
+
+    data class Usage(
+        @JsonProperty("input_tokens") val inputTokens: Long = 0,
+        @JsonProperty("output_tokens") val outputTokens: Long = 0
+    )
 
     fun textContent(): String = content
         .filter { it.type == "text" }

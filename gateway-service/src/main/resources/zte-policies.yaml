@@ -54,6 +54,71 @@ users2service:
     pathPattern: /api/v1/approver/**
     methods: "*"
 
+  # Executive dashboard (Stage 29, ADR-029). Each audience is a real realm
+  # role, and each role is granted exactly the panels it needs — the tabs in
+  # the UI are a reflection of these rules, not a substitute for them.
+  # ADMIN sees everything (it already administers the policy set itself).
+  - id: u2s-dashboard-admin
+    effect: ALLOW
+    source: ADMIN
+    target: dashboard
+    pathPattern: /api/v1/dashboard/**
+    methods: "*"
+  # CEO/BOARD: the whole overview, read-only.
+  - id: u2s-dashboard-ceo
+    effect: ALLOW
+    source: CEO
+    target: dashboard
+    pathPattern: /api/v1/dashboard/**
+    methods: GET
+  - id: u2s-dashboard-board
+    effect: ALLOW
+    source: BOARD
+    target: dashboard
+    pathPattern: /api/v1/dashboard/**
+    methods: GET
+  # CFO: spend only. A deliberately narrower pathPattern rather than a role
+  # check inside the controller — the gate decides, the app doesn't.
+  - id: u2s-dashboard-cfo
+    effect: ALLOW
+    source: CFO
+    target: dashboard
+    pathPattern: /api/v1/dashboard/spend/**
+    methods: GET
+  # CTO: operations — agent activity, registry health.
+  - id: u2s-dashboard-cto
+    effect: ALLOW
+    source: CTO
+    target: dashboard
+    pathPattern: /api/v1/dashboard/operations/**
+    methods: GET
+  # DPO: data-protection view — scopes and PII-relevant decisions.
+  - id: u2s-dashboard-dpo
+    effect: ALLOW
+    source: DPO
+    target: dashboard
+    pathPattern: /api/v1/dashboard/data-protection/**
+    methods: GET
+  # Every role above also needs the shared summary tiles.
+  - id: u2s-dashboard-summary-cfo
+    effect: ALLOW
+    source: CFO
+    target: dashboard
+    pathPattern: /api/v1/dashboard/summary
+    methods: GET
+  - id: u2s-dashboard-summary-cto
+    effect: ALLOW
+    source: CTO
+    target: dashboard
+    pathPattern: /api/v1/dashboard/summary
+    methods: GET
+  - id: u2s-dashboard-summary-dpo
+    effect: ALLOW
+    source: DPO
+    target: dashboard
+    pathPattern: /api/v1/dashboard/summary
+    methods: GET
+
 # When adding a rule, prefer the client:<clientId> URN form for source
 # (ADR-015) — matches an OIDC client id synced into idp_identities, same as
 # the bare form still does for backward compatibility.

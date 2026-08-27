@@ -69,7 +69,8 @@ auditable — the opposite of a mesh's "hide it in the sidecar" approach. See
 | 26 | Standalone Approval Center: second SPA (`zt-approver-ui`) at `/approver/` with its own Keycloak client (`zte-approver-ui`), `/api/v1/approver/approvals[/{id}/approve\|reject]` open to any interactive user (`USER`/`ADMIN` role — never role-less agent JWTs), runtime OIDC authority via `GET /ui-config.js` for both SPAs | [026](adr/ADR-026-standalone-approver-ui.md) |
 | 27 | Azure Container Apps deployment: `zte.auth-proxy.*` (`/auth/**` → Keycloak, off by default), gateway/zt-agents/bridge/agents Dockerfiles, `docker-compose.cloud.yml` local mirror, `deploy/azure/` provisioning scripts, plan in `docs/azure-deployment-plan.md` | [027](adr/ADR-027-azure-container-apps-deployment.md) |
 | 28 | Custom domain + publicly-trusted certificate: second browser-facing Container App (`gateway-web`, HTTP ingress, `demo.zteasy.tech`, Azure managed cert) alongside the agent-facing TCP-passthrough gateway; multi-origin realm generation; `bind-custom-domain.sh` | [028](adr/ADR-028-custom-domain-and-trusted-certificate.md) |
-| 29+ | Backlog (rate limiting, ABAC…) | see §9 |
+| 29 | Executive dashboard: `CEO`/`CFO`/`CTO`/`BOARD`/`DPO` realm roles with per-panel `u2s-dashboard-*` rules, `/api/v1/dashboard/{summary,spend,operations,risk,data-protection}`, real LLM token metering (`llm_usage`, `POST /api/v1/internal/metering/llm`, `zt-agents` reporting its own Anthropic usage), shared MUI theme across both SPAs | [029](adr/ADR-029-executive-dashboard.md) |
+| 30+ | Backlog (rate limiting, ABAC…) | see §9 |
 
 **Testing:** `./gradlew test` (unit — every package below has direct
 coverage for its pure decision logic; I/O-calling code that has no
@@ -728,6 +729,8 @@ target_id, relation_type)`.
 | `/api/v1/admin/approvals` | GET | JWT + `ADMIN` | gateway | Pending 🟡 HOLD queue (ADR-019) |
 | `/api/v1/admin/approvals/{id}/approve` | POST | JWT + `ADMIN` | gateway | Forwards the original held call; audits `APPROVED` |
 | `/api/v1/admin/approvals/{id}/reject` | POST | JWT + `ADMIN` | gateway | Honest denial; audits `REJECTED` |
+| `/api/v1/dashboard/{summary,spend,operations,risk,data-protection}` | GET | JWT + the role each panel is granted to (`u2s-dashboard-*`) | gateway | Executive dashboard panels (ADR-029); a role fetching a panel it isn't granted gets `403` |
+| `/api/v1/internal/metering/llm` | POST | network perimeter (+ internal key) | gateway | Token/cost report from an in-perimeter component (ADR-029); `202 Accepted` |
 | `/api/v1/approver/approvals[/{id}/approve\|reject]` | GET/POST | JWT + `USER` or `ADMIN` | gateway | Approval Center API (ADR-026) — same `PendingApprovalService` as the admin rows above; role-scoped so role-less agent JWTs can never decide |
 | `/approver/**` | GET | none (SPA handles its own login) | gateway | Approval Center static bundle (ADR-026) |
 | `/ui-config.js` | GET | none | gateway | Runtime OIDC authority snippet for both SPAs (`zte.ui.oidc-authority`, ADR-026) |
@@ -981,6 +984,7 @@ automatically instead of needing its own `WebFilter` (ADR-012).
 | [026](adr/ADR-026-standalone-approver-ui.md) | Standalone Approval Center — a Second UI Surface for the HOLD Queue |
 | [027](adr/ADR-027-azure-container-apps-deployment.md) | Azure Deployment — Container Apps, Single External Origin, `/auth` Reverse Proxy |
 | [028](adr/ADR-028-custom-domain-and-trusted-certificate.md) | Custom Domain with a Publicly-Trusted Certificate — a Second, Browser-Facing Ingress |
+| [029](adr/ADR-029-executive-dashboard.md) | Executive Dashboard — Role-Scoped Panels, Real Token Metering, Shared Visual Language |
 
 ---
 

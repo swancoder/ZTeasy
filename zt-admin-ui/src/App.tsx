@@ -15,12 +15,38 @@ import Inventory from './Inventory'
 import Approvals from './Approvals'
 import Governance from './Governance'
 import Documentation from './Documentation'
+import Dashboard from './dashboard/Dashboard'
 
-type View = 'policies' | 'audit' | 'identities' | 'inventory' | 'approvals' | 'governance' | 'documentation'
+type View =
+  | 'overview'
+  | 'policies'
+  | 'audit'
+  | 'identities'
+  | 'inventory'
+  | 'approvals'
+  | 'governance'
+  | 'documentation'
+
+/**
+ * Realm roles carried in the access token (Stage 29, ADR-029) — used only to
+ * decide which audience tabs to offer. Authorization itself is the gateway's
+ * job: every dashboard fetch is checked against the u2s-dashboard-* rules,
+ * so a hidden tab is a convenience and a 403 is the actual control.
+ */
+function realmRoles(token: string | undefined): string[] {
+  if (!token) return []
+  try {
+    const payload = token.split('.')[1]
+    const json = JSON.parse(atob(payload.replace(/-/g, '+').replace(/_/g, '/')))
+    return json?.realm_access?.roles ?? []
+  } catch {
+    return []
+  }
+}
 
 export default function App() {
   const auth = useAuth()
-  const [view, setView] = useState<View>('policies')
+  const [view, setView] = useState<View>('overview')
 
   if (auth.isLoading) {
     return (
@@ -63,9 +89,10 @@ export default function App() {
   }
 
   const accessToken = auth.user?.access_token ?? ''
+  const roles = realmRoles(auth.user?.access_token)
 
   return (
-    <Box>
+    <Box sx={{ bgcolor: 'background.default', minHeight: '100vh' }}>
       <AppBar position="static">
         <Toolbar sx={{ gap: 2 }}>
           <Typography variant="h6" sx={{ flexGrow: 1 }}>
@@ -82,6 +109,7 @@ export default function App() {
           textColor="inherit"
           indicatorColor="secondary"
         >
+          <Tab value="overview" label="Overview" />
           <Tab value="policies" label="Policies" />
           <Tab value="audit" label="Audit Trail" />
           <Tab value="identities" label="Identities" />
@@ -91,6 +119,7 @@ export default function App() {
           <Tab value="documentation" label="Documentation" />
         </Tabs>
       </AppBar>
+      {view === 'overview' && <Dashboard accessToken={accessToken} roles={roles} />}
       {view === 'policies' && <PolicyDashboard accessToken={accessToken} />}
       {view === 'audit' && <AuditTrail accessToken={accessToken} />}
       {view === 'identities' && <Identities accessToken={accessToken} />}

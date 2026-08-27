@@ -178,6 +178,8 @@ zte:
                             # self-referential noise loop (viewing the audit trail
                             # generates more audit trail)
       - /approver/         # Approval Center SPA assets (ADR-026) — same class as /admin/
+      - /api/v1/dashboard/ # Executive dashboard reads (ADR-029) — pure reporting over
+                            # data that is itself already audited
       - /api/v1/approver/  # Approval Center API — the decision itself is already audited
                             # as an APPROVED/REJECTED MCP row by PendingApprovalService;
                             # a transport row per poll would just be noise
