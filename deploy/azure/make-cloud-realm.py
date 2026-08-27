@@ -29,9 +29,19 @@ BROWSER_CLIENT_PATHS = {
     "zte-approver-ui": "/approver/*",
 }
 
+# The executive-dashboard audiences (ADR-029) need working logins in the
+# cloud too — same demo-grade posture as the two users above, since the
+# realm is re-imported from this file on every Keycloak start.
+DEMO_PASSWORD = os.environ.get("ZTE_DEMO_PASSWORD", "Demo@123!")
+
 PASSWORDS = {
     "zte-admin": ADMIN_PASSWORD,
     "zte-test-user": USER_PASSWORD,
+    "zte-ceo": DEMO_PASSWORD,
+    "zte-cfo": DEMO_PASSWORD,
+    "zte-cto": DEMO_PASSWORD,
+    "zte-board": DEMO_PASSWORD,
+    "zte-dpo": DEMO_PASSWORD,
 }
 
 
