@@ -20,8 +20,20 @@ import json
 import os
 import sys
 
-ADMIN_PASSWORD = os.environ.get("ZTE_ADMIN_PASSWORD", "Admin@123!")
-USER_PASSWORD = os.environ.get("ZTE_USER_PASSWORD", "User@123!")
+# Credentials come from the environment, never from this file. The cloud
+# values live in deploy/azure/out/cloud-credentials.env (gitignored) — source
+# it before running this script. A missing variable is a hard error rather
+# than a default: this repository is public, and a committed fallback is
+# exactly how demo passwords end up guarding a live deployment.
+def required(var: str) -> str:
+    value = os.environ.get(var)
+    if not value:
+        raise SystemExit(
+            f"{var} is not set. Source deploy/azure/out/cloud-credentials.env "
+            "before generating the cloud realm."
+        )
+    return value
+
 
 BROWSER_CLIENT_PATHS = {
     "zte-gateway": "/*",
@@ -29,19 +41,26 @@ BROWSER_CLIENT_PATHS = {
     "zte-approver-ui": "/approver/*",
 }
 
-# The executive-dashboard audiences (ADR-029) need working logins in the
-# cloud too — same demo-grade posture as the two users above, since the
-# realm is re-imported from this file on every Keycloak start.
-DEMO_PASSWORD = os.environ.get("ZTE_DEMO_PASSWORD", "Demo@123!")
+# username -> env var holding its password
+USER_PASSWORD_VARS = {
+    "zte-admin": "ZTE_PW_ZTE_ADMIN",
+    "zte-test-user": "ZTE_PW_ZTE_TEST_USER",
+    "zte-ceo": "ZTE_PW_ZTE_CEO",
+    "zte-cfo": "ZTE_PW_ZTE_CFO",
+    "zte-cto": "ZTE_PW_ZTE_CTO",
+    "zte-board": "ZTE_PW_ZTE_BOARD",
+    "zte-dpo": "ZTE_PW_ZTE_DPO",
+}
 
-PASSWORDS = {
-    "zte-admin": ADMIN_PASSWORD,
-    "zte-test-user": USER_PASSWORD,
-    "zte-ceo": DEMO_PASSWORD,
-    "zte-cfo": DEMO_PASSWORD,
-    "zte-cto": DEMO_PASSWORD,
-    "zte-board": DEMO_PASSWORD,
-    "zte-dpo": DEMO_PASSWORD,
+# clientId -> env var holding its secret. realm-export.json keeps obvious
+# "-dev-only" secrets so a localhost clone still runs out of the box; the
+# cloud must not reuse them, since anyone can read them.
+CLIENT_SECRET_VARS = {
+    "zte-gateway": "ZTE_SECRET_ZTE_GATEWAY",
+    "agent-a": "ZTE_SECRET_AGENT_A",
+    "agent-b": "ZTE_SECRET_AGENT_B",
+    "service-a": "ZTE_SECRET_SERVICE_A",
+    "crm-account-health-emea-01": "ZTE_SECRET_CRM_ACCOUNT_HEALTH_EMEA_01",
 }
 
 
@@ -70,11 +89,16 @@ def main() -> None:
         # crm-account-health client's 271-char description).
         if len(client.get("description") or "") > 255:
             client["description"] = client["description"][:252] + "..."
+        secret_var = CLIENT_SECRET_VARS.get(client["clientId"])
+        if secret_var is not None and client.get("secret"):
+            client["secret"] = required(secret_var)
 
     for user in realm.get("users", []):
-        password = PASSWORDS.get(user.get("username"))
-        if password is not None:
-            user["credentials"] = [{"type": "password", "value": password, "temporary": False}]
+        password_var = USER_PASSWORD_VARS.get(user.get("username"))
+        if password_var is not None:
+            user["credentials"] = [
+                {"type": "password", "value": required(password_var), "temporary": False}
+            ]
 
     os.makedirs(os.path.dirname(out_path), exist_ok=True)
     with open(out_path, "w") as f:

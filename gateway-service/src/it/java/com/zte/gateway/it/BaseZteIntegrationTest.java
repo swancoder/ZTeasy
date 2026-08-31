@@ -50,7 +50,13 @@ import static org.awaitility.Awaitility.await;
 abstract class BaseZteIntegrationTest {
 
     // ── Shared password used for all test users ──────────────────────────────
-    protected static final String TEST_PASSWORD  = "Admin@123!";
+    /**
+     * Password this test sets on its own throwaway user inside the ephemeral
+     * Testcontainers Keycloak — not a deployment credential, and deliberately
+     * not a value any real environment uses, so a grep for real passwords in
+     * this repository stays empty.
+     */
+    protected static final String TEST_PASSWORD  = "it-fixture-password";
     protected static final String ADMIN_USERNAME = "zte-admin";
     protected static final String USER_USERNAME  = "zte-test-user";
 

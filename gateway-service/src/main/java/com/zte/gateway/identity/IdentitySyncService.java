@@ -9,7 +9,9 @@ import reactor.core.publisher.Mono;
 
 import java.util.AbstractMap.SimpleEntry;
 import java.util.Map;
+import java.util.List;
 import java.util.UUID;
+import java.util.stream.Collectors;
 
 /**
  * Periodically pulls all identities (and, since ADR-016, their relations —
@@ -63,10 +65,47 @@ public class IdentitySyncService {
     private Mono<Map<String, UUID>> syncIdentities() {
         return Flux.merge(idpClient.fetchUsers(), idpClient.fetchGroups(), idpClient.fetchRoles(),
                         idpClient.fetchClients())
+                .collectList()
+                .flatMap(fetched -> reconcile(fetched).thenReturn(fetched))
+                .flatMapMany(Flux::fromIterable)
                 .flatMap(identity -> repository
                         .upsert(identity.type().name(), identity.externalId(), identity.name(), identity.displayName())
                         .map(internalId -> new SimpleEntry<>(identity.externalId(), internalId)))
                 .collectMap(SimpleEntry::getKey, SimpleEntry::getValue);
+    }
+
+    /**
+     * Removes cached identities the IdP no longer reports (Stage 30).
+     *
+     * <p>The cache used to be append-only, so an identity deleted and
+     * recreated upstream — precisely what a realm re-import does, and the
+     * cloud deployment re-imports on every restart (ADR-027) — accumulated a
+     * new row per cycle under its new {@code external_id}. The Admin
+     * Console then listed the same person several times, and every
+     * orphaned-rule check ran against identities that no longer exist.
+     *
+     * <p>Deliberately per type, and deliberately skipped for a type that
+     * came back empty: an IdP call that fails or returns nothing must never
+     * be read as "the IdP has no users" and empty the cache. That makes this
+     * safe against a partial fetch at the cost of leaving stale rows for one
+     * more cycle in the (rare) case where a type legitimately becomes empty.
+     */
+    private Mono<Void> reconcile(List<IdpIdentity> fetched) {
+        Map<String, List<String>> seenByType = fetched.stream().collect(Collectors.groupingBy(
+                identity -> identity.type().name(),
+                Collectors.mapping(IdpIdentity::externalId, Collectors.toList())));
+
+        return Flux.fromIterable(seenByType.entrySet())
+                .filter(entry -> !entry.getValue().isEmpty())
+                .flatMap(entry -> repository.deleteMissing(entry.getKey(), entry.getValue())
+                        .count()
+                        .doOnNext(removed -> {
+                            if (removed > 0) {
+                                log.info("[ZTE-IDENTITY-SYNC] reconciled: removed {} stale {} identit{} no longer in the IdP",
+                                        removed, entry.getKey(), removed == 1 ? "y" : "ies");
+                            }
+                        }))
+                .then();
     }
 
     /**

@@ -201,6 +201,7 @@ zte-lightweight/
 | [ADR-027](docs/adr/ADR-027-azure-container-apps-deployment.md) | Azure Deployment — Container Apps, Single External Origin, `/auth` Reverse Proxy | Accepted |
 | [ADR-028](docs/adr/ADR-028-custom-domain-and-trusted-certificate.md) | Custom Domain with a Publicly-Trusted Certificate — a Second, Browser-Facing Ingress | Accepted |
 | [ADR-029](docs/adr/ADR-029-executive-dashboard.md) | Executive Dashboard — Role-Scoped Panels, Real Token Metering, Shared Visual Language | Accepted |
+| [ADR-030](docs/adr/ADR-030-credential-hygiene-and-identity-reconciliation.md) | Credential Hygiene and Identity-Cache Reconciliation | Accepted |
 
 ---
 
@@ -290,8 +291,9 @@ its own held call. Decisions go through the exact same
 audit trail (`decided_by` = the approver's username).
 
 ```bash
-# Try it: log in as zte-test-user / User@123! (set-keycloak-password.sh sets
-# both users' passwords) and decide a held send_email from the demo agent.
+# Try it: log in as the USER-role account (scripts/set-keycloak-password.sh
+# sets the local dev passwords; cloud credentials live only in the gitignored
+# deploy/azure/out/cloud-credentials.env) and decide a held send_email.
 open https://localhost:8080/approver/index.html
 ```
 
@@ -527,7 +529,8 @@ the page itself loads.
 # 2. Open the console
 open https://localhost:8080/admin/index.html   # or just visit it in a browser
 
-# 3. Log in as zte-admin / Admin@123!
+# 3. Log in as zte-admin (password from scripts/set-keycloak-password.sh —
+#    local dev only; never reuse it for a deployment reachable from anywhere else)
 ```
 
 **Building without Node/npm installed:** `./gradlew build -x :gateway-service:buildAdminUi`
@@ -876,7 +879,9 @@ chmod +x certs/generate-certs.sh && ./certs/generate-certs.sh
 # 3. Start infrastructure (PostgreSQL + Keycloak)
 docker compose up -d
 
-# 4. Set Keycloak password (first time only)
+# 4. Set Keycloak passwords (first time only). Defaults are localhost-only
+#    development values; override with ZTE_LOCAL_ADMIN_PASSWORD /
+#    ZTE_LOCAL_USER_PASSWORD, or pass them as arguments.
 ./scripts/set-keycloak-password.sh
 
 # 5. Start services (each in a separate terminal)
@@ -887,7 +892,7 @@ docker compose up -d
 # 6. Get an ADMIN token
 TOKEN=$(curl -s -X POST http://localhost:8180/realms/zte-realm/protocol/openid-connect/token \
   -d "grant_type=password&client_id=zte-gateway&client_secret=zte-gateway-secret" \
-  -d "username=zte-admin&password=Admin@123!" | python3 -c "import sys,json; print(json.load(sys.stdin)['access_token'])")
+  -d "username=zte-admin&password=$ZTE_LOCAL_ADMIN_PASSWORD" | python3 -c "import sys,json; print(json.load(sys.stdin)['access_token'])")
 
 # 7. Call the full chain: User → Gateway → Service A → Service B
 # As of ADR-018, /api/v1/** (proxied REST traffic) requires a client certificate in

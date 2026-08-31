@@ -70,7 +70,8 @@ auditable — the opposite of a mesh's "hide it in the sidecar" approach. See
 | 27 | Azure Container Apps deployment: `zte.auth-proxy.*` (`/auth/**` → Keycloak, off by default), gateway/zt-agents/bridge/agents Dockerfiles, `docker-compose.cloud.yml` local mirror, `deploy/azure/` provisioning scripts, plan in `docs/azure-deployment-plan.md` | [027](adr/ADR-027-azure-container-apps-deployment.md) |
 | 28 | Custom domain + publicly-trusted certificate: second browser-facing Container App (`gateway-web`, HTTP ingress, `demo.zteasy.tech`, Azure managed cert) alongside the agent-facing TCP-passthrough gateway; multi-origin realm generation; `bind-custom-domain.sh` | [028](adr/ADR-028-custom-domain-and-trusted-certificate.md) |
 | 29 | Executive dashboard: `CEO`/`CFO`/`CTO`/`BOARD`/`DPO` realm roles with per-panel `u2s-dashboard-*` rules, `/api/v1/dashboard/{summary,spend,operations,risk,data-protection}`, real LLM token metering (`llm_usage`, `POST /api/v1/internal/metering/llm`, `zt-agents` reporting its own Anthropic usage), shared MUI theme across both SPAs | [029](adr/ADR-029-executive-dashboard.md) |
-| 30+ | Backlog (rate limiting, ABAC…) | see §9 |
+| 30 | Credential hygiene and identity-cache reconciliation: cloud credentials only in the gitignored `deploy/azure/out/cloud-credentials.env` (generator fails loudly without them, and rewrites the cloud's OIDC client secrets), repo keeps only obviously-local dev values; `IdentitySyncService` reconciles each identity type against what the IdP still reports, so a realm re-import no longer duplicates every user | [030](adr/ADR-030-credential-hygiene-and-identity-reconciliation.md) |
+| 31+ | Backlog (rate limiting, ABAC…) | see §9 |
 
 **Testing:** `./gradlew test` (unit — every package below has direct
 coverage for its pure decision logic; I/O-calling code that has no
@@ -932,7 +933,7 @@ automatically instead of needing its own `WebFilter` (ADR-012).
 | Medium (cloud) | Postgres and Keycloak state is ephemeral (in-container), so any restart — including `power.sh stop`/`start` — wipes the audit trail and approval queue and re-imports the realm | Deliberate demo tradeoff; `DB_HOST` is the seam to a managed database |
 | Medium | MCP session state in-memory, single-instance | Needs sticky routing or a shared store before scaling out |
 | Medium | True-`401` requests aren't captured in `request_logs` | Named; doesn't affect any existing test |
-| Medium | `idp_identities`/`idp_identity_relations` can be stale up to the sync interval (15 min default) | Deliberate tradeoff to keep policy evaluation zero-I/O; manual sync gives an immediate override |
+| Medium | `idp_identities`/`idp_identity_relations` can be stale up to the sync interval (15 min default) | Deliberate tradeoff to keep policy evaluation zero-I/O; manual sync gives an immediate override. Identities are also reconciled each sync (ADR-030) — relations are not |
 | Medium | `fetchRelations()` is N+1-shaped (2 HTTP calls per user/client) | No known Keycloak Admin API batch alternative; backlog (§9) |
 | Medium | `AutoDiscoveryWorker`'s MCP discovery assumes a stateless `tools/list` call | Unverified against a real session-only agent; backlog (§9) |
 | Medium | Passive `last_successful_call` telemetry depends on an exact name match with no validation at onboarding time | Documented; backlog (§9) |
@@ -944,7 +945,7 @@ automatically instead of needing its own `WebFilter` (ADR-012).
 | Low | `OrphanedRuleChecker`'s startup check can race `IdentitySyncService`'s first sync, a transient false-positive | Self-corrects within one sync interval; observational only |
 | Low | No IT test exercises `group:`-scoped `users2service` matching end-to-end | `zte-realm` has no groups defined yet; backlog (§9) |
 | Low | Several `WebClient`-calling classes (`KeycloakIdpAdapter`, `AutoDiscoveryWorker`, `HealthPollingService`, `McpBackendClient`) have no dedicated mocked-HTTP unit test | Deliberate, repeated choice — proven by IT tests instead (§8) |
-| Low | `inventory_services`/`health_metrics` have no reconciliation for stale rows | Same posture as `idp_identities`; backlog (§9) |
+| Low | `inventory_services`/`health_metrics` have no reconciliation for stale rows | Still open; `idp_identities` itself is reconciled as of ADR-030, so this is now the only append-only cache left |
 | Low | `WARNING` inventory status has no UI action to clear other than delete+re-onboard | The "Fetch" (🔄) button already recovers it once the target's reachable again — no dedicated action needed |
 | Low | `HealthPollingService`'s `/actuator/health` + JSON-shape assumption forces non-Spring backends to fake being one | Backlog (§9) — found live via the `hubspot-mcp` MCP bridge |
 | — | **Keycloak `--import-realm` only imports on first creation** — a `realm-export.json` change (new role grant, redirect URI) silently doesn't apply to an already-running realm | Real, has bitten a real deployment of this repo; needs `docker compose down && up` (destroys dev state) or a live Admin API update — no code fix, an operational gotcha worth remembering |
@@ -985,6 +986,7 @@ automatically instead of needing its own `WebFilter` (ADR-012).
 | [027](adr/ADR-027-azure-container-apps-deployment.md) | Azure Deployment — Container Apps, Single External Origin, `/auth` Reverse Proxy |
 | [028](adr/ADR-028-custom-domain-and-trusted-certificate.md) | Custom Domain with a Publicly-Trusted Certificate — a Second, Browser-Facing Ingress |
 | [029](adr/ADR-029-executive-dashboard.md) | Executive Dashboard — Role-Scoped Panels, Real Token Metering, Shared Visual Language |
+| [030](adr/ADR-030-credential-hygiene-and-identity-reconciliation.md) | Credential Hygiene and Identity-Cache Reconciliation |
 
 ---
 

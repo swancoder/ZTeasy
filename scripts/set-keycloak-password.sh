@@ -5,7 +5,9 @@
 #
 # Run once after `docker compose up -d` and Keycloak is healthy.
 # Usage: ./scripts/set-keycloak-password.sh [password]
-# Default password: Admin@123!
+# Passwords come from ZTE_LOCAL_ADMIN_PASSWORD/ZTE_LOCAL_USER_PASSWORD or the
+# arguments; the defaults below are LOCALHOST-ONLY development values and must
+# never be reused by a deployment reachable from anywhere else.
 # ============================================================
 set -euo pipefail
 
@@ -18,7 +20,7 @@ ADMIN_USER="${KEYCLOAK_ADMIN:-admin}"
 ADMIN_PASS="${KEYCLOAK_ADMIN_PASSWORD:-admin}"
 REALM="zte-realm"
 TARGET_USER="zte-admin"
-TARGET_PASS="${1:-Admin@123!}"
+TARGET_PASS="${1:-${ZTE_LOCAL_ADMIN_PASSWORD:-localdev-admin}}"
 
 echo "[zte-init] Waiting for Keycloak at ${KEYCLOAK_URL} ..."
 until curl -sf "${KEYCLOAK_URL}/health/ready" > /dev/null 2>&1; do
@@ -42,7 +44,7 @@ docker exec zte-keycloak /opt/keycloak/bin/kcadm.sh set-password \
 # zte-test-user (USER role) — needed since ADR-026: any interactive user may
 # log in to the Approval Center (/approver/), not just zte-admin.
 TEST_USER="zte-test-user"
-TEST_PASS="${2:-User@123!}"
+TEST_PASS="${2:-${ZTE_LOCAL_USER_PASSWORD:-localdev-user}}"
 echo "[zte-init] Setting password for user '${TEST_USER}' in realm '${REALM}' ..."
 docker exec zte-keycloak /opt/keycloak/bin/kcadm.sh set-password \
   --target-realm "${REALM}" \

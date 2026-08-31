@@ -237,7 +237,7 @@ for attempt in $(seq 1 10); do
   ADMIN_TOKEN=$(curl -sk -m 30 -X POST \
       "$ORIGIN/auth/realms/zte-realm/protocol/openid-connect/token" \
       -d "grant_type=password&client_id=zte-gateway&client_secret=zte-gateway-secret" \
-      -d "username=zte-admin&password=${ZTE_ADMIN_PASSWORD:-Admin@123!}" \
+      -d "username=zte-admin&password=${ZTE_PW_ZTE_ADMIN:?source deploy/azure/out/cloud-credentials.env}" \
       | python3 -c "import sys,json; print(json.load(sys.stdin).get('access_token',''))" 2>/dev/null || true)
   [ -n "$ADMIN_TOKEN" ] && break
   sleep 20
@@ -254,7 +254,8 @@ fi
 
 echo
 echo "══════════════════════════════════════════════════════"
-echo " Admin Console:    $ORIGIN/admin/index.html   (zte-admin / Admin@123!)"
-echo " Approval Center:  $ORIGIN/approver/index.html (zte-test-user / User@123!)"
+echo " Admin Console:    $ORIGIN/admin/index.html"
+echo " Approval Center:  $ORIGIN/approver/index.html"
+echo " Logins:           deploy/azure/out/cloud-credentials.env (local only)"
 echo " Demo run:         az containerapp job start -n agent-runner -g $RG"
 echo "══════════════════════════════════════════════════════"

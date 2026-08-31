@@ -17,8 +17,9 @@
 #   HUBSPOT_TOKEN in ../hubspot-mcp/.env, ANTHROPIC_API_KEY in ./.env
 #
 #   docker compose -f docker-compose.cloud.yml up -d --build
-#   open https://localhost:8443/admin/index.html   (zte-admin / Admin@123!)
-#   open https://localhost:8443/approver/index.html (zte-test-user / User@123!)
+#   open https://localhost:8443/admin/index.html
+#   open https://localhost:8443/approver/index.html
+#   logins: deploy/azure/out/cloud-credentials.env (gitignored)
 #   docker compose -f docker-compose.cloud.yml --profile demo run --rm agent-runner
 # ============================================================
 

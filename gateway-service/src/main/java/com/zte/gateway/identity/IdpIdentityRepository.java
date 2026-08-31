@@ -6,6 +6,8 @@ import org.springframework.data.repository.query.Param;
 import org.springframework.data.repository.reactive.ReactiveCrudRepository;
 import org.springframework.stereotype.Repository;
 import reactor.core.publisher.Flux;
+
+import java.util.Collection;
 import reactor.core.publisher.Mono;
 
 import java.util.UUID;
@@ -52,6 +54,33 @@ public interface IdpIdentityRepository extends ReactiveCrudRepository<IdpIdentit
      * {@link IdpIdentity#type()}, is the well-established, reliable direction;
      * this is the less-traveled one).
      */
+    /**
+     * Deletes cached identities the IdP no longer reports (Stage 30).
+     *
+     * <p>Without this, the cache only ever grew: an identity that is deleted
+     * and recreated in Keycloak — which is exactly what a realm re-import
+     * does, and the cloud deployment re-imports on every restart by design
+     * (ADR-027) — comes back with a fresh {@code external_id}, so the upsert
+     * inserts a second row and the old one lingers forever. Seen live on
+     * demo.zteasy.tech: {@code zte-admin} and {@code zte-test-user} each
+     * cached four times over. Named as a known gap in SPECS §10
+     * ("no reconciliation for stale rows"); this closes it for identities.
+     *
+     * <p>Scoped by {@code type} so one entity kind's fetch failing can't
+     * wipe another's: the caller passes the ids it actually just saw, per
+     * type, and only that type is reconciled.
+     *
+     * <p>Not {@code @Modifying} — same reasoning as {@link #upsert}: this
+     * returns the deleted rows' ids so the caller can log what it removed.
+     */
+    @Query("""
+            DELETE FROM idp_identities
+             WHERE type = :type
+               AND external_id NOT IN (:keepExternalIds)
+            RETURNING id
+            """)
+    Flux<UUID> deleteMissing(@Param("type") String type, @Param("keepExternalIds") Collection<String> keepExternalIds);
+
     @Query("SELECT EXISTS(SELECT 1 FROM idp_identities WHERE type = :type AND name = :name)")
     Mono<Boolean> existsByTypeAndName(@Param("type") String type, @Param("name") String name);
 

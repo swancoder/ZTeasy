@@ -3,18 +3,22 @@ package com.zte.gateway.identity;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
+import org.mockito.ArgumentCaptor;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import reactor.core.publisher.Flux;
 import reactor.core.publisher.Mono;
 import reactor.test.StepVerifier;
 
+import java.util.Collection;
+import java.util.List;
 import java.util.UUID;
 
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.lenient;
 import static org.mockito.Mockito.never;
+import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
@@ -53,6 +57,10 @@ class IdentitySyncServiceTest {
         lenient().when(repository.upsert(eq("ROLE"), eq("r1"), any(), any())).thenReturn(Mono.just(ROLE_1_ID));
         lenient().when(repository.upsert(eq("ROLE"), eq("r2"), any(), any())).thenReturn(Mono.just(ROLE_2_ID));
         lenient().when(repository.upsert(eq("CLIENT"), eq("c1"), any(), any())).thenReturn(Mono.just(CLIENT_ID));
+
+        // Stage 30: every sync now reconciles away identities the IdP no longer
+        // reports, so the repository is asked to delete-missing per type.
+        lenient().when(repository.deleteMissing(any(), any())).thenReturn(Flux.empty());
 
         lenient().when(idpClient.fetchRelations()).thenReturn(Flux.empty());
         lenient().when(relationRepository.upsert(any(), any(), any())).thenReturn(Mono.empty());
@@ -109,5 +117,42 @@ class IdentitySyncServiceTest {
                 .verifyComplete();
 
         verify(relationRepository, never()).upsert(any(), any(), any());
+    }
+
+    /**
+     * Stage 30: the cache used to be append-only, so a realm re-import (which
+     * gives every identity a new external id) left the old rows behind — seen
+     * live as four copies of zte-admin on demo.zteasy.tech.
+     */
+    @Test
+    void syncNow_reconcilesEachTypeAgainstWhatTheIdpStillReports() {
+        StepVerifier.create(service.syncNow())
+                .expectNext(5)
+                .verifyComplete();
+
+        verify(repository).deleteMissing("USER", List.of("u1"));
+        verify(repository).deleteMissing("GROUP", List.of("g1"));
+        verify(repository).deleteMissing("CLIENT", List.of("c1"));
+        // Both roles were fetched in the same cycle, so both are kept.
+        ArgumentCaptor<Collection<String>> roleIds = ArgumentCaptor.forClass(Collection.class);
+        verify(repository).deleteMissing(eq("ROLE"), roleIds.capture());
+        assertThat(roleIds.getValue()).containsExactlyInAnyOrder("r1", "r2");
+    }
+
+    /**
+     * A type whose fetch came back empty is skipped, never reconciled: an IdP
+     * call that fails or returns nothing must not be read as "there are no
+     * users" and empty the cache.
+     */
+    @Test
+    void syncNow_emptyFetchForAType_doesNotDeleteThatTypesCache() {
+        when(idpClient.fetchGroups()).thenReturn(Flux.empty());
+
+        StepVerifier.create(service.syncNow())
+                .expectNext(4)
+                .verifyComplete();
+
+        verify(repository, never()).deleteMissing(eq("GROUP"), any());
+        verify(repository).deleteMissing("USER", List.of("u1"));
     }
 }
