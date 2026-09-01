@@ -29,6 +29,7 @@ import java.util.UUID;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
@@ -196,7 +197,7 @@ class McpProxySecurityWebFluxTest {
         when(policyEngine.evaluate(eq("agent-a"), eq("get_deals"), any()))
                 .thenReturn(PolicyDecision.allow());
         JsonRpcResponse backendResponse = JsonRpcResponse.success(7, Map.of("content", "3 deals"));
-        when(forwardService.execute(any())).thenReturn(Mono.just(backendResponse));
+        when(forwardService.execute(anyString(), any())).thenReturn(Mono.just(backendResponse));
 
         webTestClient.mutateWith(mockJwt().jwt(jwt -> jwt.claim("azp", "agent-a")))
                 .post().uri("/message?sessionId=session-1")
@@ -205,7 +206,7 @@ class McpProxySecurityWebFluxTest {
                 .exchange()
                 .expectStatus().isAccepted();
 
-        verify(forwardService).execute(any());
+        verify(forwardService).execute(anyString(), any());
 
         @SuppressWarnings("unchecked")
         ArgumentCaptor<ServerSentEvent<String>> captor = ArgumentCaptor.forClass(ServerSentEvent.class);

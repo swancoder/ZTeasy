@@ -12,5 +12,9 @@ import com.zte.gateway.mcp.model.JsonRpcResponse;
  */
 public interface DataMaskingFilter {
 
-    JsonRpcResponse mask(JsonRpcResponse response);
+    /**
+     * @param agentId  the calling agent — masking is per-agent scope (ADR-032)
+     * @param toolName the tool whose result this is (drives resource mapping)
+     */
+    JsonRpcResponse mask(String agentId, String toolName, JsonRpcResponse response);
 }

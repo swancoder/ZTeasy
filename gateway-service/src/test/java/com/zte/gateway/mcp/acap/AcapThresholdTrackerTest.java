@@ -10,7 +10,7 @@ import static org.assertj.core.api.Assertions.assertThat;
  * matching this codebase's other in-memory single-instance state). */
 class AcapThresholdTrackerTest {
 
-    private final AcapThresholdTracker tracker = new AcapThresholdTracker();
+    private final AcapThresholdTracker tracker = TestThresholdTracker.empty();
 
     @Test
     void firstIncrement_returnsOne() {

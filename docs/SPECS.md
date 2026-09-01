@@ -75,7 +75,8 @@ auditable — the opposite of a mesh's "hide it in the sidecar" approach. See
 | 29 | Executive dashboard: `CEO`/`CFO`/`CTO`/`BOARD`/`DPO` realm roles with per-panel `u2s-dashboard-*` rules, `/api/v1/dashboard/{summary,spend,operations,risk,data-protection}`, real LLM token metering (`llm_usage`, `POST /api/v1/internal/metering/llm`, `zt-agents` reporting its own Anthropic usage), shared MUI theme across both SPAs | [029](adr/ADR-029-executive-dashboard.md) |
 | 30 | Credential hygiene and identity-cache reconciliation: cloud credentials only in the gitignored `deploy/azure/out/cloud-credentials.env` (generator fails loudly without them, and rewrites the cloud's OIDC client secrets), repo keeps only obviously-local dev values; `IdentitySyncService` reconciles each identity type against what the IdP still reports, so a realm re-import no longer duplicates every user | [030](adr/ADR-030-credential-hygiene-and-identity-reconciliation.md) |
 | 31 | Policy-audit surfacing + activation overlay: gateway pushes the policy document to zt-agents' structured `/analyze` (works in the cloud, unlike the fetch flow), persisted runs with read-time freshness (`policy_audit_runs`), per-rule on/off toggle (`policy_rule_overrides` + in-memory mirror) applied at all four decision points with `POLICY_INACTIVE_MATCH` logging, console Run/Last-Results drawer with Implement/Modify and orange audit flags; `zte.gateway.ca-cert` closes zt-agents' TLS gap toward the gateway | [031](adr/ADR-031-policy-audit-surfacing-and-activation-overlay.md) |
-| 32+ | Backlog (rate limiting, ABAC…) | see §9 |
+| 32 | ACAP lifecycle and response masking: `acap_profile_lifecycle`/`acap_reauthorizations` overlay (suspend/resume/retire, re-authorization history) with SUSPENDED/RETIRED→DENY and overdue→HOLD enforcement (amending ADR-022's display-only posture), real `AcapDataMaskingFilter` replacing the pass-through stub (structure-aware, marker-based, unknown shapes pass through logged), persistent daily threshold usage (`acap_threshold_usage`, write-behind + startup restore), profiles for agent-a/agent-b | [032](adr/ADR-032-acap-lifecycle-and-response-masking.md) |
+| 33+ | Backlog (rate limiting, ABAC…) | see §9 |
 
 **Testing:** `./gradlew test` (unit — every package below has direct
 coverage for its pure decision logic; I/O-calling code that has no
@@ -745,6 +746,9 @@ target_id, relation_type)`.
 | `/ui-config.js` | GET | none | gateway | Runtime OIDC authority snippet for both SPAs (`zte.ui.oidc-authority`, ADR-026) |
 | `/api/v1/admin/acap-profiles` | GET | JWT + `ADMIN` | gateway | Loaded ACAP profiles + current threshold usage (`AcapProfileView`, ADR-020/ADR-022) — Admin Console "Governance" tab's ACAP Profiles section |
 | `/api/v1/admin/acap-profiles/reload` | POST | JWT + `ADMIN` | gateway | Re-reads `zte.acap.profiles-location`; always 200 (best-effort, see ADR-020) |
+| `/api/v1/admin/acap-profiles/{agentId}/status` | PUT | JWT + `ADMIN` | gateway | Lifecycle transition ACTIVE/SUSPENDED/RETIRED; `404` without a loaded profile (ADR-032) |
+| `/api/v1/admin/acap-profiles/{agentId}/reauthorize` | POST | JWT + `ADMIN` | gateway | Records a re-authorization and moves the effective due date (ADR-032) |
+| `/api/v1/admin/acap-profiles/{agentId}/reauthorizations` | GET | JWT + `ADMIN` | gateway | Append-only re-authorization history (ADR-032) |
 | `/api/v1/admin/governance/agent-activity` | GET | JWT + `ADMIN` | gateway | Per-agent ALLOW/HOLD/DENY counts (`?hours=`, default 24) (ADR-021) |
 | `/api/v1/admin/governance/out-of-policy` | GET | JWT + `ADMIN` | gateway | Latest 50 MCP-agent denials, newest first (ADR-021) |
 | `/api/v1/admin/governance/report` | GET | JWT + `ADMIN` | gateway | Combined JSON export of the above two (`?hours=`) (ADR-021) |
@@ -947,6 +951,8 @@ automatically instead of needing its own `WebFilter` (ADR-012).
 | Medium | `AutoDiscoveryWorker`'s MCP discovery assumes a stateless `tools/list` call | Unverified against a real session-only agent; backlog (§9) |
 | Medium | Passive `last_successful_call` telemetry depends on an exact name match with no validation at onboarding time | Documented; backlog (§9) |
 | Low | `decision_effect` is status-code-derived, not per-filter provenance | Named; backlog (§9) |
+| Medium | A suspended agent and a disabled rule produce the same refusal by different mechanisms — an operator must check two overlays (ADR-031/ADR-032) | Each refusal names its source in the reason; no unified view yet |
+| Medium | Response masking only understands `properties`-shaped payloads; other shapes pass through unmasked (logged) | Named in ADR-032; a per-backend response schema is the real fix |
 | Low | `PolicyMatcher` is a full linear scan per category per request | Fine at `<100`-rule MVP scale |
 | Low | `POST /api/v1/internal/policies/reload` has network-perimeter-only auth | Acceptable for MVP (Docker-bridge only); ADR-012 adds an ADMIN-gated counterpart, and ADR-027's amendment adds the shared-secret guard for ingress-exposed deployments |
 | Low (cloud) | In Container Apps, `/actuator/health` is served on each service's mTLS API port (`MANAGEMENT_PORT` == API port) because an app publishes only one port — the management port's "no client cert needed" property is lost there | Only affects the cloud topology; the gateway's poll already carries the client cert |
@@ -997,6 +1003,7 @@ automatically instead of needing its own `WebFilter` (ADR-012).
 | [029](adr/ADR-029-executive-dashboard.md) | Executive Dashboard — Role-Scoped Panels, Real Token Metering, Shared Visual Language |
 | [030](adr/ADR-030-credential-hygiene-and-identity-reconciliation.md) | Credential Hygiene and Identity-Cache Reconciliation |
 | [031](adr/ADR-031-policy-audit-surfacing-and-activation-overlay.md) | Policy-Audit Surfacing and the Activation Overlay |
+| [032](adr/ADR-032-acap-lifecycle-and-response-masking.md) | ACAP Lifecycle Management and Response Masking (amends ADR-022) |
 
 ---
 

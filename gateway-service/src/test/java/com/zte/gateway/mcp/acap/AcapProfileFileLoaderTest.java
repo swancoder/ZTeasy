@@ -76,7 +76,11 @@ class AcapProfileFileLoaderTest {
         assertThat(profile.agent().name()).isEqualTo("Account-Health Assistant");
         assertThat(profile.agent().client()).isEqualTo("Nordwind Components");
         assertThat(profile.agent().owner().email()).isEqualTo("sales-ops@nordwind.example");
-        assertThat(profile.agent().reauthDue()).isEqualTo("2026-02-01");
+        // Stage 32 (ADR-032): the demo profile's due date moved into the
+        // future — overdue re-authorization now escalates every ALLOW to HOLD,
+        // so a permanently-stale baked date would hold every demo call. The
+        // overdue path is exercised deliberately via the reauthorize API.
+        assertThat(profile.agent().reauthDue()).isEqualTo("2027-02-01");
 
         assertThat(profile.risk()).isNotNull();
         assertThat(profile.risk().euAiActClass()).isEqualTo("limited");

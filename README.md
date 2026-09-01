@@ -205,6 +205,7 @@ zte-lightweight/
 | [ADR-029](docs/adr/ADR-029-executive-dashboard.md) | Executive Dashboard — Role-Scoped Panels, Real Token Metering, Shared Visual Language | Accepted |
 | [ADR-030](docs/adr/ADR-030-credential-hygiene-and-identity-reconciliation.md) | Credential Hygiene and Identity-Cache Reconciliation | Accepted |
 | [ADR-031](docs/adr/ADR-031-policy-audit-surfacing-and-activation-overlay.md) | Policy-Audit Surfacing and the Activation Overlay | Accepted |
+| [ADR-032](docs/adr/ADR-032-acap-lifecycle-and-response-masking.md) | ACAP Lifecycle Management and Response Masking (amends ADR-022) | Accepted |
 
 ---
 

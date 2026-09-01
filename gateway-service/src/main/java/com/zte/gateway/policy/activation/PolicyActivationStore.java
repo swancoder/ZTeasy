@@ -3,6 +3,8 @@ package com.zte.gateway.policy.activation;
 import com.zte.gateway.policy.def.PolicyRule;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.boot.context.event.ApplicationReadyEvent;
+import org.springframework.context.event.EventListener;
 import org.springframework.stereotype.Component;
 import reactor.core.publisher.Mono;
 
@@ -33,6 +35,17 @@ public class PolicyActivationStore {
 
     public PolicyActivationStore(PolicyRuleOverrideRepository repository) {
         this.repository = repository;
+    }
+
+    /**
+     * Loaded on application-ready rather than in the constructor: bean
+     * construction races Flyway's migration, so a constructor read can fail
+     * on the run that creates the table (found live in stage 32 while adding
+     * two more stores with the same shape). Until it fires, every rule reads
+     * as enabled — the correct default.
+     */
+    @EventListener(ApplicationReadyEvent.class)
+    void load() {
         repository.findAll()
                 .doOnNext(o -> enabledByRuleId.put(o.ruleId(), o.enabled()))
                 .count()

@@ -22,6 +22,7 @@ import java.util.UUID;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
@@ -96,7 +97,7 @@ class PendingApprovalServiceTest {
         JsonRpcResponse backendResponse = JsonRpcResponse.success(7, Map.of("status", "sent"));
 
         when(repository.findById(id)).thenReturn(Mono.just(approval));
-        when(forwardService.execute(any())).thenReturn(Mono.just(backendResponse));
+        when(forwardService.execute(anyString(), any())).thenReturn(Mono.just(backendResponse));
         when(sessionManager.exists("session-1")).thenReturn(true);
         when(repository.save(any())).thenAnswer(inv -> Mono.just(inv.getArgument(0)));
 
@@ -108,7 +109,7 @@ class PendingApprovalServiceTest {
                 .verifyComplete();
 
         ArgumentCaptor<JsonRpcRequest> rpcCaptor = ArgumentCaptor.forClass(JsonRpcRequest.class);
-        verify(forwardService).execute(rpcCaptor.capture());
+        verify(forwardService).execute(anyString(), rpcCaptor.capture());
         assertThat(rpcCaptor.getValue().toolName()).isEqualTo("send_email");
         assertThat(rpcCaptor.getValue().toolArguments()).containsEntry("to", "rep@nordwind.example");
 
@@ -129,7 +130,7 @@ class PendingApprovalServiceTest {
         PendingApproval approval = pending(id);
 
         when(repository.findById(id)).thenReturn(Mono.just(approval));
-        when(forwardService.execute(any())).thenReturn(Mono.just(JsonRpcResponse.success(7, Map.of())));
+        when(forwardService.execute(anyString(), any())).thenReturn(Mono.just(JsonRpcResponse.success(7, Map.of())));
         when(sessionManager.exists("session-1")).thenReturn(false);
         when(repository.save(any())).thenAnswer(inv -> Mono.just(inv.getArgument(0)));
 
@@ -154,7 +155,7 @@ class PendingApprovalServiceTest {
                 .assertNext(saved -> assertThat(saved.status()).isEqualTo("REJECTED"))
                 .verifyComplete();
 
-        verify(forwardService, never()).execute(any());
+        verify(forwardService, never()).execute(anyString(), any());
 
         ArgumentCaptor<McpAuditEvent> auditCaptor = ArgumentCaptor.forClass(McpAuditEvent.class);
         verify(auditService).record(auditCaptor.capture());

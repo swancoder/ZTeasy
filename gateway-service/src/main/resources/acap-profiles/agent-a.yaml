@@ -1,0 +1,44 @@
+# ACAP scope profile for Agent A (Stage 32, ADR-032).
+#
+# Agent A's coarse grant in zte-policies.yaml is get_deals only. This profile
+# exists so the agent is GOVERNED rather than merely permitted: the dashboard
+# counts agents with a declared scope, and a governed agent has an owner, a
+# re-authorization date and a declared data footprint — which is the whole
+# claim the product makes.
+#
+# Note the tool-name convention (AcapScopeEvaluator): scope.read resources map
+# to read_<resource>. get_deals predates that convention, so the field list
+# below governs response masking and the declared footprint; the request-side
+# resource check does not fire for it. Renaming the tool to read_deals would
+# bring it under the argument-level checks too — deliberately not done here,
+# since agent-a exists to exercise the pre-ACAP tool surface.
+agentId: agent-a
+# This demo agent is not territory-scoped; GLOBAL is the explicit
+# declaration of that, since the schema requires the field to be stated
+# rather than left to interpretation.
+territory: GLOBAL
+
+agent:
+  name: Deals Reader (demo agent A)
+  client: ZTeasy internal demo
+  owner:
+    name: Platform Engineering
+    email: platform@zteasy.example
+  deploymentDate: "2026-08-01"
+  reauthDue: "2027-02-01"
+
+risk:
+  euAiActClass: minimal
+  internalTier: 3
+
+scope:
+  read:
+    - resource: deals
+      fields: [dealname, amount, dealstage]
+  writeAllowed: false
+
+thresholds:
+  - metric: deal_reads_per_day
+    toolName: get_deals
+    limit: 200
+    onExceed: hold

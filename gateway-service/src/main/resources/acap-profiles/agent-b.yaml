@@ -1,0 +1,35 @@
+# ACAP scope profile for Agent B (Stage 32, ADR-032).
+#
+# Unlike agent-a and the CRM assistant, this agent legitimately WRITES
+# (update_deal_stage) — it is the profile that demonstrates writeAllowed: true
+# being a deliberate, owned decision rather than an oversight, and that a
+# write-capable agent still carries a volume ceiling and a review date.
+agentId: agent-b
+# Not territory-scoped — stated explicitly, as the schema requires.
+territory: GLOBAL
+
+agent:
+  name: Deal Stage Updater (demo agent B)
+  client: ZTeasy internal demo
+  owner:
+    name: Sales Operations Lead
+    email: sales-ops@nordwind.example
+  deploymentDate: "2026-08-01"
+  reauthDue: "2027-02-01"
+
+risk:
+  euAiActClass: limited
+  internalTier: 2
+
+scope:
+  read:
+    - resource: deals
+      fields: [dealname, amount, dealstage, hubspot_owner_id]
+  # Deliberately true: this agent's whole purpose is moving deal stages.
+  writeAllowed: true
+
+thresholds:
+  - metric: deal_updates_per_day
+    toolName: update_deal_stage
+    limit: 50
+    onExceed: hold

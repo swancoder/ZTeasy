@@ -60,7 +60,8 @@ the protocol does not allow us to change.
   anything inside the network can call the backend directly, bypassing every
   decision above. Closing this is the first item on the agreed backlog.
 - Session state is in-memory: one gateway instance, no shared store.
-- Data masking on responses is a pass-through stub — the gate controls
-  *whether* data flows, not yet *what* is in it.
+- Data masking is real as of stage 32 (values outside an agent's ACAP field
+  scope are replaced with a marker), but only for response shapes it
+  understands — see FEAT-05's limits.
 - One configured backend at a time; the registry (FEAT-09) knows about MCP
   targets but routing is not registry-driven for MCP.

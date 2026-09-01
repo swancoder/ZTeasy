@@ -91,7 +91,7 @@ public class PendingApprovalService {
 
     private Mono<PendingApproval> executeApproval(PendingApproval approval, String decidedBy) {
         JsonRpcRequest rpc = reconstruct(approval);
-        return forwardService.execute(rpc)
+        return forwardService.execute(approval.agentId(), rpc)
                 .doOnNext(resp -> {
                     log.info("MCP APPROVE approvalId={} agentId={} tool={} decidedBy={}",
                             approval.id(), approval.agentId(), approval.toolName(), decidedBy);

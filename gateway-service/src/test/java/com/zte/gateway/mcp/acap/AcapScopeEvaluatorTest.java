@@ -12,7 +12,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 /** Unit tests for {@link AcapScopeEvaluator} (Stage 3, ADR-020). */
 class AcapScopeEvaluatorTest {
 
-    private final AcapScopeEvaluator evaluator = new AcapScopeEvaluator(new AcapThresholdTracker());
+    private final AcapScopeEvaluator evaluator = new AcapScopeEvaluator(TestThresholdTracker.empty());
 
     private static final AcapProfile PROFILE = new AcapProfile(
             "crm-account-health-emea-01", "EMEA",
@@ -107,7 +107,7 @@ class AcapScopeEvaluatorTest {
 
     @Test
     void underLimit_allowStaysAllow() {
-        AcapScopeEvaluator eval = new AcapScopeEvaluator(new AcapThresholdTracker());
+        AcapScopeEvaluator eval = new AcapScopeEvaluator(TestThresholdTracker.empty());
         Optional<PolicyDecision> result = eval.checkThresholds(PROFILE_WITH_THRESHOLD, "draft_followup",
                 PolicyDecision.Outcome.ALLOW);
         assertThat(result).isEmpty();
@@ -115,7 +115,7 @@ class AcapScopeEvaluatorTest {
 
     @Test
     void exceedingLimit_escalatesAllowToHold() {
-        AcapScopeEvaluator eval = new AcapScopeEvaluator(new AcapThresholdTracker());
+        AcapScopeEvaluator eval = new AcapScopeEvaluator(TestThresholdTracker.empty());
         eval.checkThresholds(PROFILE_WITH_THRESHOLD, "draft_followup", PolicyDecision.Outcome.ALLOW); // 1
         eval.checkThresholds(PROFILE_WITH_THRESHOLD, "draft_followup", PolicyDecision.Outcome.ALLOW); // 2, at limit
         Optional<PolicyDecision> result = eval.checkThresholds(PROFILE_WITH_THRESHOLD, "draft_followup",
@@ -128,7 +128,7 @@ class AcapScopeEvaluatorTest {
 
     @Test
     void exceedingLimit_alreadyHeld_notReEscalated() {
-        AcapScopeEvaluator eval = new AcapScopeEvaluator(new AcapThresholdTracker());
+        AcapScopeEvaluator eval = new AcapScopeEvaluator(TestThresholdTracker.empty());
         eval.checkThresholds(PROFILE_WITH_THRESHOLD, "draft_followup", PolicyDecision.Outcome.ALLOW);
         eval.checkThresholds(PROFILE_WITH_THRESHOLD, "draft_followup", PolicyDecision.Outcome.ALLOW);
         Optional<PolicyDecision> result = eval.checkThresholds(PROFILE_WITH_THRESHOLD, "draft_followup",
@@ -139,7 +139,7 @@ class AcapScopeEvaluatorTest {
 
     @Test
     void nonMatchingToolName_noThresholdConsulted() {
-        AcapScopeEvaluator eval = new AcapScopeEvaluator(new AcapThresholdTracker());
+        AcapScopeEvaluator eval = new AcapScopeEvaluator(TestThresholdTracker.empty());
         Optional<PolicyDecision> result = eval.checkThresholds(PROFILE_WITH_THRESHOLD, "read_contacts",
                 PolicyDecision.Outcome.ALLOW);
         assertThat(result).isEmpty();
@@ -147,7 +147,7 @@ class AcapScopeEvaluatorTest {
 
     @Test
     void noThresholdsConfigured_noOpinion() {
-        AcapScopeEvaluator eval = new AcapScopeEvaluator(new AcapThresholdTracker());
+        AcapScopeEvaluator eval = new AcapScopeEvaluator(TestThresholdTracker.empty());
         Optional<PolicyDecision> result = eval.checkThresholds(PROFILE, "draft_followup", PolicyDecision.Outcome.ALLOW);
         assertThat(result).isEmpty();
     }

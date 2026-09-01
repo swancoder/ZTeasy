@@ -49,16 +49,33 @@ the next otherwise-allowed call is escalated to a hold rather than refused —
 volume is a reason to involve a human, not to fail.
 
 **Given** a profile whose re-authorisation date has passed, **when** the
-dashboards render, **then** it is flagged overdue — but calls are **not**
-blocked: re-authorisation is a human process, deliberately not a technical
-gate.
+agent calls anything, **then** every otherwise-allowed call is escalated to
+a human decision (stage 32) — work continues under supervision rather than
+stopping, and the overdue date is named in the reason.
+
+**Given** an agent an operator has suspended or retired, **when** it calls
+anything, **then** every call is refused, naming the lifecycle state — the
+refusal is attributable to a person's decision, not to policy.
+
+**Given** a re-authorisation, **when** it is recorded, **then** who did it,
+when, until when and any note are kept permanently, and the effective due
+date moves.
+
+**Given** a response from the backend containing fields outside the
+profile's list, **when** it passes back through the gate, **then** those
+values are replaced with a visible marker (stage 32) — the field-scope check
+now applies to what comes back, not only to what was asked for.
 
 ## Limits
 
-- Threshold counters are in-memory and reset daily; a restart forgets usage.
+- Threshold counters are persisted daily and restored at startup, but each
+  gateway instance counts in memory, so a multi-instance deployment can
+  exceed a limit by up to one instance's worth.
 - The implemented schema is a subset of the source ACAP format — enough for
   territory, fields, write and volume, not the full vocabulary.
 - Metadata (owner, risk class) is display-only by design; nothing enforces it.
-- Field checks apply to what the agent *requests*, not to what the backend
-  returns — a backend ignoring the projection would not be caught here
-  (response filtering belongs to the masking stub in FEAT-04).
+- Response masking understands the `properties`-shaped payloads this
+  deployment fronts; a differently-shaped response passes through unmasked
+  (logged) rather than being mangled.
+- `RETIRED` is enforced identically to `SUSPENDED` — a label of intent, not
+  a separate mechanism.

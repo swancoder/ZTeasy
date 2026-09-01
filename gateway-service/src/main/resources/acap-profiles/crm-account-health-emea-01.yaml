@@ -26,7 +26,11 @@ agent:
     name: Sales Operations Lead
     email: sales-ops@nordwind.example
   deploymentDate: "2026-08-01"
-  reauthDue: "2026-02-01"
+  # Stage 32 (ADR-032): a future date. Overdue re-authorization is now
+  # ENFORCED (every ALLOW escalates to HOLD), so a permanently-stale baked
+  # date would silently hold every call in every demo. The overdue scenario
+  # is demonstrated deliberately via POST .../reauthorize with a past date.
+  reauthDue: "2027-02-01"
 
 # Display-only — no enforcement.
 risk:

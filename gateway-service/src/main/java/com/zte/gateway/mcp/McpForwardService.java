@@ -24,7 +24,8 @@ public class McpForwardService {
         this.dataMaskingFilter = dataMaskingFilter;
     }
 
-    public Mono<JsonRpcResponse> execute(JsonRpcRequest rpc) {
-        return backendClient.forward(rpc).map(dataMaskingFilter::mask);
+    public Mono<JsonRpcResponse> execute(String agentId, JsonRpcRequest rpc) {
+        return backendClient.forward(rpc)
+                .map(response -> dataMaskingFilter.mask(agentId, rpc.toolName(), response));
     }
 }

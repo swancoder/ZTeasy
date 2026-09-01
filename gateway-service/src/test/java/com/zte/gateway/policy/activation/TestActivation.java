@@ -35,6 +35,10 @@ public final class TestActivation {
                         .toList()));
         Mockito.lenient().when(repo.upsert(Mockito.anyString(), Mockito.anyBoolean(), Mockito.anyString()))
                 .thenAnswer(inv -> Mono.just(inv.getArgument(0, String.class)));
-        return new PolicyActivationStore(repo);
+        PolicyActivationStore store = new PolicyActivationStore(repo);
+        // Stage 32: loading moved to ApplicationReadyEvent (Flyway race), so
+        // tests trigger it explicitly instead of relying on the constructor.
+        store.load();
+        return store;
     }
 }

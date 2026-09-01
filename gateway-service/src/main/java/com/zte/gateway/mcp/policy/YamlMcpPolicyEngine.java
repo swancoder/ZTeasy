@@ -4,6 +4,8 @@ import com.zte.gateway.identity.IdentitySources;
 import com.zte.gateway.mcp.acap.AcapProfile;
 import com.zte.gateway.mcp.acap.AcapProfileStore;
 import com.zte.gateway.mcp.acap.AcapScopeEvaluator;
+import com.zte.gateway.mcp.acap.lifecycle.AcapLifecycleState;
+import com.zte.gateway.mcp.acap.lifecycle.AcapLifecycleStore;
 import com.zte.gateway.policy.activation.ActivePolicyEvaluator;
 import com.zte.gateway.policy.def.PolicyDefaultsProperties;
 import com.zte.gateway.policy.def.PolicyDefinitionStore;
@@ -40,6 +42,7 @@ public class YamlMcpPolicyEngine implements McpPolicyEngine {
     private final PolicyDefaultsProperties policyDefaults;
     private final AcapProfileStore acapProfileStore;
     private final AcapScopeEvaluator acapScopeEvaluator;
+    private final AcapLifecycleStore lifecycleStore;
     private final String mcpBackendName;
 
     public YamlMcpPolicyEngine(PolicyDefinitionStore policyDefinitionStore,
@@ -47,12 +50,14 @@ public class YamlMcpPolicyEngine implements McpPolicyEngine {
                                 PolicyDefaultsProperties policyDefaults,
                                 AcapProfileStore acapProfileStore,
                                 AcapScopeEvaluator acapScopeEvaluator,
+                                AcapLifecycleStore lifecycleStore,
                                 @Value("${mcp-backend.name:hubspot-mcp}") String mcpBackendName) {
         this.policyDefinitionStore = policyDefinitionStore;
         this.activeEvaluator = activeEvaluator;
         this.policyDefaults = policyDefaults;
         this.acapProfileStore = acapProfileStore;
         this.acapScopeEvaluator = acapScopeEvaluator;
+        this.lifecycleStore = lifecycleStore;
         this.mcpBackendName = mcpBackendName;
     }
 
@@ -63,6 +68,15 @@ public class YamlMcpPolicyEngine implements McpPolicyEngine {
         }
         if (toolName == null || toolName.isBlank()) {
             return PolicyDecision.deny("Missing tool name");
+        }
+
+        // Stage 32 (ADR-032): lifecycle gate before any rule work — a
+        // suspended or retired agent is denied outright, with the state named
+        // so the refusal is attributable to an operator's decision, not policy.
+        String lifecycleStatus = lifecycleStore.status(agentId);
+        if (!AcapLifecycleState.ACTIVE.equals(lifecycleStatus)) {
+            return PolicyDecision.deny("Agent '" + agentId + "' is " + lifecycleStatus.toLowerCase()
+                    + " (ACAP lifecycle) — every call is refused until an operator reactivates it");
         }
 
         List<String> sources = IdentitySources.enrichClient(agentId);
@@ -128,7 +142,19 @@ public class YamlMcpPolicyEngine implements McpPolicyEngine {
         if (scopeDecision.isPresent()) {
             return scopeDecision.get();
         }
-        return acapScopeEvaluator.checkThresholds(profile.get(), toolName, decision.outcome()).orElse(decision);
+        PolicyDecision afterThresholds =
+                acapScopeEvaluator.checkThresholds(profile.get(), toolName, decision.outcome()).orElse(decision);
+
+        // Stage 32 (ADR-032, amending ADR-022's display-only posture): an
+        // ACTIVE agent whose re-authorization is overdue keeps working, but
+        // every ALLOW goes through a human — supervision, not a stoppage.
+        if (afterThresholds.outcome() == PolicyDecision.Outcome.ALLOW
+                && lifecycleStore.isReauthOverdue(profile.get())) {
+            String due = lifecycleStore.effectiveReauthDue(profile.get()).map(Object::toString).orElse("?");
+            return PolicyDecision.hold("Held: agent '" + agentId + "'s re-authorization has been overdue since "
+                    + due + " (ACAP lifecycle) — approve to proceed, or re-authorize the agent");
+        }
+        return afterThresholds;
     }
 
     /**

@@ -6,6 +6,8 @@ import com.zte.gateway.mcp.acap.AcapProfileStore;
 import com.zte.gateway.mcp.acap.AcapReadGrant;
 import com.zte.gateway.mcp.acap.AcapScope;
 import com.zte.gateway.mcp.acap.AcapScopeEvaluator;
+import com.zte.gateway.mcp.acap.TestThresholdTracker;
+import com.zte.gateway.mcp.acap.lifecycle.TestLifecycle;
 import com.zte.gateway.mcp.acap.AcapThreshold;
 import com.zte.gateway.mcp.acap.AcapThresholdTracker;
 import com.zte.gateway.policy.def.PolicyDefaultsProperties;
@@ -45,7 +47,7 @@ class YamlMcpPolicyEngineTest {
     @Mock AcapProfileStore acapProfileStore;
 
     private final PolicyMatcher matcher = new PolicyMatcher();
-    private final AcapScopeEvaluator acapScopeEvaluator = new AcapScopeEvaluator(new AcapThresholdTracker());
+    private final AcapScopeEvaluator acapScopeEvaluator = new AcapScopeEvaluator(TestThresholdTracker.empty());
     private PolicyDefaultsProperties defaults;
     private YamlMcpPolicyEngine engine;
 
@@ -53,7 +55,7 @@ class YamlMcpPolicyEngineTest {
     void setUp() {
         defaults = new PolicyDefaultsProperties();
         defaults.setDefaultEffect(RuleEffect.DENY);
-        engine = new YamlMcpPolicyEngine(store, TestActivation.allActive(matcher), defaults, acapProfileStore, acapScopeEvaluator, MCP_BACKEND_NAME);
+        engine = new YamlMcpPolicyEngine(store, TestActivation.allActive(matcher), defaults, acapProfileStore, acapScopeEvaluator, TestLifecycle.empty(), MCP_BACKEND_NAME);
     }
 
     private void withRules(PolicyRule... rules) {

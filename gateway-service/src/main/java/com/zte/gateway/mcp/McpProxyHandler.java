@@ -160,7 +160,7 @@ public class McpProxyHandler {
             }
             case ALLOW -> {
                 log.debug("MCP ALLOW sessionId={} agentId={} tool={}", sessionId, agentId, toolName);
-                yield forwardService.execute(rpc)
+                yield forwardService.execute(agentId, rpc)
                         .doOnNext(resp -> auditService.record(
                                 new McpAuditEvent(PROCESS_ID, agentId, toolName, "ALLOWED", Instant.now(), sessionId,
                                         null, httpContext.traceId(), httpContext.clientIp(), httpContext.userAgent(),
