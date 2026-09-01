@@ -103,6 +103,10 @@ services:
       SERVICE_A_URI:           https://service-a:8081
       SERVICE_B_URI:           https://service-b:8082
       MCP_BACKEND_URI:         http://mcp-bridge:9090
+      # Stage 31: the gateway PUSHES the policy document here for audit.
+      # Unset means the default localhost:8083, which in a containerised
+      # topology is the gateway's own container — connection refused.
+      ZT_AGENTS_URI:           http://zt-agents:8083
       ZTE_CERTS_DIR:           /app/certs
       # ACAP profiles from the mounted directory rather than the image
       # (ADR-032) — mirrors the cloud, where they live on the certs share.

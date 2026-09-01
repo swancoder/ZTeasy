@@ -110,9 +110,46 @@ but the event is logged and marked.
 
 ## Consequences
 
-- The auditor is a first-class console feature that works identically on
-  localhost and demo.zteasy.tech.
+- The auditor is a first-class console feature, on localhost and on
+  demo.zteasy.tech alike (the cloud half only after the amendment below).
 - Operators can take a rule out of effect in one click, with the change
   attributed, reversible, and every suppressed match traceable.
 - "Did we act on the audit?" is answerable from the screen — and the answer
   is computed from the policy document, not from anyone's bookkeeping.
+
+## Amendment (2026-09-01) — the cloud half was never actually wired
+
+Clicking "Run Policy Audit" on demo.zteasy.tech failed with
+`Connection refused: localhost/127.0.0.1:8083`. Two separate omissions, both
+invisible locally:
+
+1. **`ZT_AGENTS_URI` was set nowhere in the cloud config** — not in
+   `deploy/azure/deploy.sh`, not in `docker-compose.cloud.yml`. The gateway
+   fell back to `application.yml`'s `localhost:8083`, which inside its own
+   container is the gateway itself. It works on a developer machine only
+   because the gateway there runs on the host, where `localhost` happens to
+   be right. A default that is correct in exactly one topology hides its own
+   absence everywhere else.
+2. **The deployed `zt-agents` image predated this stage** — the fix to (1)
+   turned the refusal into `404 /api/v1/agents/auditor/analyze`. Stage 31
+   added an endpoint to a service whose image was never rebuilt, because
+   nothing in this stage's flow touches it during local development: the
+   local `zt-agents` is rebuilt by `./gradlew` on every run.
+
+Fixed by adding `ZT_AGENTS_URI=http://zt-agents:8083` (bare app name — the
+`internal.*` FQDN does not work for TCP-ingress apps, ADR-027) to both the
+deploy script and the cloud compose file, and by rebuilding and rolling the
+`zt-agents` image. Verified live: one run, 45s, eight findings from
+`claude-sonnet-4-6`, all `CURRENT` on re-read.
+
+Also observed while fixing: the first two attempts after the image roll still
+returned 404, served by the *previous* revision. Container Apps shifts traffic
+per new connection, and the gateway's WebClient pool holds existing ones open;
+a rolled internal service is not fully in effect for a long-lived caller until
+those connections are recycled. Deactivating the old revision ends it at once.
+
+Generalisation worth carrying: every stage that adds cross-service wiring has
+a cloud-side counterpart that local development cannot exercise. The
+per-service checklist is (a) is the address configured in `deploy.sh` *and*
+`docker-compose.cloud.yml`, (b) does the deployed image of the *callee*
+contain this stage's code.

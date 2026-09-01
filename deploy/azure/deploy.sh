@@ -186,6 +186,7 @@ bash deploy/azure/create-app-with-certs.sh gateway "$IMG/zteasy-gateway:$TAG" 80
      ZTE_IDP_KEYCLOAK_BASE_URI=http://keycloak:8080/auth \
      SERVICE_A_URI=https://service-a:8081 SERVICE_B_URI=https://service-b:8082 \
      MCP_BACKEND_URI=http://mcp-bridge:9090 \
+     ZT_AGENTS_URI=http://zt-agents:8083 \
      ZTE_CERTS_DIR=/app/certs ZTE_OBO_SECRET=$OBO_SECRET \
      ZTE_ACAP_PROFILES_LOCATION=file:/app/certs/acap-profiles/*.yaml \
      ZTE_INTERNAL_API_KEY=secretref:internal-api-key \

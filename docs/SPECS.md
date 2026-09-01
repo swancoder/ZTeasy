@@ -158,6 +158,10 @@ specific regressions were found and fixed during development.
 
   mcp-backend.uri (MCP_BACKEND_URI, default :9090) — any fronted MCP server,
   e.g. this repo's hubspot-mcp sibling project. Not part of this repo.
+
+  zt-agents.uri (ZT_AGENTS_URI, default :8083) — where the gateway PUSHES the
+  policy document for audit (ADR-031). The default suits a gateway run on the
+  host; any containerised topology must set it, or the gateway calls itself.
 ```
 
 Infrastructure: PostgreSQL 16 (`5432`, JDBC/Flyway for migrations + R2DBC for
