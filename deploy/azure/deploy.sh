@@ -104,6 +104,14 @@ upload_certs() {
   echo "── uploading certs ──"
   $AZ storage file upload-batch --account-name "$STORAGE" --account-key "$STKEY" \
       --destination certs --source certs --pattern '*' --no-progress -o none
+  # ACAP profiles ride the same share (ADR-032): editing an agent's scope or
+  # limits in the cloud must not require rebuilding the gateway image. The
+  # gateway reads them from file: instead of the classpath, and
+  # POST /api/v1/admin/acap-profiles/reload picks up changes without a restart.
+  echo "── uploading ACAP profiles ──"
+  $AZ storage file upload-batch --account-name "$STORAGE" --account-key "$STKEY" \
+      --destination certs --source gateway-service/src/main/resources/acap-profiles \
+      --pattern '*.yaml' --destination-path acap-profiles --no-progress -o none
 }
 upload_certs
 
@@ -179,6 +187,7 @@ bash deploy/azure/create-app-with-certs.sh gateway "$IMG/zteasy-gateway:$TAG" 80
      SERVICE_A_URI=https://service-a:8081 SERVICE_B_URI=https://service-b:8082 \
      MCP_BACKEND_URI=http://mcp-bridge:9090 \
      ZTE_CERTS_DIR=/app/certs ZTE_OBO_SECRET=$OBO_SECRET \
+     ZTE_ACAP_PROFILES_LOCATION=file:/app/certs/acap-profiles/*.yaml \
      ZTE_INTERNAL_API_KEY=secretref:internal-api-key \
      KEYCLOAK_ISSUER_URI=https://placeholder.invalid/auth/realms/zte-realm \
      ZTE_UI_OIDC_AUTHORITY=https://placeholder.invalid/auth/realms/zte-realm" \

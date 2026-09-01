@@ -112,6 +112,32 @@ overdue scenario is driven through the re-authorize API instead.
   the read failed on the very run that created the table. Loading now
   happens on `ApplicationReadyEvent`.
 
+## Amendment (same day): cross-instance overlay staleness
+
+Deploying the lifecycle UI exposed a defect the single-instance local stack
+could never show. The cloud runs **two** gateway instances (ADR-028's
+browser-facing and agent-facing front doors). Suspending an agent through
+the browser app updated that instance's in-memory mirror and the database —
+and the agent-facing instance kept allowing the agent's calls, because an
+in-memory mirror only learns about changes made through itself. Verified
+live: the job ran with 6 allows against a profile the API reported as
+SUSPENDED.
+
+Both overlays (this stage's lifecycle and stage 31's rule activation) now
+re-read their tables on a fixed interval (`zte.acap.lifecycle-refresh-ms`,
+`zte.policy.overlay-refresh-ms`, 20s default), bounding divergence to one
+interval instead of "until restart". Re-verified in the cloud: after a
+suspension, every call from the agent-facing gateway was refused with
+"Agent … is suspended (ACAP lifecycle)", and after resuming, traffic flowed
+again with masking applied (27 field values masked in one real HubSpot
+response).
+
+This is polling, not invalidation: an operator's action can take up to the
+interval to take effect everywhere, which is acceptable for lifecycle
+decisions and would not be for anything latency-sensitive. A push channel
+(or moving the read onto the request path with a short-lived cache) is the
+proper fix if these overlays ever govern something time-critical.
+
 ## Consequences
 
 - An agent can be suspended, resumed, re-authorized and retired from the
@@ -120,3 +146,9 @@ overdue scenario is driven through the re-authorize API instead.
   time.
 - The gate now controls what comes *back*, not only what is asked for.
 - Daily limits survive restarts, so they are a control rather than a hint.
+- Lifecycle actions are available from the Governance tab: status chip,
+  Suspend (behind a confirmation naming the consequence), Resume,
+  Re-authorize (date + note) and the last re-authorizations inline.
+- Cloud profiles live on the mounted certs share
+  (`ZTE_ACAP_PROFILES_LOCATION=file:…`), so changing an agent's scope no
+  longer requires rebuilding the gateway image — reload picks it up.

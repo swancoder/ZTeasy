@@ -104,11 +104,15 @@ services:
       SERVICE_B_URI:           https://service-b:8082
       MCP_BACKEND_URI:         http://mcp-bridge:9090
       ZTE_CERTS_DIR:           /app/certs
+      # ACAP profiles from the mounted directory rather than the image
+      # (ADR-032) — mirrors the cloud, where they live on the certs share.
+      ZTE_ACAP_PROFILES_LOCATION: file:/app/acap-profiles/*.yaml
       ZTE_OBO_SECRET:          ${ZTE_OBO_SECRET:-zte-obo-dev-secret-change-in-production}
     ports:
       - "8443:8080"   # the ONLY externally published port in this topology
     volumes:
       - ./certs:/app/certs:ro
+      - ./gateway-service/src/main/resources/acap-profiles:/app/acap-profiles:ro
     networks: [zte-cloud]
 
   service-a:

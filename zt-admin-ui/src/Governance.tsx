@@ -17,17 +17,18 @@ import MenuItem from '@mui/material/MenuItem'
 import Tooltip from '@mui/material/Tooltip'
 import Card from '@mui/material/Card'
 import CardContent from '@mui/material/CardContent'
-import type { AcapProfileView, AgentActivitySummary, GovernanceReport, RequestLogEntry } from './types'
+import AcapLifecycleDialog from './AcapLifecycleDialog'
+import ConfirmDialog from './ConfirmDialog'
+import type {
+  AcapProfileView,
+  AcapReauthorization,
+  AgentActivitySummary,
+  GovernanceReport,
+  RequestLogEntry,
+} from './types'
 
 interface Props {
   accessToken: string
-}
-
-// today's date compared as a plain yyyy-mm-dd string (reauthDue is stored the same
-// way) — avoids a timezone-sensitive Date parse for what's just a calendar-day compare.
-function isPastDue(isoDate: string | null): boolean {
-  if (!isoDate) return false
-  return isoDate < new Date().toISOString().slice(0, 10)
 }
 
 const WINDOW_OPTIONS = [
@@ -46,6 +47,11 @@ export default function Governance({ accessToken }: Props) {
   const [activity, setActivity] = useState<AgentActivitySummary[]>([])
   const [outOfPolicy, setOutOfPolicy] = useState<RequestLogEntry[]>([])
   const [acapProfiles, setAcapProfiles] = useState<AcapProfileView[]>([])
+  // Stage 32 (ADR-032): lifecycle actions on the cards
+  const [suspendTarget, setSuspendTarget] = useState<AcapProfileView | null>(null)
+  const [reauthTarget, setReauthTarget] = useState<AcapProfileView | null>(null)
+  const [history, setHistory] = useState<Record<string, AcapReauthorization[]>>({})
+  const [busyAgent, setBusyAgent] = useState<string | null>(null)
   const [loading, setLoading] = useState(true)
   const [refreshing, setRefreshing] = useState(false)
   const [exporting, setExporting] = useState(false)
@@ -76,6 +82,56 @@ export default function Governance({ accessToken }: Props) {
     setLoading(true)
     fetchData().finally(() => setLoading(false))
   }, [fetchData])
+
+  // ── Stage 32 (ADR-032): lifecycle actions ──
+
+  const setStatus = async (agentId: string, status: 'ACTIVE' | 'SUSPENDED' | 'RETIRED') => {
+    setBusyAgent(agentId)
+    try {
+      const res = await fetch(`/api/v1/admin/acap-profiles/${encodeURIComponent(agentId)}/status`, {
+        method: 'PUT',
+        headers: { ...authHeaders(), 'Content-Type': 'application/json' },
+        body: JSON.stringify({ status }),
+      })
+      if (!res.ok) throw new Error(`status -> ${res.status}`)
+      await fetchData()
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e))
+    } finally {
+      setBusyAgent(null)
+    }
+  }
+
+  const reauthorize = async (agentId: string, nextDue: string, note: string) => {
+    setBusyAgent(agentId)
+    try {
+      const res = await fetch(`/api/v1/admin/acap-profiles/${encodeURIComponent(agentId)}/reauthorize`, {
+        method: 'POST',
+        headers: { ...authHeaders(), 'Content-Type': 'application/json' },
+        body: JSON.stringify({ nextDue, note }),
+      })
+      if (!res.ok) throw new Error(`reauthorize -> ${res.status}`)
+      await Promise.all([fetchData(), loadHistory(agentId)])
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e))
+    } finally {
+      setBusyAgent(null)
+    }
+  }
+
+  const loadHistory = async (agentId: string) => {
+    try {
+      const res = await fetch(`/api/v1/admin/acap-profiles/${encodeURIComponent(agentId)}/reauthorizations`, {
+        headers: authHeaders(),
+      })
+      if (res.ok) {
+        const rows: AcapReauthorization[] = await res.json()
+        setHistory((prev) => ({ ...prev, [agentId]: rows }))
+      }
+    } catch {
+      // History is supplementary — its absence must not break the card.
+    }
+  }
 
   const handleRefresh = async () => {
     setRefreshing(true)
@@ -235,10 +291,20 @@ export default function Governance({ accessToken }: Props) {
         </Typography>
       ) : (
         <Stack direction="row" spacing={2} sx={{ flexWrap: 'wrap' }}>
-          {acapProfiles.map(({ profile, currentThresholdUsage }) => {
-            const overdue = isPastDue(profile.agent?.reauthDue ?? null)
+          {acapProfiles.map((view) => {
+            const { profile, currentThresholdUsage } = view
+            // Stage 32 (ADR-032): overdue and status come from the gateway's
+            // lifecycle overlay, not from the file date this tab used to read
+            // — the operator-managed date wins when one exists.
+            const overdue = view.reauthOverdue
+            const suspended = view.lifecycleStatus !== 'ACTIVE'
+            const busy = busyAgent === profile.agentId
             return (
-              <Card key={profile.agentId} variant="outlined" sx={{ width: 340 }}>
+              <Card
+                key={profile.agentId}
+                variant="outlined"
+                sx={{ width: 340, ...(suspended ? { opacity: 0.7, borderColor: 'error.main' } : {}) }}
+              >
                 <CardContent>
                   <Stack direction="row" sx={{ justifyContent: 'space-between', alignItems: 'flex-start' }}>
                     <Box>
@@ -247,7 +313,12 @@ export default function Governance({ accessToken }: Props) {
                         {profile.agentId}
                       </Typography>
                     </Box>
-                    <Chip label={profile.territory} size="small" />
+                    <Stack direction="row" spacing={0.5} sx={{ alignItems: 'center' }}>
+                      <Chip label={profile.territory} size="small" />
+                      {view.lifecycleStatus !== 'ACTIVE' && (
+                        <Chip label={view.lifecycleStatus} size="small" color="error" />
+                      )}
+                    </Stack>
                   </Stack>
 
                   {profile.agent?.client && (
@@ -263,10 +334,14 @@ export default function Governance({ accessToken }: Props) {
                   {profile.agent?.deploymentDate && (
                     <Typography variant="body2">Deployed: {profile.agent.deploymentDate}</Typography>
                   )}
-                  {profile.agent?.reauthDue && (
+                  {view.effectiveReauthDue && (
                     <Stack direction="row" spacing={1} sx={{ alignItems: 'center', mt: 0.5 }}>
-                      <Typography variant="body2">Re-auth due: {profile.agent.reauthDue}</Typography>
-                      {overdue && <Chip label="OVERDUE" size="small" color="error" />}
+                      <Typography variant="body2">Re-auth due: {view.effectiveReauthDue}</Typography>
+                      {overdue && (
+                        <Tooltip title="Every allowed call is held for a human decision until this agent is re-authorized">
+                          <Chip label="OVERDUE" size="small" color="error" />
+                        </Tooltip>
+                      )}
                     </Stack>
                   )}
                   {profile.risk?.euAiActClass && (
@@ -305,12 +380,71 @@ export default function Governance({ accessToken }: Props) {
                       </Stack>
                     </Box>
                   )}
+
+                  <Stack direction="row" spacing={1} sx={{ mt: 2 }}>
+                    <Button size="small" variant="outlined" disabled={busy}
+                            onClick={() => { setReauthTarget(view); loadHistory(profile.agentId) }}>
+                      Re-authorize
+                    </Button>
+                    {suspended ? (
+                      <Button size="small" variant="contained" color="success" disabled={busy}
+                              onClick={() => setStatus(profile.agentId, 'ACTIVE')}>
+                        Resume
+                      </Button>
+                    ) : (
+                      <Button size="small" variant="outlined" color="error" disabled={busy}
+                              onClick={() => setSuspendTarget(view)}>
+                        Suspend
+                      </Button>
+                    )}
+                  </Stack>
+
+                  {(history[profile.agentId] ?? []).length > 0 && (
+                    <Box sx={{ mt: 1.5 }}>
+                      <Typography variant="caption" color="text.secondary">
+                        Re-authorization history
+                      </Typography>
+                      {(history[profile.agentId] ?? []).slice(0, 3).map((h) => (
+                        <Typography key={h.id} variant="caption" sx={{ display: 'block' }}>
+                          {new Date(h.reauthorizedAt).toLocaleDateString()} · {h.reauthorizedBy} → {h.nextDue}
+                          {h.note ? ` · ${h.note}` : ''}
+                        </Typography>
+                      ))}
+                    </Box>
+                  )}
                 </CardContent>
               </Card>
             )
           })}
         </Stack>
       )}
+
+      <ConfirmDialog
+        open={suspendTarget !== null}
+        title="Suspend this agent?"
+        confirmLabel="Suspend"
+        message={
+          suspendTarget
+            ? `Every call from "${suspendTarget.profile.agent?.name ?? suspendTarget.profile.agentId}" will be refused until it is resumed. Its policy grants stay untouched — this is a lifecycle decision, and it is recorded against your name.`
+            : ''
+        }
+        onConfirm={() => {
+          if (suspendTarget) setStatus(suspendTarget.profile.agentId, 'SUSPENDED')
+          setSuspendTarget(null)
+        }}
+        onCancel={() => setSuspendTarget(null)}
+      />
+
+      <AcapLifecycleDialog
+        open={reauthTarget !== null}
+        agentName={reauthTarget?.profile.agent?.name ?? reauthTarget?.profile.agentId ?? ''}
+        defaultNextDue={new Date(Date.now() + 365 * 24 * 3600 * 1000).toISOString().slice(0, 10)}
+        onConfirm={(nextDue, note) => {
+          if (reauthTarget) reauthorize(reauthTarget.profile.agentId, nextDue, note)
+          setReauthTarget(null)
+        }}
+        onCancel={() => setReauthTarget(null)}
+      />
     </Box>
   )
 }

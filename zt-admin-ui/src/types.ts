@@ -184,6 +184,21 @@ export interface AcapProfile {
 export interface AcapProfileView {
   profile: AcapProfile
   currentThresholdUsage: Record<string, number>
+  // Stage 32 (ADR-032): lifecycle overlay. The effective due date is the
+  // operator-managed one when present, else the profile file's own.
+  lifecycleStatus: 'ACTIVE' | 'SUSPENDED' | 'RETIRED'
+  effectiveReauthDue: string | null
+  reauthOverdue: boolean
+}
+
+// Mirrors com.zte.gateway.mcp.acap.lifecycle.AcapReauthorization (Stage 32, ADR-032).
+export interface AcapReauthorization {
+  id: string
+  agentId: string
+  reauthorizedBy: string
+  reauthorizedAt: string
+  nextDue: string
+  note: string | null
 }
 
 // ── Stage 31 (ADR-031): policy activation overlay + AI audit runs ──

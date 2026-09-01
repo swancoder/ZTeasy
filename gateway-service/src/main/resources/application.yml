@@ -125,6 +125,10 @@ zte:
   # ── YAML policy definitions (Stage 10 / ADR-011) ──
   policy:
     file: ${ZTE_POLICY_FILE:classpath:zte-policies.yaml}
+    # How often each instance re-reads the rule-activation overlay (ADR-031/
+    # ADR-032). Matters only in multi-instance deployments, where a toggle
+    # made on one instance is otherwise invisible to the others.
+    overlay-refresh-ms: ${ZTE_POLICY_OVERLAY_REFRESH_MS:20000}
     default-effect: ${ZTE_POLICY_DEFAULT_EFFECT:DENY}
     user-client-id: ${ZTE_POLICY_USER_CLIENT_ID:zte-gateway}
 
@@ -157,6 +161,9 @@ zte:
   # policy.file, a location matching zero files is normal, not an error.
   acap:
     profiles-location: ${ZTE_ACAP_PROFILES_LOCATION:classpath:acap-profiles/*.yaml}
+    # Same reasoning as zte.policy.overlay-refresh-ms, for the lifecycle
+    # overlay (suspend/resume/re-authorization) — ADR-032.
+    lifecycle-refresh-ms: ${ZTE_ACAP_LIFECYCLE_REFRESH_MS:20000}
 
   # ── IdP identity sync (Stage 13 / ADR-014) ──
   idp:

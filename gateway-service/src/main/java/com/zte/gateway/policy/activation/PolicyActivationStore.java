@@ -3,8 +3,10 @@ package com.zte.gateway.policy.activation;
 import com.zte.gateway.policy.def.PolicyRule;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.boot.context.event.ApplicationReadyEvent;
 import org.springframework.context.event.EventListener;
+import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Component;
 import reactor.core.publisher.Mono;
 
@@ -44,6 +46,22 @@ public class PolicyActivationStore {
      * two more stores with the same shape). Until it fires, every rule reads
      * as enabled — the correct default.
      */
+
+    /**
+     * Periodic refresh (Stage 32, ADR-032). The in-memory mirror is what
+     * keeps evaluation zero-I/O, but it also means an instance only learns
+     * about a change it made itself: found live on the two-front-door cloud
+     * topology (ADR-028), where suspending an agent through the browser-
+     * facing app left the agent-facing one still allowing its calls. Polling
+     * bounds that divergence to one interval instead of "until restart".
+     * A push/invalidation channel would be better and is noted in the ADR.
+     */
+    @Scheduled(fixedDelayString = "${zte.policy.overlay-refresh-ms:20000}",
+               initialDelayString = "${zte.policy.overlay-refresh-ms:20000}")
+    void refresh() {
+        load();
+    }
+
     @EventListener(ApplicationReadyEvent.class)
     void load() {
         repository.findAll()
