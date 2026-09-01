@@ -291,7 +291,11 @@ prefixes, but gated by the broader `u2s-approver-api-*` rules (`USER` or
 - **`ApproverApprovalsController`** — `GET /api/v1/approver/approvals`,
   `POST .../{id}/approve|reject`, delegating to the same
   `PendingApprovalService` as the admin controller (one decision path, one
-  audit trail).
+  audit trail). Both controllers go through `ApprovalApiSupport` (ADR-034):
+  the queue is rendered as per-viewer `ApprovalView`s (`canDecide`,
+  `refusalReason`, `secondsRemaining`, computed from the caller's token and
+  the clock by `ApprovalEntitlement`), and refusals share one error contract —
+  `404` unknown, `409` already decided or expired, `403` routed to someone else.
 - **`ApproverUiConfig`** — permits and serves `/approver/**` from
   `classpath:/static/approver/`, plus `/ui-config.js`.
 - **`UiConfigController`** — `GET /ui-config.js`, a one-line snippet
@@ -322,9 +326,12 @@ not a fifth category within it.
 | `agentMcpToolHolds` (ADR-019) | MCP tool calls routed to a human even when `agentMcpToolCalls` would ALLOW them | `YamlMcpPolicyEngine`, matched via `PolicyMatcher.matchAny` (not `evaluate` — see ADR-019 for why this is a separate list rather than a third `RuleEffect`) |
 
 One `PolicyRule` shape (`id`/`effect`/`source`/`target`/`pathPattern`/
-`methods`/`priority`/`mcpTarget`) is reused across all four — `pathPattern`/
+`methods`/`priority`/`mcpTarget`/`routeTo`) is reused across all four — `pathPattern`/
 `methods` are simply unused by `agentMcpToolCalls`/`agentMcpToolHolds`,
-`effect` is unused (conventionally `ALLOW`) by `agentMcpToolHolds`, and
+`effect` is unused (conventionally `ALLOW`) by `agentMcpToolHolds`, `routeTo`
+(ADR-034: who may decide the held call, a `role:`/`user:` URN; absent means any
+interactive user, as before) is meaningful only on `agentMcpToolHolds` — the
+validator warns when it appears elsewhere — and
 conversely `mcpTarget` (ADR-023) is unused by `users2service`/
 `service2service` — when set on an MCP-category rule, it must match the
 configured `mcp-backend.name` (exact string, not an Ant pattern) or the rule
@@ -371,6 +378,15 @@ HTTP+SSE transport needs `POST /message` to inject its result into an
    original call through the same `McpForwardService` the Allow path uses,
    reject synthesizes an honest denial; either way the decision is audited,
    and pushed back into the originating SSE session only if it's still open.
+   Since ADR-034 the row also carries the matched rule's `routeTo` (via
+   `PolicyDecision`) and an `expires_at` stamped from
+   `zte.approvals.ttl-minutes` (`ZTE_APPROVALS_TTL_MINUTES`, default 24h):
+   `ApprovalEntitlement` refuses a decider the rule didn't name (`403`),
+   `ApprovalExpirySweeper` moves overdue rows to `EXPIRED` every
+   `zte.approvals.sweep-interval-ms` (`ZTE_APPROVALS_SWEEP_INTERVAL_MS`,
+   default 60s), and `decide(...)` re-checks the deadline itself so a late
+   decision can't execute in the gap before the next sweep. An expiry is
+   audited as `DENY`/`408` — not silently dropped.
 5. **Allow** → `McpForwardService.execute(rpc)` (wraps
    `McpBackendClient.forward` + `DataMaskingFilter`, currently a pass-through
    stub) — shared with the Hold-then-approve path above so masking can't
@@ -578,8 +594,11 @@ Keycloak login (client `zte-admin-ui`, authorization code + PKCE). Built by
   `request_logs` write path.
 - **Keycloak 24.0.4** — realm `zte-realm`, auto-imported from
   `keycloak/realm-export.json` (clients `zte-gateway`, `agent-a`/`agent-b`,
-  `service-a`, `zte-admin-ui`; roles `ADMIN`/`USER`; users `zte-admin`/
-  `zte-test-user`). **`--import-realm` only imports on a realm's first
+  `service-a`, `zte-admin-ui`, `zte-approver-ui`; roles `ADMIN`/`USER`, the
+  dashboard roles of ADR-029, and `APPROVER` (ADR-034 — held by `zte-admin`
+  and `zte-dpo`, deliberately not by `zte-test-user`, so routing is visible in
+  the demo); users `zte-admin`/`zte-test-user` plus the ADR-029 executives).
+  **`--import-realm` only imports on a realm's first
   creation** — a config change to an already-imported realm (a new client
   role grant, a redirect URI) needs either a full `docker compose down &&
   up` (destroys Keycloak's dev-mode state) or a live Admin REST API update;
@@ -604,8 +623,11 @@ Keycloak login (client `zte-admin-ui`, authorization code + PKCE). Built by
 A second, independent Vite/React/TS/MUI SPA served at `/approver/`, with its
 own Keycloak client (`zte-approver-ui`, PKCE) and its own login screen — for
 business approvers who shouldn't hold the Admin Console's `ADMIN` role. One
-card per held call (agent, tool, arguments, hold reason) with
-**Approve**/**Decline** and a 15s poll. Reads and writes the same
+card per held call (agent, tool, arguments, hold reason, and — ADR-034 — who it
+is routed to plus a countdown to its deadline) with **Approve**/**Decline**
+and a 15s poll; the buttons are disabled with the server's `refusalReason`
+when the viewer may not decide, and expired items stay visible greyed out
+rather than vanishing. Reads and writes the same
 `pending_approvals` queue as the Admin Console's Approvals tab (§5.4) via
 `/api/v1/approver/**` (§5.2). `types.ts`/`ConfirmDialog.tsx`/`index.css` are
 copied from `zt-admin-ui`, not shared — the two are separate npm projects,
@@ -714,7 +736,7 @@ target_id, relation_type)`.
 `service_id` (`UNIQUE REFERENCES inventory_services(id) ON DELETE CASCADE`),
 `last_ping_ms`, `actuator_status`, `last_successful_call`, `updated_at`.
 
-**`pending_approvals`** (Flyway `V13`, ADR-019) — the 🟡 HOLD outcome's durable queue:
+**`pending_approvals`** (Flyway `V13`, ADR-019; `V19` adds `expires_at`, the `EXPIRED` status and the `(status, expires_at)` sweeper index, ADR-034) — the 🟡 HOLD outcome's durable queue:
 
 | Column | Type | Notes |
 |---|---|---|
@@ -723,11 +745,12 @@ target_id, relation_type)`.
 | `agent_id` | `VARCHAR(128)` | |
 | `tool_name` | `VARCHAR(255)` | |
 | `rpc_id_json` / `arguments_json` | `VARCHAR(255)` / `TEXT`, nullable | The original `tools/call` request's `id`/`arguments`, compact-JSON — reconstructed verbatim on approval |
-| `route_to` | `VARCHAR(128)`, nullable | Stored, not yet enforced/routed anywhere — see ADR-019 Self-Criticism |
+| `route_to` | `VARCHAR(128)`, nullable | The matched hold rule's `routeTo` URN (`role:APPROVER`, `user:jane`); `NULL` means any interactive user may decide. Written and enforced since ADR-034 — before that the column existed (V13) but nothing wrote it |
 | `reason` | `TEXT`, nullable | Why it was held (the matched `agentMcpToolHolds` rule) |
-| `status` | `VARCHAR(10)` + `CHECK`, `DEFAULT 'PENDING'` | `PENDING`/`APPROVED`/`REJECTED` |
+| `status` | `VARCHAR(10)` + `CHECK`, `DEFAULT 'PENDING'` | `PENDING`/`APPROVED`/`REJECTED`/`EXPIRED` (terminal; ADR-034) |
 | `requested_at` / `decided_at` | `TIMESTAMPTZ` | |
-| `decided_by` | `VARCHAR(128)`, nullable | Deciding admin's JWT `preferred_username`/`sub` |
+| `expires_at` | `TIMESTAMPTZ`, nullable | Deadline stamped at hold time from `zte.approvals.ttl-minutes` (V19 backfilled `requested_at + 24h` for existing rows); `ApprovalExpirySweeper` moves overdue `PENDING` rows to `EXPIRED` |
+| `decided_by` | `VARCHAR(128)`, nullable | Deciding human's JWT `preferred_username`/`sub`; `system` for an expiry |
 | `trace_id` / `client_ip` / `user_agent` / `display_identity` | — | Same audit-context fields as `request_logs`, carried through to the eventual `APPROVED`/`REJECTED` audit row |
 
 ---
@@ -750,12 +773,12 @@ target_id, relation_type)`.
 | `/api/v1/admin/identities/{id}/relations` | GET | JWT + `ADMIN` | gateway | Local-cache-only |
 | `/api/v1/admin/inventory[/{id}]` | GET/POST/PUT/DELETE | JWT + `ADMIN` | gateway | APIM registry CRUD |
 | `/api/v1/admin/inventory/{id}/schema[/fetch]` | GET/POST | JWT + `ADMIN` | gateway | Captured discovery payload; synchronous re-probe |
-| `/api/v1/admin/approvals` | GET | JWT + `ADMIN` | gateway | Pending 🟡 HOLD queue (ADR-019) |
-| `/api/v1/admin/approvals/{id}/approve` | POST | JWT + `ADMIN` | gateway | Forwards the original held call; audits `APPROVED` |
-| `/api/v1/admin/approvals/{id}/reject` | POST | JWT + `ADMIN` | gateway | Honest denial; audits `REJECTED` |
+| `/api/v1/admin/approvals` | GET | JWT + `ADMIN` | gateway | Pending 🟡 HOLD queue (ADR-019) as per-viewer `ApprovalView`s — `canDecide`/`refusalReason`/`secondsRemaining` computed for the caller (ADR-034) |
+| `/api/v1/admin/approvals/{id}/approve` | POST | JWT + `ADMIN` | gateway | Forwards the original held call; audits `APPROVED`. `403` if the item is routed to someone else, `409` if already decided or expired (ADR-034) |
+| `/api/v1/admin/approvals/{id}/reject` | POST | JWT + `ADMIN` | gateway | Honest denial; audits `REJECTED`; same `403`/`409` contract |
 | `/api/v1/dashboard/{summary,spend,operations,risk,data-protection}` | GET | JWT + the role each panel is granted to (`u2s-dashboard-*`) | gateway | Executive dashboard panels (ADR-029); a role fetching a panel it isn't granted gets `403` |
 | `/api/v1/internal/metering/llm` | POST | network perimeter (+ internal key) | gateway | Token/cost report from an in-perimeter component (ADR-029); `202 Accepted` |
-| `/api/v1/approver/approvals[/{id}/approve\|reject]` | GET/POST | JWT + `USER` or `ADMIN` | gateway | Approval Center API (ADR-026) — same `PendingApprovalService` as the admin rows above; role-scoped so role-less agent JWTs can never decide |
+| `/api/v1/approver/approvals[/{id}/approve\|reject]` | GET/POST | JWT + `USER` or `ADMIN` | gateway | Approval Center API (ADR-026) — same `PendingApprovalService`, same per-viewer view and `403`/`409` contract as the admin rows above (shared `ApprovalApiSupport`, ADR-034); role-scoped so role-less agent JWTs can never decide |
 | `/approver/**` | GET | none (SPA handles its own login) | gateway | Approval Center static bundle (ADR-026) |
 | `/ui-config.js` | GET | none | gateway | Runtime OIDC authority snippet for both SPAs (`zte.ui.oidc-authority`, ADR-026) |
 | `/api/v1/admin/acap-profiles` | GET | JWT + `ADMIN` | gateway | Loaded ACAP profiles + current threshold usage (`AcapProfileView`, ADR-020/ADR-022) — Admin Console "Governance" tab's ACAP Profiles section |
@@ -962,7 +985,7 @@ automatically instead of needing its own `WebFilter` (ADR-012).
 | Medium | Shared HMAC secret for OBO tokens | `ZTE_OBO_SECRET` env var; RS256 upgrade deferred (§9) |
 | Medium | Server-side TLS cert rotation requires a restart (no hot-reload API) | 1-year dev certs; production needs cert-manager + rolling restart |
 | Medium | mTLS transport-layer enforcement untested in the IT suite (WireMock has no TLS) | Backlog (§9) |
-| High (prod) | Any `USER`-role account can approve any held call — no APPROVER role, no `route_to` enforcement, no notification, no expiry (ADR-026) | Deliberate for this stage; first item of the agreed next-work list alongside the gateway→MCP-backend hop |
+| Medium (prod) | An *unrouted* held call is still decidable by any `USER`-role account (ADR-026's posture, kept on purpose), and nobody is notified when an item is raised — the queue is polled (ADR-034) | Routing (`routeTo` → `403`), the `APPROVER` role and expiry closed the rest in ADR-034; notification, four-eyes and delegation remain in §9 |
 | Medium | `/api/v1/internal/**` is protected by a shared header secret, not authentication (ADR-027 amendment) | Closes the accidental public exposure a public ingress created; a service account + policy rule is still the real fix (ADR-007) |
 | Medium (cloud) | Two gateway apps run the same background jobs (health polling, IdP sync, route refresh) against shared state, and MCP session state — already in-memory — is now split between them (ADR-028) | Harmless at demo scale since agents only use the TCP app; needs leader election or a jobs-disabled flag before scaling |
 | Medium (cloud) | The custom domain's managed certificate renews only while its CNAME keeps pointing at `gateway-web`; a repoint fails renewal silently | Named in ADR-028; no monitoring on it today |

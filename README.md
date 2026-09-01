@@ -299,6 +299,20 @@ its own held call. Decisions go through the exact same
 `PendingApprovalService` as the Admin Console tab — one decision path, one
 audit trail (`decided_by` = the approver's username).
 
+**Routing and expiry (ADR-034).** A hold rule may name who owns the decision
+with `routeTo: "role:APPROVER"` (or `user:<name>`); both surfaces then show
+the item to everyone but only let a matching viewer decide it — anyone else
+sees the buttons disabled with the reason, and a direct `POST .../approve`
+gets `403` with the same sentence. Rules without `routeTo` stay open to any
+interactive user. In the dev realm the `APPROVER` role is held by `zte-admin`
+and `zte-dpo` and deliberately *not* by `zte-test-user`, and the demo's
+`send_email` hold is the one routed rule — log in as each to see the
+difference. Every held call also carries a deadline (`ZTE_APPROVALS_TTL_MINUTES`,
+default 24h) with a countdown on the card; past it the item turns `EXPIRED`
+(swept every `ZTE_APPROVALS_SWEEP_INTERVAL_MS`, default 60s), stays visible
+greyed out, and is audited as a `DENY`/`408` — a late approval is refused with
+`409`. Nobody is notified when an item is raised; the page polls.
+
 ```bash
 # Try it: log in as the USER-role account (scripts/set-keycloak-password.sh
 # sets the local dev passwords; cloud credentials live only in the gitignored
@@ -405,6 +419,7 @@ Every rule, in every category, shares one shape:
 | `methods` | no | Comma-separated HTTP verbs, or `*`; unused by `agentMcpToolCalls` |
 | `priority` | no | Tie-break within the same effect only (default `0`) — never breaks a DENY vs ALLOW tie |
 | `mcpTarget` | no | Which MCP backend this rule applies to, matched exactly against `mcp-backend.name` (ADR-023). Unused by `users2service`/`service2service`. Omit to match any backend — a rule authored against a specific backend's tool semantics should set this so it stops applying if the gateway is ever repointed elsewhere. |
+| `routeTo` | no | `agentMcpToolHolds` only (ADR-034): who may decide the held call, as a `role:<name>` or `user:<name>` URN (a bare name means a role). Omit and any interactive user may decide, exactly as before. The validator warns if it appears in any other category, where it would be silently ignored. |
 
 ### How to add a rule
 
