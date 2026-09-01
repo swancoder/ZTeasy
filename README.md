@@ -206,6 +206,7 @@ zte-lightweight/
 | [ADR-030](docs/adr/ADR-030-credential-hygiene-and-identity-reconciliation.md) | Credential Hygiene and Identity-Cache Reconciliation | Accepted |
 | [ADR-031](docs/adr/ADR-031-policy-audit-surfacing-and-activation-overlay.md) | Policy-Audit Surfacing and the Activation Overlay | Accepted |
 | [ADR-032](docs/adr/ADR-032-acap-lifecycle-and-response-masking.md) | ACAP Lifecycle Management and Response Masking (amends ADR-022) | Accepted |
+| [ADR-033](docs/adr/ADR-033-demo-durability-and-cloud-configuration.md) | Demo Durability and the Cloud-Only Configuration (amends ADR-027) | Accepted |
 
 ---
 
@@ -851,10 +852,16 @@ survives to the gate). Same image, same Postgres/Keycloak/MCP backend.
 # Provision from scratch (needs GHCR_USER/GHCR_PAT, HUBSPOT_TOKEN; see the plan)
 ./deploy/azure/deploy.sh
 
-# Park it overnight / bring it back / see what's running
+# Park it overnight / bring it back / see what's running.
+# `stop` dumps the database to the pgbackup share first and refuses to stop if
+# that fails; `start` restores it automatically (ADR-033), so the audit trail,
+# approval queue, policy toggles and ACAP lifecycle are still there tomorrow.
 ./deploy/azure/power.sh stop
 ./deploy/azure/power.sh start
 ./deploy/azure/power.sh status
+
+# Dump the database without stopping anything (before a risky change, say)
+az containerapp job start -n db-backup -g zteasy-demo-rg
 
 # Attach a custom domain + free managed certificate (prints the DNS records first)
 ./deploy/azure/bind-custom-domain.sh
@@ -866,7 +873,22 @@ for `/api/v1/internal/**` — mandatory once the gateway has a public ingress),
 `ZTE_AUTH_PROXY_ENABLED` (serve Keycloak's login under `/auth`),
 `ZTE_UI_OIDC_AUTHORITY` (what both SPAs get from `/ui-config.js`), and
 `MANAGEMENT_PORT` set equal to each service's API port (a Container App
-publishes only one port).
+publishes only one port). Three more exist only because a container is not a
+developer machine (ADR-033): `ZT_AGENTS_URI` and `ZTE_GATEWAY_CA_CERT` — without
+which the gateway calls itself for policy audits, and zt-agents cannot speak TLS
+back for token metering — and `ZTE_POLICY_FILE`, which puts the policy document
+on the file share so that "Reload Policies" re-reads something an operator can
+actually edit.
+
+Editing policy on a running deployment (this is what makes the AI auditor's
+"Modify policy" suggestion applicable, ADR-031):
+
+```bash
+az storage file upload --account-name <acct> --share-name certs \
+   --source gateway-service/src/main/resources/zte-policies.yaml --path zte-policies.yaml
+# then press "Reload Policies" in the console, or:
+curl -X POST https://demo.zteasy.tech/api/v1/admin/policies/reload -H "Authorization: Bearer $TOKEN"
+```
 
 ---
 

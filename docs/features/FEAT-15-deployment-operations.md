@@ -1,6 +1,6 @@
 # FEAT-15 — Deployment & Operations
 
-**Maturity:** Working (demo-grade state handling — see Limits)
+**Maturity:** Working. State survives the nightly stop/start since ADR-033 (dump to an Azure Files share, automatic restore on start); it does not survive an unplanned crash between dumps.
 **Depends on:** container images, a cloud subscription, DNS control
 **Feeds:** every other feature's availability
 **Detail:** [azure-deployment-plan.md](../azure-deployment-plan.md) · [ADR-027](../adr/ADR-027-azure-container-apps-deployment.md), [ADR-028](../adr/ADR-028-custom-domain-and-trusted-certificate.md)

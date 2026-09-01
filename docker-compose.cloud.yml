@@ -107,6 +107,7 @@ services:
       # Unset means the default localhost:8083, which in a containerised
       # topology is the gateway's own container — connection refused.
       ZT_AGENTS_URI:           http://zt-agents:8083
+      ZTE_POLICY_FILE:         file:/app/certs/zte-policies.yaml
       ZTE_CERTS_DIR:           /app/certs
       # ACAP profiles from the mounted directory rather than the image
       # (ADR-032) — mirrors the cloud, where they live on the certs share.
@@ -178,11 +179,14 @@ services:
     env_file:
       - .env                  # ANTHROPIC_API_KEY
     environment:
-      # Known limitation (ADR-027 critique): the gateway is HTTPS-only with
-      # the dev ZTE-CA; zt-agents' WebClient doesn't trust it yet, so the
-      # auditor's policy fetch fails TLS validation until a truststore is
-      # wired in. Deployed anyway to keep the container inventory complete.
       GATEWAY_INTERNAL_URI: https://gateway:8080
+      # Closes the ADR-027 gap this block used to describe: the gateway is
+      # HTTPS-only with the dev ZTE-CA, and until ADR-033 nothing pointed
+      # zt-agents at that CA, so every call to the gateway — the auditor's
+      # policy fetch and the token metering report alike — failed TLS.
+      ZTE_GATEWAY_CA_CERT: /app/certs/ca.crt
+    volumes:
+      - ./certs:/app/certs:ro
     networks: [zte-cloud]
 
   # On-demand demo job — not started by default; run with:

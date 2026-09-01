@@ -162,6 +162,11 @@ specific regressions were found and fixed during development.
   zt-agents.uri (ZT_AGENTS_URI, default :8083) — where the gateway PUSHES the
   policy document for audit (ADR-031). The default suits a gateway run on the
   host; any containerised topology must set it, or the gateway calls itself.
+
+  zte.gateway.ca-cert (ZTE_GATEWAY_CA_CERT, zt-agents side) — PEM of the CA that
+  signed the gateway's server certificate. Unset means the JVM's public-CA trust,
+  which rejects the dev CA: every zt-agents→gateway call then fails TLS, silently
+  for the fire-and-forget metering report (ADR-033).
 ```
 
 Infrastructure: PostgreSQL 16 (`5432`, JDBC/Flyway for migrations + R2DBC for
@@ -873,7 +878,6 @@ did this documents exactly what was investigated and found.
   call, instead of buffering to one `Mono<JsonRpcResponse>`.
 - Shared/sticky session store for `McpSessionManager` if the gateway is ever
   run with >1 replica.
-- Real `DataMaskingFilter` (PII rules undefined today — pass-through stub).
 - Real TSDB writer behind `McpAuditService`, replacing the log line in
   `LoggingMcpAuditService.persist()`.
 - **`HealthPollingService`'s `/actuator/health` + Spring-shaped-JSON
@@ -918,6 +922,11 @@ did this documents exactly what was investigated and found.
 - Warn on a name mismatch between a registered service and passive
   telemetry's exact-name-match requirement.
 - Code-split `zt-admin-ui`'s bundle (`swagger-ui-react` roughly tripled it).
+
+**Cloud durability** (ADR-033): the demo database is dumped to an Azure Files
+share by the `db-backup` job and restored automatically on start; a crash
+between dumps still loses the delta, and a Premium FileStorage NFS share would
+replace the whole scheme with a real data volume.
 
 **Production-path items** (deferred by design at MVP scope, see the ADR
 cited): RS256 OBO tokens instead of shared-secret HMAC (ADR-004); per-agent

@@ -25,6 +25,11 @@ anthropic:
 zte:
   gateway:
     internal-uri: ${GATEWAY_INTERNAL_URI:http://localhost:8080}
+    # PEM of the CA that signed the gateway's server certificate. GatewayWebClients
+    # has honoured this since ADR-029, but nothing ever set it — so every call to
+    # the gateway (metering included) failed TLS validation against the JVM's
+    # public-CA trust, silently, because metering is fire-and-forget (ADR-033).
+    ca-cert: ${ZTE_GATEWAY_CA_CERT:}
 
 logging:
   level:

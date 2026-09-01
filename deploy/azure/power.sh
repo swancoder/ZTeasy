@@ -14,10 +14,15 @@
 #
 # Env: AZ (az binary), RG (default zteasy-demo-rg)
 #
-# Note: state is ephemeral by design (ADR-027) — Postgres and Keycloak keep
-# their data inside the container, so a stop/start cycle wipes the audit
-# trail, the approval queue and any Keycloak session, and re-imports the
-# realm. That's the demo's accepted tradeoff, not a bug in this script.
+# State: Postgres keeps its data inside the container (SMB Azure Files cannot
+# host a Postgres data directory — ADR-033), so `stop` first runs the
+# `db-backup` job, which dumps the database onto the pgbackup share. The
+# postgres app mounts that share read-only at /docker-entrypoint-initdb.d, so
+# `start` restores it automatically while initialising the empty data
+# directory. What survives is everything in the database: audit trail,
+# approval queue, policy toggles, ACAP lifecycle and re-authorisations.
+# What does not: anything written after the last dump, and Keycloak sessions
+# (its realm is re-imported on every start, by design).
 set -euo pipefail
 
 AZ="${AZ:-az}"
@@ -34,6 +39,27 @@ latest_revision() {
 case "${1:-status}" in
 
   stop)
+    # Dump the database before anything is taken down — the whole point of the
+    # nightly stop is that tomorrow's demo starts where today's ended.
+    if $AZ containerapp job show -n db-backup -g "$RG" -o none 2>/dev/null; then
+      echo "── backing up the database ──"
+      EXEC=$($AZ containerapp job start -n db-backup -g "$RG" --query name -o tsv)
+      for _ in $(seq 1 30); do
+        ST=$($AZ containerapp job execution show -n db-backup -g "$RG" \
+             --job-execution-name "$EXEC" --query properties.status -o tsv 2>/dev/null || echo Unknown)
+        case "$ST" in
+          Succeeded) echo "backup ok ($EXEC)"; break ;;
+          Failed|Degraded)
+            echo "BACKUP FAILED ($EXEC) — stopping anyway would lose today's state." >&2
+            echo "Investigate with: $AZ containerapp job logs show -n db-backup -g $RG --container db-backup" >&2
+            exit 1 ;;
+          *) sleep 10 ;;
+        esac
+      done
+    else
+      echo "WARNING: no db-backup job — this stop will lose the database." >&2
+    fi
+
     # Reverse order: take the front door down first so nothing is served by
     # a gateway whose dependencies are already gone.
     for (( i=${#APPS[@]}-1; i>=0; i-- )); do
@@ -60,6 +86,8 @@ case "${1:-status}" in
       # connect to them at startup (Flyway, JWKS) — those fail fast otherwise.
       case "$app" in postgres|keycloak) sleep 30 ;; esac
     done
+    echo
+    echo "Postgres restored from the last dump on the pgbackup share (if one exists)."
     # The browser-facing app's custom domain (ADR-028), falling back to its
     # Azure FQDN if no domain is bound.
     WEB=$($AZ containerapp show -n gateway-web -g "$RG" \

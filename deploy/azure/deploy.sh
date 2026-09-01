@@ -112,6 +112,14 @@ upload_certs() {
   $AZ storage file upload-batch --account-name "$STORAGE" --account-key "$STKEY" \
       --destination certs --source gateway-service/src/main/resources/acap-profiles \
       --pattern '*.yaml' --destination-path acap-profiles --no-progress -o none
+  # Same reasoning for the policy document itself (ADR-033): the console's
+  # "Reload Policies" button is only meaningful if the file it re-reads can be
+  # changed without a rebuild — which is what makes the AI auditor's
+  # "Modify policy" suggestion applicable on a running demo.
+  echo "── uploading policy document ──"
+  $AZ storage file upload --account-name "$STORAGE" --account-key "$STKEY" \
+      --share-name certs --source gateway-service/src/main/resources/zte-policies.yaml \
+      --path zte-policies.yaml --no-progress -o none
 }
 upload_certs
 
@@ -175,7 +183,10 @@ if [ -n "${ANTHROPIC_API_KEY:-}" ]; then
       --secrets "anthropic-key=$ANTHROPIC_API_KEY" "internal-api-key=$INTERNAL_KEY" \
       --env-vars "ANTHROPIC_API_KEY=secretref:anthropic-key" \
         "ZTE_INTERNAL_API_KEY=secretref:internal-api-key" \
-        "GATEWAY_INTERNAL_URI=https://gateway:8080"
+        "GATEWAY_INTERNAL_URI=https://gateway:8080" \
+        "ZTE_GATEWAY_CA_CERT=/app/certs/ca.crt"
+  # Without the CA it cannot speak TLS to the gateway at all (ADR-033).
+  bash deploy/azure/attach-volume.sh zt-agents certs /app/certs ztagents-certs
 fi
 
 echo "── gateway (phase-1 create → learn FQDN) ──"
@@ -189,6 +200,7 @@ bash deploy/azure/create-app-with-certs.sh gateway "$IMG/zteasy-gateway:$TAG" 80
      ZT_AGENTS_URI=http://zt-agents:8083 \
      ZTE_CERTS_DIR=/app/certs ZTE_OBO_SECRET=$OBO_SECRET \
      ZTE_ACAP_PROFILES_LOCATION=file:/app/certs/acap-profiles/*.yaml \
+     ZTE_POLICY_FILE=file:/app/certs/zte-policies.yaml \
      ZTE_INTERNAL_API_KEY=secretref:internal-api-key \
      KEYCLOAK_ISSUER_URI=https://placeholder.invalid/auth/realms/zte-realm \
      ZTE_UI_OIDC_AUTHORITY=https://placeholder.invalid/auth/realms/zte-realm" \

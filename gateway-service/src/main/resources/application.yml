@@ -34,6 +34,16 @@ spring:
       initial-size: 2
       max-size: 5
       max-idle-time: 30m
+      # A restarted database leaves this pool holding sockets to a server that
+      # no longer exists; without validation the gateway serves 500s until it
+      # is itself restarted (measured on the Azure demo, ADR-033). Borrow-time
+      # validation plus a bounded lifetime makes the recovery automatic — which
+      # matters because deploy/azure/power.sh stops the whole environment every
+      # night and brings it back in an arbitrary order.
+      validation-query: SELECT 1
+      validation-depth: REMOTE
+      max-life-time: 30m
+      max-acquire-time: 10s
 
   # ── Spring Cloud Gateway: disable default web (use WebFlux) ──
   main:

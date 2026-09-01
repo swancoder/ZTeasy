@@ -1,6 +1,6 @@
 # FEAT-12 — LLM Token Metering
 
-**Maturity:** Partial coverage (one reporter today — see Limits)
+**Maturity:** Partial coverage (one reporter today — see Limits). Reported end to end in the cloud only since ADR-033: the reporter's TLS trust in the gateway had never been configured, so `llm_usage` stayed empty and every money panel read zero.
 **Depends on:** components that make LLM calls and report them
 **Feeds:** FEAT-11 (spend panels)
 **Detail:** [ADR-029](../adr/ADR-029-executive-dashboard.md)
