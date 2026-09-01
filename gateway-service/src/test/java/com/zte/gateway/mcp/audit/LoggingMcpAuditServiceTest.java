@@ -123,6 +123,29 @@ class LoggingMcpAuditServiceTest {
         assertThat(logged.decisionEffect()).isEqualTo("DENY");
     }
 
+    /**
+     * An expiry is a DENY with its own status code (ADR-034). Pinned because the
+     * mapping's default branch is ALLOW: when EXPIRED was first introduced it fell
+     * through to that branch, and the audit trail recorded a call that never ran as
+     * one that was permitted. Any future terminal state will do the same unless it
+     * is added to the mapping deliberately.
+     */
+    @Test
+    void expiredEvent_persistsAsDenyWith408_notAsAnAllow() {
+        LoggingMcpAuditService service = new LoggingMcpAuditService(requestLogAuditService, "test-mcp-backend");
+
+        service.record(new McpAuditEvent("1234", "crm-account-health-emea-01", "send_email", "EXPIRED",
+                Instant.now(), "session-9", "Expired undecided at 2026-09-01T19:01:30Z", "trace-hold",
+                "203.0.113.10", "test-agent/4.0", "crm-subject-uuid", "{\"to\":\"rep@nordwind.example\"}"));
+
+        ArgumentCaptor<RequestLog> captor = ArgumentCaptor.forClass(RequestLog.class);
+        verify(requestLogAuditService, timeout(2000)).record(captor.capture());
+        RequestLog logged = captor.getValue();
+        assertThat(logged.decisionEffect()).isEqualTo("DENY");
+        assertThat(logged.statusCode()).isEqualTo(408);
+        assertThat(logged.message()).contains("Expired undecided");
+    }
+
     /** A human-approved hold is audited as an ALLOW. */
     @Test
     void approvedEvent_persistsAsAllowWith200() {

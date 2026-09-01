@@ -9,9 +9,14 @@ package com.zte.gateway.mcp.policy;
  * convenience for call sites that only ever cared about the ALLOW/not-ALLOW
  * split before HOLD existed; new code should switch on {@link #outcome()}.
  */
-public record PolicyDecision(Outcome outcome, String reason) {
+public record PolicyDecision(Outcome outcome, String reason, String routeTo) {
 
     public enum Outcome { ALLOW, DENY, HOLD }
+
+    /** Two-component form for the ALLOW/DENY sites that predate ADR-034's routing. */
+    public PolicyDecision(Outcome outcome, String reason) {
+        this(outcome, reason, null);
+    }
 
     public static PolicyDecision allow() {
         return new PolicyDecision(Outcome.ALLOW, "ok");
@@ -22,7 +27,16 @@ public record PolicyDecision(Outcome outcome, String reason) {
     }
 
     public static PolicyDecision hold(String reason) {
-        return new PolicyDecision(Outcome.HOLD, reason);
+        return new PolicyDecision(Outcome.HOLD, reason, null);
+    }
+
+    /**
+     * A hold whose matched rule names who may decide it (ADR-034). {@code routeTo}
+     * travels with the decision rather than being re-derived later, because by the
+     * time the approval row is written the rule that matched is long out of scope.
+     */
+    public static PolicyDecision hold(String reason, String routeTo) {
+        return new PolicyDecision(Outcome.HOLD, reason, routeTo);
     }
 
     public boolean allowed() {

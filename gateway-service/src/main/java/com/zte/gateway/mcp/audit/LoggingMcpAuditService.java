@@ -68,17 +68,29 @@ public class LoggingMcpAuditService implements McpAuditService {
 
         // Event shapes sharing this one persist() path: a session opening (GET /sse, no
         // policy decision — always "succeeds"), a tool call's ALLOW/DENY/HOLD outcome
-        // (POST /message), and a held call's later APPROVED/REJECTED decision (Stage 1,
-        // ADR-019) — REJECTED is audited as a DENY (the human's decision, not the
-        // original policy engine's), APPROVED as an ALLOW, HELD as its own HOLD effect
-        // (202: the call is genuinely pending, not yet succeeded or failed).
-        boolean denied = "DENIED".equals(event.status()) || "REJECTED".equals(event.status());
+        // (POST /message), and a held call's later APPROVED/REJECTED/EXPIRED decision
+        // (Stage 1, ADR-019; expiry from ADR-034) — REJECTED is audited as a DENY (the
+        // human's decision, not the original policy engine's), APPROVED as an ALLOW,
+        // HELD as its own HOLD effect (202: the call is genuinely pending, not yet
+        // succeeded or failed).
+        //
+        // EXPIRED belongs with DENY and the mapping must stay explicit about it. The
+        // effect started life as "denied ? DENY : held ? HOLD : ALLOW", so the first
+        // expiry this deployment recorded appeared in the audit trail as an ALLOW —
+        // a call that never ran, filed as one that did. Any status this method does
+        // not recognise still lands on ALLOW, which is why new terminal states must
+        // be added here at the same time they are added to the enum.
+        boolean denied = "DENIED".equals(event.status())
+                || "REJECTED".equals(event.status())
+                || "EXPIRED".equals(event.status());
         boolean held = "HELD".equals(event.status());
         boolean sseOpened = "SSE_OPENED".equals(event.status());
         String path = sseOpened ? "/sse" : "/message";
         String httpMethod = sseOpened ? "GET" : "POST";
         String decisionEffect = denied ? "DENY" : held ? "HOLD" : "ALLOW";
-        int statusCode = denied ? 403 : held ? 202 : 200;
+        // 408 for an expiry: it is a deny in effect, but "nobody answered in time" is a
+        // different fact from "a human said no", and the audit trail should not blur them.
+        int statusCode = "EXPIRED".equals(event.status()) ? 408 : denied ? 403 : held ? 202 : 200;
 
         // sessionId no longer travels as trace_id (see RequestLog.forMcp's Javadoc), and
         // argumentsJson has no dedicated column either — both folded into message instead,

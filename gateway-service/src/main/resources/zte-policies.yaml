@@ -245,6 +245,11 @@ agentMcpToolHolds:
     source: "client:crm-account-health-emea-01"
     target: send_email
     mcpTarget: hubspot-mcp
+    # ADR-034: an outbound email to a customer is the one held call with a named
+    # owner. Everything else in this section stays open to any interactive user,
+    # which is also what an absent routeTo means.
+    routeTo: "role:APPROVER"
+
   - id: mcp-hold-crm-account-health-draft-followup
     effect: ALLOW
     source: "client:crm-account-health-emea-01"

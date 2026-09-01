@@ -224,9 +224,9 @@ class McpProxySecurityWebFluxTest {
                 .thenReturn(PolicyDecision.hold("held by test policy"));
         PendingApproval approval = new PendingApproval(UUID.fromString("11111111-1111-1111-1111-111111111111"),
                 "session-1", "crm-account-health-emea-01", "send_email", "7", "{}", null, "held by test policy",
-                "PENDING", Instant.now(), null, null, null, null, null, null);
+                "PENDING", Instant.now(), Instant.now().plusSeconds(86400), null, null, null, null, null, null);
         when(pendingApprovalService.hold(eq("session-1"), eq("crm-account-health-emea-01"), eq("send_email"), any(),
-                eq("held by test policy"), any(), any(), any(), any())).thenReturn(Mono.just(approval));
+                eq("held by test policy"), any(), any(), any(), any(), any())).thenReturn(Mono.just(approval));
 
         webTestClient.mutateWith(mockJwt().jwt(jwt -> jwt.claim("azp", "crm-account-health-emea-01")))
                 .post().uri("/message?sessionId=session-1")

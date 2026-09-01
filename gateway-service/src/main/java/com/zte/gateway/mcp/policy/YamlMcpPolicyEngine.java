@@ -151,6 +151,8 @@ public class YamlMcpPolicyEngine implements McpPolicyEngine {
         if (afterThresholds.outcome() == PolicyDecision.Outcome.ALLOW
                 && lifecycleStore.isReauthOverdue(profile.get())) {
             String due = lifecycleStore.effectiveReauthDue(profile.get()).map(Object::toString).orElse("?");
+            // No routeTo: this hold comes from the agent's lifecycle state, not from a
+            // rule that could name an approver, so it stays open to any interactive user.
             return PolicyDecision.hold("Held: agent '" + agentId + "'s re-authorization has been overdue since "
                     + due + " (ACAP lifecycle) — approve to proceed, or re-authorize the agent");
         }
@@ -168,7 +170,8 @@ public class YamlMcpPolicyEngine implements McpPolicyEngine {
                 policyDefinitionStore.current().agentMcpToolHolds(), sources, toolName, mcpBackendName);
         PolicyDecision decision = holds.match()
                 .map(rule -> PolicyDecision.hold(
-                        "Tool '" + toolName + "' held for human approval by rule '" + rule.id() + "'"))
+                        "Tool '" + toolName + "' held for human approval by rule '" + rule.id() + "'",
+                        rule.routeTo()))
                 .orElseGet(PolicyDecision::allow);
         return annotateInactive(decision, holds.inactiveMatches());
     }

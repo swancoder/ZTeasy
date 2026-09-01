@@ -172,13 +172,18 @@ function ApprovalQueue({ accessToken, username, onSignOut }: QueueProps) {
               <Card
                 key={approval.id}
                 sx={{
-                  borderColor: 'warning.main',
-                  bgcolor: 'rgba(245, 166, 35, 0.04)',
+                  borderColor: approval.status === 'EXPIRED' ? 'divider' : 'warning.main',
+                  bgcolor: approval.status === 'EXPIRED' ? 'transparent' : 'rgba(245, 166, 35, 0.04)',
+                  opacity: approval.status === 'EXPIRED' ? 0.65 : 1,
                 }}
               >
                 <CardContent>
                   <Stack direction="row" spacing={1} sx={{ alignItems: 'center', mb: 1 }}>
-                    <Chip label="HELD" color="warning" size="small" />
+                    <Chip
+                      label={approval.status === 'EXPIRED' ? 'EXPIRED' : 'HELD'}
+                      color={approval.status === 'EXPIRED' ? 'default' : 'warning'}
+                      size="small"
+                    />
                     <Typography variant="subtitle1" sx={{ fontFamily: 'monospace' }}>
                       {approval.toolName}
                     </Typography>
@@ -188,7 +193,23 @@ function ApprovalQueue({ accessToken, username, onSignOut }: QueueProps) {
                   </Typography>
                   <Typography variant="body2" color="text.secondary">
                     Requested: {new Date(approval.requestedAt).toLocaleString()}
+                    {approval.expiresAt && (
+                      <>
+                        {' · '}
+                        <Box
+                          component="span"
+                          sx={{ color: approval.secondsRemaining < 3600 ? 'error.main' : 'text.secondary' }}
+                        >
+                          {formatRemaining(approval.secondsRemaining)}
+                        </Box>
+                      </>
+                    )}
                   </Typography>
+                  {approval.routeTo && (
+                    <Typography variant="body2" color="text.secondary">
+                      Routed to: <b>{approval.routeTo}</b>
+                    </Typography>
+                  )}
                   {approval.reason && (
                     <Typography variant="body2" color="text.secondary">
                       Held because: {approval.reason}
@@ -213,10 +234,15 @@ function ApprovalQueue({ accessToken, username, onSignOut }: QueueProps) {
                   )}
                 </CardContent>
                 <CardActions sx={{ justifyContent: 'flex-end', px: 2, pb: 2 }}>
+                  {!approval.canDecide && approval.refusalReason && (
+                    <Typography variant="body2" color="text.secondary" sx={{ mr: 'auto' }}>
+                      {approval.refusalReason}
+                    </Typography>
+                  )}
                   <Button
                     variant="outlined"
                     color="error"
-                    disabled={decidingId === approval.id}
+                    disabled={decidingId === approval.id || !approval.canDecide}
                     onClick={() => setDeclineTarget(approval)}
                   >
                     Deny
@@ -224,7 +250,7 @@ function ApprovalQueue({ accessToken, username, onSignOut }: QueueProps) {
                   <Button
                     variant="contained"
                     color="success"
-                    disabled={decidingId === approval.id}
+                    disabled={decidingId === approval.id || !approval.canDecide}
                     onClick={() => decide(approval, 'approve')}
                   >
                     Allow
@@ -262,6 +288,20 @@ function ApprovalQueue({ accessToken, username, onSignOut }: QueueProps) {
       </Snackbar>
     </Box>
   )
+}
+
+/**
+ * "4h 12m left" / "12m left" / "expiring now". Rendered from the gateway's own
+ * secondsRemaining rather than from expiresAt minus the browser clock, so a
+ * reviewer with a skewed machine sees the deadline the gateway will enforce.
+ */
+function formatRemaining(seconds: number): string {
+  if (seconds <= 0) return 'expiring now'
+  const h = Math.floor(seconds / 3600)
+  const m = Math.floor((seconds % 3600) / 60)
+  if (h > 0) return `${h}h ${m}m left`
+  if (m > 0) return `${m}m left`
+  return `${seconds}s left`
 }
 
 function formatArguments(argumentsJson: string): string {

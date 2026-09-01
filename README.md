@@ -210,6 +210,7 @@ zte-lightweight/
 | [ADR-031](docs/adr/ADR-031-policy-audit-surfacing-and-activation-overlay.md) | Policy-Audit Surfacing and the Activation Overlay | Accepted |
 | [ADR-032](docs/adr/ADR-032-acap-lifecycle-and-response-masking.md) | ACAP Lifecycle Management and Response Masking (amends ADR-022) | Accepted |
 | [ADR-033](docs/adr/ADR-033-demo-durability-and-cloud-configuration.md) | Demo Durability and the Cloud-Only Configuration (amends ADR-027) | Accepted |
+| [ADR-034](docs/adr/ADR-034-approval-routing-and-expiry.md) | Approval Routing, Entitlement and Expiry (extends ADR-019) | Accepted |
 
 ---
 

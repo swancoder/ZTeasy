@@ -65,6 +65,13 @@
         "composite": false,
         "clientRole": false,
         "containerId": "zte-realm"
+      },
+      {
+        "name": "APPROVER",
+        "description": "May decide held calls that a policy rule routes to role:APPROVER (ADR-034)",
+        "composite": false,
+        "clientRole": false,
+        "containerId": "zte-realm"
       }
     ],
     "client": {}
@@ -322,7 +329,8 @@
       "credentials": [],
       "requiredActions": [],
       "realmRoles": [
-        "ADMIN"
+        "ADMIN",
+        "APPROVER"
       ],
       "clientRoles": {}
     },
@@ -423,7 +431,8 @@
       "requiredActions": [],
       "realmRoles": [
         "DPO",
-        "USER"
+        "USER",
+        "APPROVER"
       ],
       "clientRoles": {}
     }

@@ -166,6 +166,17 @@ zte:
   ui:
     oidc-authority: ${ZTE_UI_OIDC_AUTHORITY:http://localhost:8180/realms/zte-realm}
 
+  # ── Human approvals (ADR-019, routing and expiry from ADR-034) ──
+  approvals:
+    # How long a held call waits for a human. 24h comes from ADR-019's own
+    # "held items reviewed daily" framing, not from a requirement — it is the
+    # number to change first if a deployment has an actual SLA.
+    ttl-minutes: ${ZTE_APPROVALS_TTL_MINUTES:1440}
+    # How often undecided items past that deadline are swept to EXPIRED. The
+    # sweep is what keeps the queue honest; the deadline check on the decision
+    # path is what keeps a late decision from executing.
+    sweep-interval-ms: ${ZTE_APPROVALS_SWEEP_INTERVAL_MS:60000}
+
   # ── ACAP per-agent scope profiles (Stage 3 / ADR-020) — additive, opt-in ──
   # tightening on top of agentMcpToolCalls/agentMcpToolHolds above. Unlike
   # policy.file, a location matching zero files is normal, not an error.

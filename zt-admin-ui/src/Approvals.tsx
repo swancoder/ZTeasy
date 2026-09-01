@@ -23,6 +23,16 @@ interface Props {
 // The 🟡 outcome (Stage 1, ADR-019): tool calls held by an agentMcpToolHolds
 // rule, awaiting a human's Approve/Reject here before (or instead of) reaching
 // the backend MCP server. Mirrors Inventory.tsx's fetch/snackbar/confirm shape.
+/** Same wording the Approval Center uses, from the gateway's own countdown (ADR-034). */
+function formatRemaining(seconds: number): string {
+  if (seconds <= 0) return 'expiring now'
+  const h = Math.floor(seconds / 3600)
+  const m = Math.floor((seconds % 3600) / 60)
+  if (h > 0) return `${h}h ${m}m`
+  if (m > 0) return `${m}m`
+  return `${seconds}s`
+}
+
 export default function Approvals({ accessToken }: Props) {
   const [approvals, setApprovals] = useState<PendingApproval[]>([])
   const [loading, setLoading] = useState(true)
@@ -119,8 +129,10 @@ export default function Approvals({ accessToken }: Props) {
             <TableHead>
               <TableRow>
                 <TableCell>Requested</TableCell>
+                <TableCell>Expires</TableCell>
                 <TableCell>Agent</TableCell>
                 <TableCell>Tool</TableCell>
+                <TableCell>Routed to</TableCell>
                 <TableCell>Arguments</TableCell>
                 <TableCell>Reason</TableCell>
                 <TableCell align="right">Actions</TableCell>
@@ -130,8 +142,14 @@ export default function Approvals({ accessToken }: Props) {
               {approvals.map((approval) => (
                 <TableRow key={approval.id}>
                   <TableCell>{new Date(approval.requestedAt).toLocaleString()}</TableCell>
+                  <TableCell sx={{ color: approval.secondsRemaining < 3600 ? 'error.main' : 'text.secondary' }}>
+                    {approval.status === 'EXPIRED' ? 'expired' : formatRemaining(approval.secondsRemaining)}
+                  </TableCell>
                   <TableCell>{approval.displayIdentity ?? approval.agentId}</TableCell>
                   <TableCell>{approval.toolName}</TableCell>
+                  <TableCell sx={{ fontFamily: 'monospace', fontSize: '0.8rem' }}>
+                    {approval.routeTo ?? 'anyone'}
+                  </TableCell>
                   <TableCell sx={{ fontFamily: 'monospace', fontSize: '0.8rem', maxWidth: 260 }}>
                     <Tooltip title={approval.argumentsJson ?? '—'}>
                       <span style={{ display: 'block', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
@@ -141,26 +159,28 @@ export default function Approvals({ accessToken }: Props) {
                   </TableCell>
                   <TableCell>{approval.reason ?? '—'}</TableCell>
                   <TableCell align="right">
-                    <Stack direction="row" spacing={1} sx={{ justifyContent: 'flex-end' }}>
-                      <Button
-                        size="small"
-                        variant="contained"
-                        color="success"
-                        disabled={decidingId === approval.id}
-                        onClick={() => decide(approval, 'approve')}
-                      >
-                        Approve
-                      </Button>
-                      <Button
-                        size="small"
-                        variant="outlined"
-                        color="error"
-                        disabled={decidingId === approval.id}
-                        onClick={() => setRejectTarget(approval)}
-                      >
-                        Reject
-                      </Button>
-                    </Stack>
+                    <Tooltip title={approval.canDecide ? '' : approval.refusalReason ?? ''}>
+                      <Stack direction="row" spacing={1} sx={{ justifyContent: 'flex-end' }}>
+                        <Button
+                          size="small"
+                          variant="contained"
+                          color="success"
+                          disabled={decidingId === approval.id || !approval.canDecide}
+                          onClick={() => decide(approval, 'approve')}
+                        >
+                          Approve
+                        </Button>
+                        <Button
+                          size="small"
+                          variant="outlined"
+                          color="error"
+                          disabled={decidingId === approval.id || !approval.canDecide}
+                          onClick={() => setRejectTarget(approval)}
+                        >
+                          Reject
+                        </Button>
+                      </Stack>
+                    </Tooltip>
                   </TableCell>
                 </TableRow>
               ))}

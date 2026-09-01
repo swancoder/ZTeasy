@@ -11,10 +11,12 @@ import com.zte.gateway.mcp.model.JsonRpcResponse;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.http.codec.ServerSentEvent;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 import reactor.core.publisher.Flux;
 import reactor.core.publisher.Mono;
 
+import java.time.Duration;
 import java.time.Instant;
 import java.util.Map;
 import java.util.UUID;
@@ -46,22 +48,28 @@ public class PendingApprovalService {
     private final McpSessionManager sessionManager;
     private final ObjectMapper objectMapper;
 
+    private final ApprovalEntitlement entitlement;
+    private final Duration ttl;
+
     public PendingApprovalService(PendingApprovalRepository repository, McpForwardService forwardService,
                                    McpAuditService auditService, McpSessionManager sessionManager,
-                                   ObjectMapper objectMapper) {
+                                   ObjectMapper objectMapper, ApprovalEntitlement entitlement,
+                                   @Value("${zte.approvals.ttl-minutes:1440}") long ttlMinutes) {
         this.repository = repository;
         this.forwardService = forwardService;
         this.auditService = auditService;
         this.sessionManager = sessionManager;
         this.objectMapper = objectMapper;
+        this.entitlement = entitlement;
+        this.ttl = Duration.ofMinutes(ttlMinutes);
     }
 
     /** Persists a new held call — called from {@code McpProxyHandler.process()} on a HOLD decision. */
     public Mono<PendingApproval> hold(String sessionId, String agentId, String toolName, JsonRpcRequest rpc,
-                                       String reason, String traceId, String clientIp, String userAgent,
-                                       String displayIdentity) {
+                                       String reason, String routeTo, String traceId, String clientIp,
+                                       String userAgent, String displayIdentity) {
         PendingApproval approval = PendingApproval.requested(sessionId, agentId, toolName, writeJson(rpc.id()),
-                writeJson(rpc.toolArguments()), null, reason, traceId, clientIp, userAgent, displayIdentity);
+                writeJson(rpc.toolArguments()), routeTo, reason, traceId, clientIp, userAgent, displayIdentity, ttl);
         return repository.save(approval);
     }
 
@@ -70,23 +78,55 @@ public class PendingApprovalService {
         return repository.findByStatusOrderByRequestedAtAsc(PendingApprovalStatus.PENDING.name());
     }
 
-    public Mono<PendingApproval> approve(UUID id, String decidedBy) {
-        return decide(id, true, decidedBy);
+    public Mono<PendingApproval> approve(UUID id, ApprovalEntitlement.Decider decider) {
+        return decide(id, true, decider);
     }
 
-    public Mono<PendingApproval> reject(UUID id, String decidedBy) {
-        return decide(id, false, decidedBy);
+    public Mono<PendingApproval> reject(UUID id, ApprovalEntitlement.Decider decider) {
+        return decide(id, false, decider);
     }
 
-    private Mono<PendingApproval> decide(UUID id, boolean approve, String decidedBy) {
+    private Mono<PendingApproval> decide(UUID id, boolean approve, ApprovalEntitlement.Decider decider) {
         return repository.findById(id)
                 .switchIfEmpty(Mono.error(new ApprovalNotFoundException(id)))
                 .flatMap(approval -> {
                     if (!PendingApprovalStatus.PENDING.name().equals(approval.status())) {
                         return Mono.error(new ApprovalAlreadyDecidedException(id, approval.status()));
                     }
-                    return approve ? executeApproval(approval, decidedBy) : executeRejection(approval, decidedBy);
+                    // Checked here rather than only in the sweeper: a row can be past
+                    // its deadline for up to one sweep interval and must not execute
+                    // in that window just because a timer hasn't fired yet (ADR-034).
+                    if (approval.isExpired(Instant.now())) {
+                        return expire(approval).then(Mono.error(new ApprovalExpiredException(id, approval.expiresAt())));
+                    }
+                    return entitlement.refusalReason(approval, decider)
+                            .<Mono<PendingApproval>>map(reason -> Mono.error(new ApprovalNotRoutedToYouException(reason)))
+                            .orElseGet(() -> approve
+                                    ? executeApproval(approval, decider.username())
+                                    : executeRejection(approval, decider.username()));
                 });
+    }
+
+    /**
+     * Terminal state for an approval nobody decided in time. Writes the same kind of
+     * audit row a human decision would, because "expired" is an outcome of the
+     * governance process, not an absence of one.
+     */
+    Mono<PendingApproval> expire(PendingApproval approval) {
+        log.info("MCP EXPIRE approvalId={} agentId={} tool={} expiresAt={}",
+                approval.id(), approval.agentId(), approval.toolName(), approval.expiresAt());
+        auditService.record(new McpAuditEvent(PROCESS_ID, approval.agentId(), approval.toolName(), "EXPIRED",
+                Instant.now(), approval.sessionId(), "Expired undecided at " + approval.expiresAt(),
+                approval.traceId(), approval.clientIp(), approval.userAgent(), approval.displayIdentity(),
+                approval.argumentsJson()));
+        emitIfSessionOpen(approval.sessionId(), JsonRpcResponse.denied(
+                readJson(approval.rpcIdJson(), Object.class), "Expired without a human decision"));
+        return repository.save(approval.decided(PendingApprovalStatus.EXPIRED, "system"));
+    }
+
+    /** Everything past its deadline and still pending — the sweeper's input. */
+    public Flux<PendingApproval> findExpired(Instant now) {
+        return repository.findByStatusAndExpiresAtBefore(PendingApprovalStatus.PENDING.name(), now);
     }
 
     private Mono<PendingApproval> executeApproval(PendingApproval approval, String decidedBy) {

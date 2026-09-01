@@ -77,7 +77,8 @@ auditable — the opposite of a mesh's "hide it in the sidecar" approach. See
 | 31 | Policy-audit surfacing + activation overlay: gateway pushes the policy document to zt-agents' structured `/analyze` (works in the cloud, unlike the fetch flow), persisted runs with read-time freshness (`policy_audit_runs`), per-rule on/off toggle (`policy_rule_overrides` + in-memory mirror) applied at all four decision points with `POLICY_INACTIVE_MATCH` logging, console Run/Last-Results drawer with Implement/Modify and orange audit flags; `zte.gateway.ca-cert` closes zt-agents' TLS gap toward the gateway | [031](adr/ADR-031-policy-audit-surfacing-and-activation-overlay.md) |
 | 32 | ACAP lifecycle and response masking: `acap_profile_lifecycle`/`acap_reauthorizations` overlay (suspend/resume/retire, re-authorization history) with SUSPENDED/RETIRED→DENY and overdue→HOLD enforcement (amending ADR-022's display-only posture), real `AcapDataMaskingFilter` replacing the pass-through stub (structure-aware, marker-based, unknown shapes pass through logged), persistent daily threshold usage (`acap_threshold_usage`, write-behind + startup restore), profiles for agent-a/agent-b | [032](adr/ADR-032-acap-lifecycle-and-response-masking.md) |
 | 33 | Demo durability and cloud-only configuration: `db-backup` job (`pg_dump` → Azure Files share) with the same share mounted read-only at `/docker-entrypoint-initdb.d` so the official Postgres image restores it on every start, `power.sh stop` backing up first and aborting on failure, R2DBC validation-on-borrow so a restarted database no longer 500s the gateway, `ZTE_GATEWAY_CA_CERT` (metering had never reported: the property was read but never set), `ZTE_POLICY_FILE` on the share (makes Reload Policies re-read an editable document), `attach-volume.sh` | [033](adr/ADR-033-demo-durability-and-cloud-configuration.md) |
-| 34+ | Backlog (rate limiting, ABAC…) | see §9 |
+| 34 | Approval routing, entitlement and expiry: `routeTo` on agentMcpToolHolds rules carried through `PolicyDecision` into the approval row (the V13 column nothing ever wrote), per-viewer `canDecide`/`refusalReason`/`secondsRemaining` on both approval surfaces with 403 enforcement in the service, `expires_at` + `EXPIRED` terminal state swept on a timer and re-checked on the decision path, expiry audited as DENY/408 | [034](adr/ADR-034-approval-routing-and-expiry.md) |
+| 35+ | Backlog (rate limiting, ABAC…) | see §9 |
 
 **Testing:** `./gradlew test` (unit — every package below has direct
 coverage for its pure decision logic; I/O-calling code that has no
@@ -927,6 +928,11 @@ did this documents exactly what was investigated and found.
   telemetry's exact-name-match requirement.
 - Code-split `zt-admin-ui`'s bundle (`swagger-ui-react` roughly tripled it).
 
+**Approvals** (ADR-034 closed routing, entitlement and expiry): still open —
+notification when an item is raised (the queue is polled, nobody is told), a
+four-eyes rule, delegation, and group-based routing (blocked on group claims
+reaching the token at all).
+
 **Cloud durability** (ADR-033): the demo database is dumped to an Azure Files
 share by the `db-backup` job and restored automatically on start; a crash
 between dumps still loses the delta, and a Premium FileStorage NFS share would
@@ -1022,6 +1028,7 @@ automatically instead of needing its own `WebFilter` (ADR-012).
 | [031](adr/ADR-031-policy-audit-surfacing-and-activation-overlay.md) | Policy-Audit Surfacing and the Activation Overlay |
 | [032](adr/ADR-032-acap-lifecycle-and-response-masking.md) | ACAP Lifecycle Management and Response Masking (amends ADR-022) |
 | [033](adr/ADR-033-demo-durability-and-cloud-configuration.md) | Demo Durability and the Cloud-Only Configuration (amends ADR-027) |
+| [034](adr/ADR-034-approval-routing-and-expiry.md) | Approval Routing, Entitlement and Expiry (extends ADR-019/ADR-026) |
 
 ---
 

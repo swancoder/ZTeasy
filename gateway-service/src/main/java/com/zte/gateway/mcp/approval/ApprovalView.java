@@ -1,0 +1,44 @@
+package com.zte.gateway.mcp.approval;
+
+import java.time.Instant;
+
+/**
+ * A held call as a human sees it (Stage 34, ADR-034): the stored row plus the two
+ * things that depend on <em>who is asking</em> and <em>when</em> — whether this
+ * viewer may decide it, and how long is left.
+ *
+ * <p>Computed per request rather than stored: entitlement depends on the caller's
+ * token and the remaining time depends on the clock, so neither can be persisted
+ * without being wrong by the time it is read.
+ */
+public record ApprovalView(
+        java.util.UUID id,
+        String sessionId,
+        String agentId,
+        String toolName,
+        String argumentsJson,
+        String routeTo,
+        String reason,
+        String status,
+        Instant requestedAt,
+        Instant expiresAt,
+        Instant decidedAt,
+        String decidedBy,
+        String traceId,
+        String displayIdentity,
+        boolean canDecide,
+        String refusalReason,
+        long secondsRemaining
+) {
+
+    public static ApprovalView of(PendingApproval a, ApprovalEntitlement entitlement,
+                                   ApprovalEntitlement.Decider decider, Instant now) {
+        String refusal = entitlement.refusalReason(a, decider).orElse(null);
+        long remaining = a.expiresAt() == null ? 0 : Math.max(0, a.expiresAt().getEpochSecond() - now.getEpochSecond());
+        boolean expired = a.isExpired(now);
+        return new ApprovalView(a.id(), a.sessionId(), a.agentId(), a.toolName(), a.argumentsJson(), a.routeTo(),
+                a.reason(), expired ? PendingApprovalStatus.EXPIRED.name() : a.status(), a.requestedAt(),
+                a.expiresAt(), a.decidedAt(), a.decidedBy(), a.traceId(), a.displayIdentity(),
+                refusal == null && !expired, expired ? "This approval has expired" : refusal, remaining);
+    }
+}

@@ -4,5 +4,11 @@ package com.zte.gateway.mcp.approval;
 public enum PendingApprovalStatus {
     PENDING,
     APPROVED,
-    REJECTED
+    REJECTED,
+    /**
+     * Nobody decided in time (ADR-034). A terminal state like the other two,
+     * and audited like them — the difference between "expired" and "silently
+     * dropped" is the whole point of having it.
+     */
+    EXPIRED
 }

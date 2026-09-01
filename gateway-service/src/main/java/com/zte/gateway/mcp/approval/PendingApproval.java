@@ -4,6 +4,7 @@ import org.springframework.data.annotation.Id;
 import org.springframework.data.relational.core.mapping.Column;
 import org.springframework.data.relational.core.mapping.Table;
 
+import java.time.Duration;
 import java.time.Instant;
 import java.util.UUID;
 
@@ -40,6 +41,7 @@ public record PendingApproval(
                                        String reason,
                                        String status,
         @Column("requested_at")        Instant requestedAt,
+        @Column("expires_at")          Instant expiresAt,
         @Column("decided_at")          Instant decidedAt,
         @Column("decided_by")          String decidedBy,
         @Column("trace_id")            String traceId,
@@ -50,15 +52,23 @@ public record PendingApproval(
 
     public static PendingApproval requested(String sessionId, String agentId, String toolName, String rpcIdJson,
                                              String argumentsJson, String routeTo, String reason, String traceId,
-                                             String clientIp, String userAgent, String displayIdentity) {
+                                             String clientIp, String userAgent, String displayIdentity,
+                                             Duration ttl) {
+        Instant now = Instant.now();
         return new PendingApproval(null, sessionId, agentId, toolName, rpcIdJson, argumentsJson, routeTo, reason,
-                PendingApprovalStatus.PENDING.name(), Instant.now(), null, null, traceId, clientIp, userAgent,
+                PendingApprovalStatus.PENDING.name(), now, now.plus(ttl), null, null, traceId, clientIp, userAgent,
                 displayIdentity);
+    }
+
+    /** True once {@code expiresAt} is in the past — the sweeper's predicate, and the API's guard. */
+    public boolean isExpired(Instant now) {
+        return expiresAt != null && !now.isBefore(expiresAt);
     }
 
     /** Same row with a terminal decision recorded — {@code save()} then issues an UPDATE, {@code id} is non-null. */
     public PendingApproval decided(PendingApprovalStatus newStatus, String decidedBy) {
         return new PendingApproval(id, sessionId, agentId, toolName, rpcIdJson, argumentsJson, routeTo, reason,
-                newStatus.name(), requestedAt, Instant.now(), decidedBy, traceId, clientIp, userAgent, displayIdentity);
+                newStatus.name(), requestedAt, expiresAt, Instant.now(), decidedBy, traceId, clientIp, userAgent,
+                displayIdentity);
     }
 }

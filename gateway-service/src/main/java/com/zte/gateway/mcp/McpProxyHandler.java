@@ -147,8 +147,8 @@ public class McpProxyHandler {
                 log.info("MCP HOLD sessionId={} agentId={} tool={} reason={}",
                         sessionId, agentId, toolName, decision.reason());
                 yield pendingApprovalService.hold(sessionId, agentId, toolName, rpc, decision.reason(),
-                                httpContext.traceId(), httpContext.clientIp(), httpContext.userAgent(),
-                                identity.displayIdentity())
+                                decision.routeTo(), httpContext.traceId(), httpContext.clientIp(),
+                                httpContext.userAgent(), identity.displayIdentity())
                         .flatMap(approval -> {
                             auditService.record(new McpAuditEvent(PROCESS_ID, agentId, toolName, "HELD",
                                     Instant.now(), sessionId, decision.reason(), httpContext.traceId(),

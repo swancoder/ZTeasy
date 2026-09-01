@@ -11,8 +11,14 @@ export interface PendingApproval {
   argumentsJson: string | null
   routeTo: string | null
   reason: string | null
-  status: 'PENDING' | 'APPROVED' | 'REJECTED'
+  status: 'PENDING' | 'APPROVED' | 'REJECTED' | 'EXPIRED'
   requestedAt: string
+  expiresAt: string | null
+  // Computed per request by the gateway (ADR-034): entitlement depends on the
+  // caller's token and the remaining time on the clock, so neither is stored.
+  canDecide: boolean
+  refusalReason: string | null
+  secondsRemaining: number
   decidedAt: string | null
   decidedBy: string | null
   traceId: string | null

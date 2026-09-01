@@ -2,6 +2,9 @@ package com.zte.gateway.admin;
 
 import com.zte.gateway.mcp.approval.ApprovalAlreadyDecidedException;
 import com.zte.gateway.mcp.approval.ApprovalNotFoundException;
+import com.zte.gateway.mcp.approval.ApprovalApiSupport;
+import com.zte.gateway.mcp.approval.ApprovalEntitlement;
+import com.zte.gateway.mcp.approval.ApprovalView;
 import com.zte.gateway.mcp.approval.PendingApproval;
 import com.zte.gateway.mcp.approval.PendingApprovalService;
 import org.springframework.http.HttpStatus;
@@ -32,39 +35,28 @@ import java.util.UUID;
 class AdminApprovalsController {
 
     private final PendingApprovalService approvalService;
+    private final ApprovalEntitlement    entitlement;
 
-    AdminApprovalsController(PendingApprovalService approvalService) {
+    AdminApprovalsController(PendingApprovalService approvalService, ApprovalEntitlement entitlement) {
         this.approvalService = approvalService;
+        this.entitlement = entitlement;
     }
 
     @GetMapping
-    public Mono<List<PendingApproval>> list() {
-        return approvalService.listPending().collectList();
+    public Mono<List<ApprovalView>> list(@AuthenticationPrincipal Jwt jwt) {
+        ApprovalEntitlement.Decider decider = ApprovalApiSupport.decider(jwt);
+        return approvalService.listPending().collectList()
+                .map(pending -> ApprovalApiSupport.views(pending, entitlement, decider));
     }
 
     @PostMapping("/{id}/approve")
     public Mono<ResponseEntity<Object>> approve(@PathVariable UUID id, @AuthenticationPrincipal Jwt jwt) {
-        return approvalService.approve(id, decidedBy(jwt))
-                .<ResponseEntity<Object>>map(ResponseEntity::ok)
-                .onErrorResume(ApprovalNotFoundException.class, ex -> Mono.just(
-                        ResponseEntity.status(HttpStatus.NOT_FOUND).body(Map.of("error", ex.getMessage()))))
-                .onErrorResume(ApprovalAlreadyDecidedException.class, ex -> Mono.just(
-                        ResponseEntity.status(HttpStatus.CONFLICT).body(Map.of("error", ex.getMessage()))));
+        return ApprovalApiSupport.respond(approvalService.approve(id, ApprovalApiSupport.decider(jwt)));
     }
 
     @PostMapping("/{id}/reject")
     public Mono<ResponseEntity<Object>> reject(@PathVariable UUID id, @AuthenticationPrincipal Jwt jwt) {
-        return approvalService.reject(id, decidedBy(jwt))
-                .<ResponseEntity<Object>>map(ResponseEntity::ok)
-                .onErrorResume(ApprovalNotFoundException.class, ex -> Mono.just(
-                        ResponseEntity.status(HttpStatus.NOT_FOUND).body(Map.of("error", ex.getMessage()))))
-                .onErrorResume(ApprovalAlreadyDecidedException.class, ex -> Mono.just(
-                        ResponseEntity.status(HttpStatus.CONFLICT).body(Map.of("error", ex.getMessage()))));
+        return ApprovalApiSupport.respond(approvalService.reject(id, ApprovalApiSupport.decider(jwt)));
     }
 
-    /** {@code preferred_username}, falling back to {@code sub} — same convention {@code McpProxyHandler} uses for agents. */
-    private String decidedBy(Jwt jwt) {
-        String preferredUsername = jwt.getClaimAsString("preferred_username");
-        return preferredUsername != null ? preferredUsername : jwt.getSubject();
-    }
 }

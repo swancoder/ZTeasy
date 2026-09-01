@@ -1,6 +1,6 @@
 # FEAT-06 — Human-in-the-Loop Approvals
 
-**Maturity:** Working (no routing, notification or expiry — see Limits)
+**Maturity:** Working. Routing and expiry landed in ADR-034 (a hold rule may name `role:APPROVER`, enforced with a 403; items carry a deadline and expire into an audited terminal state). Still no notification: the queue is polled, nobody is told.
 **Depends on:** FEAT-04 (produces holds), FEAT-02 (who may decide)
 **Feeds:** FEAT-07 (decisions are audited), FEAT-10/11 (queue depth, refusals)
 **Detail:** [SPECS §5.4](../SPECS.md) · [ADR-019](../adr/ADR-019-hold-decision-and-approval-queue.md), [ADR-026](../adr/ADR-026-standalone-approver-ui.md)
@@ -52,10 +52,17 @@ hold no realm role, so an agent can never approve its own call.
 
 ## Limits
 
-- **Anyone with a login can approve anything.** There is no approver role, no
-  routing to a specific person, and the `route_to` field is stored but not
-  enforced.
+- **An unrouted call is still decidable by anyone with a login**, deliberately
+  (ADR-026's posture). A hold rule opts into an owner with `routeTo:
+  role:APPROVER`, which the gateway enforces with a 403 — but rules that don't
+  set it stay open to every interactive user.
 - No notifications: an approver must be looking at the page (it polls every
-  15 seconds).
-- No expiry or escalation — a held call waits indefinitely.
-- No second-person rule for high-risk actions.
+  15 seconds). This is the largest remaining gap in the feature.
+- **Expiry is swept on a timer**, so an item can read as PENDING for up to one
+  sweep interval past its deadline. Deciding it in that window is refused by the
+  decision path itself, so the display lags but the enforcement does not.
+- Routing understands roles and usernames only. `group:` URNs are refused
+  outright, with the reason shown, because a realm JWT carries no group claim.
+- No escalation, no delegation, and no second-person rule for high-risk actions.
+- **A late approval still executes the original call**, arguments and all — the
+  deadline bounds how late, but ADR-019's model is unchanged (ADR-034).

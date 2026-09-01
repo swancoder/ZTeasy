@@ -59,6 +59,13 @@ public class PolicyValidator {
             if (rule.effect() == null) errors.add(ref + ": missing required field 'effect'");
             if (isBlank(rule.source())) errors.add(ref + ": missing required field 'source'");
             if (isBlank(rule.target())) errors.add(ref + ": missing required field 'target'");
+            // routeTo (ADR-034) only means anything where a decision can be routed —
+            // a hold. Elsewhere it is silently ignored at evaluation time, so say so
+            // here rather than let an author believe they restricted something.
+            if (!isBlank(rule.routeTo()) && !"agentMcpToolHolds".equals(category)) {
+                warnings.add(ref + ": 'routeTo' has no effect outside agentMcpToolHolds — "
+                        + "only a held call has a decision to route");
+            }
             if (pathAware && rule.methods() != null && !isValidMethods(rule.methods())) {
                 errors.add(ref + ": invalid 'methods' value '" + rule.methods()
                         + "' (expected '*' or a comma-separated list of " + VALID_METHODS + ")");
