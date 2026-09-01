@@ -103,6 +103,13 @@ mcp-backend:
   # with whatever's actually running there by whoever configures MCP_BACKEND_URI.
   name: ${MCP_BACKEND_NAME:hubspot-mcp}
 
+# ── zt-agents (AI copilot) — where the gateway pushes policy documents for
+#    structured audit (Stage 31, ADR-031; reversed from ADR-007's fetch flow
+#    so it works where zt-agents doesn't trust the gateway's dev CA) ──
+zt-agents:
+  uri: ${ZT_AGENTS_URI:http://localhost:8083}
+  audit-timeout-seconds: ${ZT_AGENTS_AUDIT_TIMEOUT_SECONDS:180}
+
 # ── mTLS outbound (gateway → service-a / service-b) ──
 zte:
   mtls:

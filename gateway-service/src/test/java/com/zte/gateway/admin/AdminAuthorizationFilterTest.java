@@ -1,5 +1,6 @@
 package com.zte.gateway.admin;
 
+import com.zte.gateway.policy.activation.TestActivation;
 import com.zte.gateway.policy.def.PolicyDefinitionStore;
 import com.zte.gateway.policy.def.PolicyDocument;
 import com.zte.gateway.policy.def.PolicyMatcher;
@@ -49,7 +50,7 @@ class AdminAuthorizationFilterTest {
 
     @BeforeEach
     void setUp() {
-        filter = new AdminAuthorizationFilter(policyDefinitionStore, matcher);
+        filter = new AdminAuthorizationFilter(policyDefinitionStore, TestActivation.allActive(matcher));
     }
 
     private JwtAuthenticationToken jwtAuth(List<String> roles) {

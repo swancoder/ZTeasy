@@ -37,6 +37,13 @@ public record PolicyDocument(
         return new PolicyDocument(SUPPORTED_SCHEMA_VERSION, List.of(), List.of(), List.of(), List.of());
     }
 
+    /** Every rule across all four categories — Stage 31 (ADR-031) uses this for rule-id existence checks and hashing. */
+    public List<PolicyRule> allRules() {
+        return java.util.stream.Stream.of(users2service(), service2service(), agentMcpToolCalls(), agentMcpToolHolds())
+                .flatMap(List::stream)
+                .toList();
+    }
+
     public List<PolicyRule> users2service() {
         return users2service == null ? List.of() : users2service;
     }

@@ -2,6 +2,7 @@ package com.zte.gateway.admin;
 
 import com.zte.auth.audit.ZteAuditLogger;
 import com.zte.gateway.identity.IdentitySources;
+import com.zte.gateway.policy.activation.ActivePolicyEvaluator;
 import com.zte.gateway.policy.def.PolicyDefinitionStore;
 import com.zte.gateway.policy.def.PolicyEvaluation;
 import com.zte.gateway.policy.def.PolicyMatcher;
@@ -59,11 +60,11 @@ public class AdminAuthorizationFilter implements WebFilter {
             .getBytes(StandardCharsets.UTF_8);
 
     private final PolicyDefinitionStore policyDefinitionStore;
-    private final PolicyMatcher policyMatcher;
+    private final ActivePolicyEvaluator activeEvaluator;
 
-    public AdminAuthorizationFilter(PolicyDefinitionStore policyDefinitionStore, PolicyMatcher policyMatcher) {
+    public AdminAuthorizationFilter(PolicyDefinitionStore policyDefinitionStore, ActivePolicyEvaluator activeEvaluator) {
         this.policyDefinitionStore = policyDefinitionStore;
-        this.policyMatcher = policyMatcher;
+        this.activeEvaluator = activeEvaluator;
     }
 
     @Override
@@ -105,7 +106,7 @@ public class AdminAuthorizationFilter implements WebFilter {
         String method = exchange.getRequest().getMethod().name();
         String targetService = RequestTargetResolver.targetService(path);
         List<String> sources = IdentitySources.enrich(roles, jwtAuth);
-        PolicyEvaluation eval = policyMatcher.evaluate(
+        PolicyEvaluation eval = activeEvaluator.evaluate("users2service",
                 policyDefinitionStore.current().users2service(), sources, targetService, path, method);
 
         return switch (eval.outcome()) {

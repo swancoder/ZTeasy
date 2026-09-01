@@ -4,6 +4,7 @@ import com.zte.gateway.identity.IdentitySources;
 import com.zte.gateway.mcp.acap.AcapProfile;
 import com.zte.gateway.mcp.acap.AcapProfileStore;
 import com.zte.gateway.mcp.acap.AcapScopeEvaluator;
+import com.zte.gateway.policy.activation.ActivePolicyEvaluator;
 import com.zte.gateway.policy.def.PolicyDefaultsProperties;
 import com.zte.gateway.policy.def.PolicyDefinitionStore;
 import com.zte.gateway.policy.def.PolicyEvaluation;
@@ -35,20 +36,20 @@ import java.util.Optional;
 public class YamlMcpPolicyEngine implements McpPolicyEngine {
 
     private final PolicyDefinitionStore policyDefinitionStore;
-    private final PolicyMatcher policyMatcher;
+    private final ActivePolicyEvaluator activeEvaluator;
     private final PolicyDefaultsProperties policyDefaults;
     private final AcapProfileStore acapProfileStore;
     private final AcapScopeEvaluator acapScopeEvaluator;
     private final String mcpBackendName;
 
     public YamlMcpPolicyEngine(PolicyDefinitionStore policyDefinitionStore,
-                                PolicyMatcher policyMatcher,
+                                ActivePolicyEvaluator activeEvaluator,
                                 PolicyDefaultsProperties policyDefaults,
                                 AcapProfileStore acapProfileStore,
                                 AcapScopeEvaluator acapScopeEvaluator,
                                 @Value("${mcp-backend.name:hubspot-mcp}") String mcpBackendName) {
         this.policyDefinitionStore = policyDefinitionStore;
-        this.policyMatcher = policyMatcher;
+        this.activeEvaluator = activeEvaluator;
         this.policyDefaults = policyDefaults;
         this.acapProfileStore = acapProfileStore;
         this.acapScopeEvaluator = acapScopeEvaluator;
@@ -65,8 +66,12 @@ public class YamlMcpPolicyEngine implements McpPolicyEngine {
         }
 
         List<String> sources = IdentitySources.enrichClient(agentId);
-        PolicyEvaluation eval = policyMatcher.evaluate(
+        // Stage 31 (ADR-031): evaluated over the ACTIVE subset; disabled rules
+        // that would have matched are logged and annotated onto the decision's
+        // reason so the audit row records why the outcome differs from the file.
+        ActivePolicyEvaluator.WithInactive detailed = activeEvaluator.evaluateDetailed("agentMcpToolCalls",
                 policyDefinitionStore.current().agentMcpToolCalls(), sources, toolName, null, null, mcpBackendName);
+        PolicyEvaluation eval = detailed.evaluation();
 
         PolicyDecision decision = switch (eval.outcome()) {
             case DENIED -> PolicyDecision.deny(
@@ -78,7 +83,25 @@ public class YamlMcpPolicyEngine implements McpPolicyEngine {
                             "No policy grants agent '" + agentId + "' access to tool '" + toolName + "'");
         };
 
-        return tightenViaAcapProfile(decision, agentId, toolName, arguments);
+        return tightenViaAcapProfile(annotateInactive(decision, detailed.inactiveMatches()), agentId, toolName, arguments);
+    }
+
+    /**
+     * Stage 31 (ADR-031): fold "rule X matched but is switched off" into the
+     * decision's reason, which {@code McpProxyHandler} already writes into the
+     * audit row's message — so the trail explains why the outcome differs from
+     * what the YAML alone would produce, without a new column or row type.
+     */
+    private PolicyDecision annotateInactive(PolicyDecision decision, List<com.zte.gateway.policy.def.PolicyRule> inactive) {
+        if (inactive.isEmpty()) {
+            return decision;
+        }
+        String note = "Inactive rule(s) matched but did not apply: "
+                + inactive.stream().map(r -> r.id() + " (" + r.effect() + ")").reduce((a, b) -> a + ", " + b).orElse("");
+        String reason = decision.reason() == null || decision.reason().isBlank()
+                ? note
+                : decision.reason() + ". " + note;
+        return new PolicyDecision(decision.outcome(), reason);
     }
 
     /**
@@ -115,10 +138,12 @@ public class YamlMcpPolicyEngine implements McpPolicyEngine {
      * PolicyMatcher#matchAny}, never able to loosen a DENY into an ALLOW.
      */
     private PolicyDecision checkHold(List<String> sources, String toolName) {
-        return policyMatcher.matchAny(policyDefinitionStore.current().agentMcpToolHolds(), sources, toolName,
-                        mcpBackendName)
+        ActivePolicyEvaluator.HoldWithInactive holds = activeEvaluator.matchAnyHold("agentMcpToolHolds",
+                policyDefinitionStore.current().agentMcpToolHolds(), sources, toolName, mcpBackendName);
+        PolicyDecision decision = holds.match()
                 .map(rule -> PolicyDecision.hold(
                         "Tool '" + toolName + "' held for human approval by rule '" + rule.id() + "'"))
                 .orElseGet(PolicyDecision::allow);
+        return annotateInactive(decision, holds.inactiveMatches());
     }
 }

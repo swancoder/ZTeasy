@@ -56,6 +56,13 @@ policy is loaded, **then** it is flagged as orphaned in logs and in the Admin
 Console — but never auto-deleted, because a cold identity cache must not
 delete an operator's rules.
 
+**Given** a rule an operator switched off (stage 31's activation overlay),
+**when** a matching request is evaluated, **then** the rule contributes
+nothing to the decision, and the would-have-matched hit is logged as
+`POLICY_INACTIVE_MATCH` (and annotated on MCP audit rows) — the outcome
+changes, the record of why never disappears. Switching a DENY rule off
+requires an explicit confirmation in the console.
+
 ## Limits
 
 - Evaluation is a linear scan per category per request — correct and fast at

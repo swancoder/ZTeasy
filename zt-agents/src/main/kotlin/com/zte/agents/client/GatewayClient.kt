@@ -20,12 +20,13 @@ import reactor.core.publisher.Flux
  */
 @Component
 class GatewayClient(
+    gatewayWebClients: GatewayWebClients,
     @Value("\${zte.gateway.internal-uri:http://localhost:8080}") gatewayUri: String,
     @Value("\${zte.internal.api-key:}") internalApiKey: String
 ) {
     private val log = LoggerFactory.getLogger(GatewayClient::class.java)
 
-    private val webClient = WebClient.builder()
+    private val webClient = gatewayWebClients.builder()
         .baseUrl(gatewayUri)
         .apply { builder ->
             internalApiKey.trim().takeIf { it.isNotEmpty() }

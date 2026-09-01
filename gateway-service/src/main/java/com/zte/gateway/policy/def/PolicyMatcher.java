@@ -49,13 +49,7 @@ public class PolicyMatcher {
      */
     public PolicyEvaluation evaluate(List<PolicyRule> rules, List<String> sources, String target,
                                       String path, String method, String mcpIdentifier) {
-        List<PolicyRule> matches = rules.stream()
-                .filter(rule -> sources.stream().anyMatch(source -> PATH_MATCHER.match(rule.source(), source)))
-                .filter(rule -> PATH_MATCHER.match(rule.target(), target))
-                .filter(rule -> pathMatches(rule, path))
-                .filter(rule -> methodMatches(rule, method))
-                .filter(rule -> mcpTargetMatches(rule, mcpIdentifier))
-                .toList();
+        List<PolicyRule> matches = matching(rules, sources, target, path, method, mcpIdentifier);
 
         Optional<PolicyRule> deny = highestPriority(matches, RuleEffect.DENY);
         if (deny.isPresent()) return PolicyEvaluation.denied(deny.get());
@@ -90,6 +84,23 @@ public class PolicyMatcher {
                 .filter(rule -> PATH_MATCHER.match(rule.target(), target))
                 .filter(rule -> mcpTargetMatches(rule, mcpIdentifier))
                 .max(Comparator.comparingInt(PolicyRule::priority));
+    }
+
+    /**
+     * Every rule whose predicates match — the shared filter chain behind
+     * {@link #evaluate}, exposed (Stage 31, ADR-031) so the activation layer
+     * can ask "which <em>disabled</em> rules would have applied?" without
+     * duplicating the matching semantics here.
+     */
+    public List<PolicyRule> matching(List<PolicyRule> rules, List<String> sources, String target,
+                                      String path, String method, String mcpIdentifier) {
+        return rules.stream()
+                .filter(rule -> sources.stream().anyMatch(source -> PATH_MATCHER.match(rule.source(), source)))
+                .filter(rule -> PATH_MATCHER.match(rule.target(), target))
+                .filter(rule -> pathMatches(rule, path))
+                .filter(rule -> methodMatches(rule, method))
+                .filter(rule -> mcpTargetMatches(rule, mcpIdentifier))
+                .toList();
     }
 
     private Optional<PolicyRule> highestPriority(List<PolicyRule> matches, RuleEffect effect) {

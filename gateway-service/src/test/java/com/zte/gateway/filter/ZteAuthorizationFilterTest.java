@@ -1,5 +1,6 @@
 package com.zte.gateway.filter;
 
+import com.zte.gateway.policy.activation.TestActivation;
 import com.zte.gateway.policy.def.PolicyDefaultsProperties;
 import com.zte.gateway.policy.def.PolicyDefinitionStore;
 import com.zte.gateway.policy.def.PolicyDocument;
@@ -56,7 +57,7 @@ class ZteAuthorizationFilterTest {
         defaults = new PolicyDefaultsProperties();
         defaults.setUserClientId("zte-gateway");
         lenient().when(policyDefinitionStore.current()).thenReturn(PolicyDocument.empty());
-        filter = new ZteAuthorizationFilter(policyDefinitionStore, matcher, defaults);
+        filter = new ZteAuthorizationFilter(policyDefinitionStore, TestActivation.allActive(matcher), defaults);
     }
 
     // ── helpers ──────────────────────────────────────────────────────────────

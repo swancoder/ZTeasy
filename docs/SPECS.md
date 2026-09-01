@@ -74,7 +74,8 @@ auditable — the opposite of a mesh's "hide it in the sidecar" approach. See
 | 28 | Custom domain + publicly-trusted certificate: second browser-facing Container App (`gateway-web`, HTTP ingress, `demo.zteasy.tech`, Azure managed cert) alongside the agent-facing TCP-passthrough gateway; multi-origin realm generation; `bind-custom-domain.sh` | [028](adr/ADR-028-custom-domain-and-trusted-certificate.md) |
 | 29 | Executive dashboard: `CEO`/`CFO`/`CTO`/`BOARD`/`DPO` realm roles with per-panel `u2s-dashboard-*` rules, `/api/v1/dashboard/{summary,spend,operations,risk,data-protection}`, real LLM token metering (`llm_usage`, `POST /api/v1/internal/metering/llm`, `zt-agents` reporting its own Anthropic usage), shared MUI theme across both SPAs | [029](adr/ADR-029-executive-dashboard.md) |
 | 30 | Credential hygiene and identity-cache reconciliation: cloud credentials only in the gitignored `deploy/azure/out/cloud-credentials.env` (generator fails loudly without them, and rewrites the cloud's OIDC client secrets), repo keeps only obviously-local dev values; `IdentitySyncService` reconciles each identity type against what the IdP still reports, so a realm re-import no longer duplicates every user | [030](adr/ADR-030-credential-hygiene-and-identity-reconciliation.md) |
-| 31+ | Backlog (rate limiting, ABAC…) | see §9 |
+| 31 | Policy-audit surfacing + activation overlay: gateway pushes the policy document to zt-agents' structured `/analyze` (works in the cloud, unlike the fetch flow), persisted runs with read-time freshness (`policy_audit_runs`), per-rule on/off toggle (`policy_rule_overrides` + in-memory mirror) applied at all four decision points with `POLICY_INACTIVE_MATCH` logging, console Run/Last-Results drawer with Implement/Modify and orange audit flags; `zte.gateway.ca-cert` closes zt-agents' TLS gap toward the gateway | [031](adr/ADR-031-policy-audit-surfacing-and-activation-overlay.md) |
+| 32+ | Backlog (rate limiting, ABAC…) | see §9 |
 
 **Testing:** `./gradlew test` (unit — every package below has direct
 coverage for its pure decision logic; I/O-calling code that has no
@@ -724,6 +725,10 @@ target_id, relation_type)`.
 | `/api/v1/service-b/restricted` | GET | JWT + `service2service` policy | gateway → service-b | Deliberately has no rule, exercises default-deny |
 | `/api/v1/internal/policies[/reload]` | GET/POST | network perimeter only | gateway | Feeds `zt-agents`; no-downtime reload |
 | `/api/v1/admin/policies[/reload]` | GET/POST | JWT + `ADMIN` | gateway | Full policy document; ADMIN-gated reload |
+| `/api/v1/admin/policies/overrides` | GET | JWT + `ADMIN` | gateway | Activation overlay — rules an operator switched off (ADR-031) |
+| `/api/v1/admin/policies/{ruleId}/enabled` | PUT | JWT + `ADMIN` | gateway | Toggle a rule's activation; `404` for unknown ids (ADR-031) |
+| `/api/v1/admin/policy-audit/run` | POST | JWT + `ADMIN` | gateway | Push policies to zt-agents, persist the structured findings (ADR-031) |
+| `/api/v1/admin/policy-audit/latest[/findings/{id}/acknowledge]` | GET/POST | JWT + `ADMIN` | gateway | Latest run with read-time freshness; mark a finding taken into work (ADR-031) |
 | `/api/v1/admin/audit-logs` | GET | JWT + `ADMIN` | gateway | Latest 100 `request_logs` rows |
 | `/api/v1/admin/identities/sync` | POST | JWT + `ADMIN` | gateway | Manual IdP sync trigger |
 | `/api/v1/admin/identities/search` | GET | JWT + `ADMIN` | gateway | `?type=&q=` |
@@ -925,6 +930,7 @@ automatically instead of needing its own `WebFilter` (ADR-012).
 |---|---|---|
 | High | Gateway could become a "God Service" if business logic creeps in | Convention only — no enforcement mechanism |
 | High (prod) | Keycloak client secret hardcoded in `realm-export.json` | Dev-only; must be env/secret-manager-injected before staging |
+| High | A disabled DENY rule is an open door with only a confirm dialog in front (ADR-031) | Every toggle is attributed and logged, matches are traced as `POLICY_INACTIVE_MATCH`; a time-boxed auto-re-enable would be the better control |
 | High | `GlobalFilter`s silently skip non-routed/pre-denied requests (§8) | No generic guard against a third instance — real gap |
 | Medium | Shared HMAC secret for OBO tokens | `ZTE_OBO_SECRET` env var; RS256 upgrade deferred (§9) |
 | Medium | Server-side TLS cert rotation requires a restart (no hot-reload API) | 1-year dev certs; production needs cert-manager + rolling restart |
@@ -990,6 +996,7 @@ automatically instead of needing its own `WebFilter` (ADR-012).
 | [028](adr/ADR-028-custom-domain-and-trusted-certificate.md) | Custom Domain with a Publicly-Trusted Certificate — a Second, Browser-Facing Ingress |
 | [029](adr/ADR-029-executive-dashboard.md) | Executive Dashboard — Role-Scoped Panels, Real Token Metering, Shared Visual Language |
 | [030](adr/ADR-030-credential-hygiene-and-identity-reconciliation.md) | Credential Hygiene and Identity-Cache Reconciliation |
+| [031](adr/ADR-031-policy-audit-surfacing-and-activation-overlay.md) | Policy-Audit Surfacing and the Activation Overlay |
 
 ---
 

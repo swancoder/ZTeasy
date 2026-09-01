@@ -5,6 +5,7 @@ import com.zte.gateway.identity.IdentitySources;
 import com.zte.gateway.policy.def.PolicyDefaultsProperties;
 import com.zte.gateway.policy.def.PolicyDefinitionStore;
 import com.zte.gateway.policy.def.PolicyEvaluation;
+import com.zte.gateway.policy.activation.ActivePolicyEvaluator;
 import com.zte.gateway.policy.def.PolicyMatcher;
 import com.zte.gateway.policy.def.RequestTargetResolver;
 import com.zte.gateway.policy.def.RuleEffect;
@@ -57,14 +58,14 @@ public class ServiceToServiceAuthorizationFilter implements GlobalFilter, Ordere
                     .getBytes(StandardCharsets.UTF_8);
 
     private final PolicyDefinitionStore policyDefinitionStore;
-    private final PolicyMatcher policyMatcher;
+    private final ActivePolicyEvaluator activeEvaluator;
     private final PolicyDefaultsProperties policyDefaults;
 
     public ServiceToServiceAuthorizationFilter(PolicyDefinitionStore policyDefinitionStore,
-                                                PolicyMatcher policyMatcher,
+                                                ActivePolicyEvaluator activeEvaluator,
                                                 PolicyDefaultsProperties policyDefaults) {
         this.policyDefinitionStore = policyDefinitionStore;
-        this.policyMatcher = policyMatcher;
+        this.activeEvaluator = activeEvaluator;
         this.policyDefaults = policyDefaults;
     }
 
@@ -92,7 +93,7 @@ public class ServiceToServiceAuthorizationFilter implements GlobalFilter, Ordere
                     String method = exchange.getRequest().getMethod().name();
                     String targetService = RequestTargetResolver.targetService(path);
 
-                    PolicyEvaluation eval = policyMatcher.evaluate(
+                    PolicyEvaluation eval = activeEvaluator.evaluate("service2service",
                             policyDefinitionStore.current().service2service(),
                             IdentitySources.enrichClient(callerService), targetService, path, method);
 

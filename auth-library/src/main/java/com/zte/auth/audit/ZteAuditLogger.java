@@ -86,6 +86,19 @@ public final class ZteAuditLogger {
      * {@code request_logs} write (ADR-013) — same "log both sync and async"
      * pattern already used for MCP audit events.
      */
+    /**
+     * Stage 31 (ADR-031): a request matched a rule that an operator has
+     * switched OFF — the rule contributed nothing to the decision, and this
+     * line is the promised trace of "the system behaved this way because the
+     * policy exists but is inactive". {@code appliedOutcome} is what actually
+     * happened instead.
+     */
+    public static void policyInactiveMatch(String category, String ruleId, String effect,
+                                            String subject, String target, String appliedOutcome) {
+        log.warn("[ZTE-AUDIT] POLICY_INACTIVE_MATCH category={} rule={} effect={} subject={} target={} applied={}",
+                category, ruleId, effect, subject, target, appliedOutcome);
+    }
+
     public static void requestLog(String traceId, String path, Integer statusCode) {
         log.info(FMT, "REQUEST_LOG", "gateway",
                 "traceId=" + traceId + " path=" + path + " status=" + statusCode);

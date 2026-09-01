@@ -1,5 +1,6 @@
 package com.zte.gateway.mcp.policy;
 
+import com.zte.gateway.policy.activation.TestActivation;
 import com.zte.gateway.mcp.acap.AcapProfile;
 import com.zte.gateway.mcp.acap.AcapProfileStore;
 import com.zte.gateway.mcp.acap.AcapReadGrant;
@@ -52,7 +53,7 @@ class YamlMcpPolicyEngineTest {
     void setUp() {
         defaults = new PolicyDefaultsProperties();
         defaults.setDefaultEffect(RuleEffect.DENY);
-        engine = new YamlMcpPolicyEngine(store, matcher, defaults, acapProfileStore, acapScopeEvaluator, MCP_BACKEND_NAME);
+        engine = new YamlMcpPolicyEngine(store, TestActivation.allActive(matcher), defaults, acapProfileStore, acapScopeEvaluator, MCP_BACKEND_NAME);
     }
 
     private void withRules(PolicyRule... rules) {

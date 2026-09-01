@@ -185,3 +185,41 @@ export interface AcapProfileView {
   profile: AcapProfile
   currentThresholdUsage: Record<string, number>
 }
+
+// ── Stage 31 (ADR-031): policy activation overlay + AI audit runs ──
+
+// Mirrors gateway-service's com.zte.gateway.policy.activation.PolicyRuleOverride.
+export interface PolicyRuleOverride {
+  ruleId: string
+  enabled: boolean
+  updatedBy: string | null
+  updatedAt: string
+}
+
+// Computed at read time against the live document — see FreshnessEvaluator.
+export type FindingFreshness = 'CURRENT' | 'RULE_CHANGED' | 'ADDRESSED'
+
+// FindingView with the stored AuditFinding @JsonUnwrapped into it.
+export interface AuditFinding {
+  id: string
+  severity: 'HIGH' | 'MEDIUM' | 'LOW'
+  title: string
+  ruleIds: string[] | null
+  recommendation: string
+  suggestedAction: 'DISABLE_RULE' | 'MODIFY_RULE' | 'ADD_RULE' | 'NONE'
+  suggestedYaml: string | null
+  acknowledgedBy: string | null
+  acknowledgedAt: string | null
+  freshness: FindingFreshness
+}
+
+// Mirrors com.zte.gateway.policyaudit.PolicyAuditRunView.
+export interface PolicyAuditRun {
+  id: string
+  timestamp: string
+  requestedBy: string | null
+  model: string | null
+  status: 'COMPLETED' | 'PARSE_ERROR' | 'FAILED'
+  rawReport: string | null
+  findings: AuditFinding[]
+}

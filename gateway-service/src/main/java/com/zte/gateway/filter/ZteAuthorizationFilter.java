@@ -2,6 +2,7 @@ package com.zte.gateway.filter;
 
 import com.zte.auth.audit.ZteAuditLogger;
 import com.zte.gateway.identity.IdentitySources;
+import com.zte.gateway.policy.activation.ActivePolicyEvaluator;
 import com.zte.gateway.policy.def.PolicyDefaultsProperties;
 import com.zte.gateway.policy.def.PolicyDefinitionStore;
 import com.zte.gateway.policy.def.PolicyEvaluation;
@@ -73,14 +74,14 @@ public class ZteAuthorizationFilter implements GlobalFilter, Ordered {
             .getBytes(StandardCharsets.UTF_8);
 
     private final PolicyDefinitionStore policyDefinitionStore;
-    private final PolicyMatcher policyMatcher;
+    private final ActivePolicyEvaluator activeEvaluator;
     private final PolicyDefaultsProperties policyDefaults;
 
     public ZteAuthorizationFilter(PolicyDefinitionStore policyDefinitionStore,
-                                   PolicyMatcher policyMatcher,
+                                   ActivePolicyEvaluator activeEvaluator,
                                    PolicyDefaultsProperties policyDefaults) {
         this.policyDefinitionStore = policyDefinitionStore;
-        this.policyMatcher = policyMatcher;
+        this.activeEvaluator = activeEvaluator;
         this.policyDefaults = policyDefaults;
     }
 
@@ -116,7 +117,9 @@ public class ZteAuthorizationFilter implements GlobalFilter, Ordered {
                     List<String> roles = RealmRoles.extract(jwtAuth);
                     String targetService = RequestTargetResolver.targetService(path);
                     List<String> sources = IdentitySources.enrich(roles, jwtAuth);
-                    PolicyEvaluation yamlEval = policyMatcher.evaluate(
+                    // Stage 31 (ADR-031): evaluated over the ACTIVE subset; a
+                    // disabled rule that would have matched is logged, never applied.
+                    PolicyEvaluation yamlEval = activeEvaluator.evaluate("users2service",
                             policyDefinitionStore.current().users2service(), sources, targetService, path, method);
 
                     return switch (yamlEval.outcome()) {

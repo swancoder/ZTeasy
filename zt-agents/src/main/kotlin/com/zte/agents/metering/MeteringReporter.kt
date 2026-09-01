@@ -2,8 +2,8 @@ package com.zte.agents.metering
 
 import org.slf4j.LoggerFactory
 import org.springframework.beans.factory.annotation.Value
+import com.zte.agents.client.GatewayWebClients
 import org.springframework.stereotype.Component
-import org.springframework.web.reactive.function.client.WebClient
 
 /**
  * Reports this agent's LLM token spend to the gateway (ZTeasy ADR-029), which
@@ -21,6 +21,7 @@ import org.springframework.web.reactive.function.client.WebClient
  */
 @Component
 class MeteringReporter(
+    gatewayWebClients: GatewayWebClients,
     @Value("\${zte.gateway.internal-uri:http://localhost:8080}") gatewayUri: String,
     @Value("\${zte.internal.api-key:}") internalApiKey: String,
     @Value("\${zte.metering.agent-id:zt-agents}") private val agentId: String,
@@ -29,7 +30,7 @@ class MeteringReporter(
 ) {
     private val log = LoggerFactory.getLogger(MeteringReporter::class.java)
 
-    private val webClient = WebClient.builder()
+    private val webClient = gatewayWebClients.builder()
         .baseUrl(gatewayUri)
         .apply { builder ->
             internalApiKey.trim().takeIf { it.isNotEmpty() }

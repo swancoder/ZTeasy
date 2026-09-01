@@ -1,6 +1,6 @@
 # FEAT-14 — AI Policy Auditor
 
-**Maturity:** Demo-grade
+**Maturity:** Working
 **Depends on:** FEAT-02 (reads the active policy set), an LLM provider
 **Feeds:** FEAT-12 (reports its own token usage)
 **Detail:** [SPECS §5.9](../SPECS.md) · [ADR-007](../adr/ADR-007-policy-auditor-agent.md)
@@ -39,10 +39,11 @@ it fails fast rather than starting and failing per request.
 
 ## Limits
 
-- Advisory only: findings are text for a human, never applied automatically.
-- Single prompt over the whole document — no diffing between versions, no
-  history of what a previous run said.
-- The run endpoint is unauthenticated inside the perimeter.
-- In the cloud deployment it cannot currently reach the gateway, because it
-  does not trust the deployment's development certificate authority — a
-  known, named gap rather than a silent failure.
+- Advisory only — and demonstrably so: a live run produced one finding that
+  contradicts actual configuration. Findings drive suggestions and one
+  narrow action (disable-a-rule), never automatic policy edits.
+- Findings vary between runs; there is no diffing against a previous run.
+- Since stage 31 the console runs it via the gateway (`/api/v1/admin/
+  policy-audit/run`, ADMIN-gated) by PUSHING the document to the agent —
+  the old TLS gap toward the gateway is closed by `zte.gateway.ca-cert`,
+  and the audit's own token spend lands in FEAT-12's metering.

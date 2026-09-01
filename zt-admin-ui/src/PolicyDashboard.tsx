@@ -14,10 +14,13 @@ import Chip from '@mui/material/Chip'
 import Typography from '@mui/material/Typography'
 import Stack from '@mui/material/Stack'
 import Tooltip from '@mui/material/Tooltip'
+import Switch from '@mui/material/Switch'
 import Accordion from '@mui/material/Accordion'
 import AccordionSummary from '@mui/material/AccordionSummary'
 import AccordionDetails from '@mui/material/AccordionDetails'
-import type { IdpIdentityEntry, PolicyDocument, PolicyRule, ReloadResult } from './types'
+import AuditDrawer from './AuditDrawer'
+import ConfirmDialog from './ConfirmDialog'
+import type { AuditFinding, IdpIdentityEntry, PolicyAuditRun, PolicyDocument, PolicyRule, PolicyRuleOverride, ReloadResult } from './types'
 
 interface Props {
   accessToken: string
@@ -63,7 +66,19 @@ const CATEGORIES: Category[] = [
   { key: 'agentMcpToolHolds', title: 'Agent → MCP Tool (Hold)', description: 'MCP tool calls routed to a human for approval, even when Agent → MCP Tool above would ALLOW them (Stage 1, ADR-019)', defaultSourceType: 'CLIENT', effectOverride: 'HOLD' },
 ]
 
-function RuleTable({ rules, identitySet, defaultSourceType, effectOverride }: { rules: PolicyRule[]; identitySet?: Set<string>; defaultSourceType: IdentityTypeName; effectOverride?: 'HOLD' }) {
+interface RuleTableProps {
+  rules: PolicyRule[]
+  identitySet?: Set<string>
+  defaultSourceType: IdentityTypeName
+  effectOverride?: 'HOLD'
+  /** ruleId -> enabled; absence means enabled (Stage 31, ADR-031). */
+  overrides: Map<string, boolean>
+  /** Rule ids referenced by non-addressed findings of the latest audit. */
+  flaggedIds: Set<string>
+  onToggle: (rule: PolicyRule, enabled: boolean) => void
+}
+
+function RuleTable({ rules, identitySet, defaultSourceType, effectOverride, overrides, flaggedIds, onToggle }: RuleTableProps) {
   if (rules.length === 0) {
     return (
       <Typography color="text.secondary" sx={{ p: 2 }}>
@@ -84,6 +99,7 @@ function RuleTable({ rules, identitySet, defaultSourceType, effectOverride }: { 
       <Table size="small">
         <TableHead>
           <TableRow>
+            <TableCell>Active</TableCell>
             <TableCell>ID</TableCell>
             <TableCell>Effect</TableCell>
             <TableCell>Source</TableCell>
@@ -96,9 +112,32 @@ function RuleTable({ rules, identitySet, defaultSourceType, effectOverride }: { 
         <TableBody>
           {rules.map((rule) => {
             const orphaned = isOrphaned(rule)
+            const enabled = overrides.get(rule.id) ?? true
+            const flagged = flaggedIds.has(rule.id)
+            // Audit flag paints the row orange; an inactive rule dims it —
+            // both can apply at once.
+            const rowSx = {
+              ...(flagged ? { bgcolor: 'rgba(245, 166, 35, 0.16)' } : orphaned ? { bgcolor: 'warning.light' } : {}),
+              ...(enabled ? {} : { opacity: 0.55 }),
+            }
             return (
-              <TableRow key={rule.id} sx={orphaned ? { bgcolor: 'warning.light' } : undefined}>
-                <TableCell>{rule.id}</TableCell>
+              <TableRow key={rule.id} sx={rowSx}>
+                <TableCell>
+                  <Tooltip title={enabled
+                    ? 'Active — this rule takes effect on match'
+                    : 'Inactive — matches are logged but the rule has no effect (ADR-031)'}>
+                    <Switch size="small" checked={enabled} onChange={(_, next) => onToggle(rule, next)} />
+                  </Tooltip>
+                </TableCell>
+                <TableCell>
+                  {rule.id}
+                  {flagged && (
+                    <Tooltip title="Flagged by the latest policy audit — see Last Audit Results">
+                      <span style={{ marginLeft: 6 }}>🟠</span>
+                    </Tooltip>
+                  )}
+                  {!enabled && <Chip label="inactive" size="small" sx={{ ml: 0.75 }} />}
+                </TableCell>
                 <TableCell>
                   <Chip
                     label={effectOverride ?? rule.effect}
@@ -134,6 +173,12 @@ export default function PolicyDashboard({ accessToken }: Props) {
   const [reloading, setReloading] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [snackbar, setSnackbar] = useState<{ message: string; severity: 'success' | 'error' } | null>(null)
+  // Stage 31 (ADR-031): activation overlay + AI audit surfacing
+  const [overrides, setOverrides] = useState<Map<string, boolean>>(new Map())
+  const [auditRun, setAuditRun] = useState<PolicyAuditRun | null>(null)
+  const [auditOpen, setAuditOpen] = useState(false)
+  const [auditRunning, setAuditRunning] = useState(false)
+  const [confirmDenyOff, setConfirmDenyOff] = useState<PolicyRule | null>(null)
 
   const fetchPolicies = useCallback(async () => {
     setLoading(true)
@@ -166,10 +211,113 @@ export default function PolicyDashboard({ accessToken }: Props) {
     }
   }, [accessToken])
 
+  const fetchOverrides = useCallback(async () => {
+    try {
+      const res = await fetch('/api/v1/admin/policies/overrides', {
+        headers: { Authorization: `Bearer ${accessToken}` },
+      })
+      if (!res.ok) return
+      const rows: PolicyRuleOverride[] = await res.json()
+      setOverrides(new Map(rows.map((o) => [o.ruleId, o.enabled])))
+    } catch {
+      // Toggle state is additive — a failed fetch just renders everything enabled.
+    }
+  }, [accessToken])
+
+  const fetchLatestAudit = useCallback(async () => {
+    try {
+      const res = await fetch('/api/v1/admin/policy-audit/latest', {
+        headers: { Authorization: `Bearer ${accessToken}` },
+      })
+      if (res.ok) setAuditRun(await res.json())
+    } catch {
+      // Absence of a past audit is a normal state, not an error.
+    }
+  }, [accessToken])
+
   useEffect(() => {
     fetchPolicies()
     fetchIdentitySet()
-  }, [fetchPolicies, fetchIdentitySet])
+    fetchOverrides()
+    fetchLatestAudit()
+  }, [fetchPolicies, fetchIdentitySet, fetchOverrides, fetchLatestAudit])
+
+  const applyToggle = async (rule: PolicyRule, enabled: boolean) => {
+    try {
+      const res = await fetch(`/api/v1/admin/policies/${encodeURIComponent(rule.id)}/enabled`, {
+        method: 'PUT',
+        headers: { Authorization: `Bearer ${accessToken}`, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ enabled }),
+      })
+      if (!res.ok) {
+        const body = await res.json().catch(() => ({}))
+        throw new Error(body.error ?? `PUT enabled -> ${res.status}`)
+      }
+      setSnackbar({
+        message: `Rule ${rule.id} ${enabled ? 'activated' : 'deactivated'} — matches ${enabled ? 'take effect again' : 'will be logged but have no effect'}`,
+        severity: 'success',
+      })
+      await Promise.all([fetchOverrides(), fetchLatestAudit()])
+    } catch (e) {
+      setSnackbar({ message: e instanceof Error ? e.message : String(e), severity: 'error' })
+    }
+  }
+
+  const handleToggle = (rule: PolicyRule, enabled: boolean) => {
+    // Switching a DENY safety net OFF opens the perimeter — never one silent
+    // click (ADR-031's chosen posture: allowed, but behind an explicit confirm).
+    if (!enabled && rule.effect === 'DENY') {
+      setConfirmDenyOff(rule)
+      return
+    }
+    applyToggle(rule, enabled)
+  }
+
+  const handleRunAudit = async () => {
+    setAuditRunning(true)
+    setAuditOpen(true)
+    try {
+      const res = await fetch('/api/v1/admin/policy-audit/run', {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${accessToken}` },
+      })
+      const body = await res.json()
+      if (!res.ok) throw new Error(body.error ?? `run -> ${res.status}`)
+      setAuditRun(body)
+      setSnackbar({ message: `Audit complete: ${body.findings.length} finding(s)`, severity: 'success' })
+    } catch (e) {
+      setSnackbar({ message: e instanceof Error ? e.message : String(e), severity: 'error' })
+    } finally {
+      setAuditRunning(false)
+    }
+  }
+
+  const handleImplement = (finding: AuditFinding) => {
+    const target = (finding.ruleIds ?? [])[0]
+    const rule = allRules().find((r) => r.id === target)
+    if (rule) handleToggle(rule, false)
+  }
+
+  const handleAcknowledge = async (finding: AuditFinding) => {
+    try {
+      const res = await fetch(`/api/v1/admin/policy-audit/latest/findings/${finding.id}/acknowledge`, {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${accessToken}` },
+      })
+      if (res.ok) setAuditRun(await res.json())
+    } catch {
+      // Acknowledgement is bookkeeping; a failure here must not block reading the YAML.
+    }
+  }
+
+  const allRules = (): PolicyRule[] =>
+    CATEGORIES.flatMap((c) => policies?.[c.key] ?? [])
+
+  const flaggedIds = new Set(
+    (auditRun?.findings ?? [])
+      .filter((f) => f.freshness !== 'ADDRESSED')
+      .flatMap((f) => f.ruleIds ?? []),
+  )
 
   const handleReload = async () => {
     setReloading(true)
@@ -215,9 +363,17 @@ export default function PolicyDashboard({ accessToken }: Props) {
     <Box sx={{ p: 3 }}>
       <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 3 }}>
         <Typography variant="h5">Active YAML Policy Set (schema v{policies?.schemaVersion})</Typography>
-        <Button variant="contained" onClick={handleReload} disabled={reloading}>
-          {reloading ? 'Reloading…' : 'Reload Policies'}
-        </Button>
+        <Stack direction="row" spacing={1}>
+          <Button variant="outlined" onClick={handleRunAudit} disabled={auditRunning}>
+            {auditRunning ? 'Auditing… (10–60s)' : 'Run Policy Audit'}
+          </Button>
+          <Button variant="outlined" onClick={() => setAuditOpen(true)} disabled={auditRunning}>
+            Last Audit Results{auditRun ? ` (${auditRun.findings.length})` : ''}
+          </Button>
+          <Button variant="contained" onClick={handleReload} disabled={reloading}>
+            {reloading ? 'Reloading…' : 'Reload Policies'}
+          </Button>
+        </Stack>
       </Box>
 
       <Stack spacing={1}>
@@ -242,12 +398,41 @@ export default function PolicyDashboard({ accessToken }: Props) {
                   identitySet={identitySet}
                   defaultSourceType={category.defaultSourceType}
                   effectOverride={category.effectOverride}
+                  overrides={overrides}
+                  flaggedIds={flaggedIds}
+                  onToggle={handleToggle}
                 />
               </AccordionDetails>
             </Accordion>
           )
         })}
       </Stack>
+
+      <AuditDrawer
+        open={auditOpen}
+        onClose={() => setAuditOpen(false)}
+        run={auditRun}
+        onImplement={handleImplement}
+        onAcknowledge={handleAcknowledge}
+        ruleEnabled={(id) => overrides.get(id) ?? true}
+        ruleExists={(id) => allRules().some((r) => r.id === id)}
+      />
+
+      <ConfirmDialog
+        open={confirmDenyOff !== null}
+        title="Deactivate a DENY rule?"
+        confirmLabel="Deactivate"
+        message={
+          confirmDenyOff
+            ? `"${confirmDenyOff.id}" is a DENY rule — switching it off removes that protection for every matching call until it is re-enabled. Matches will be logged but nothing will be blocked by it.`
+            : ''
+        }
+        onConfirm={() => {
+          if (confirmDenyOff) applyToggle(confirmDenyOff, false)
+          setConfirmDenyOff(null)
+        }}
+        onCancel={() => setConfirmDenyOff(null)}
+      />
 
       <Snackbar
         open={snackbar !== null}

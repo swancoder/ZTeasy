@@ -104,6 +104,11 @@ class McpProxySecurityWebFluxTest {
     @MockBean
     private com.zte.gateway.policy.def.PolicyMatcher policyMatcher;
 
+    // Stage 31 (ADR-031): AdminAuthorizationFilter now depends on the
+    // activation-aware evaluator instead of PolicyMatcher directly.
+    @MockBean
+    private com.zte.gateway.policy.activation.ActivePolicyEvaluator activePolicyEvaluator;
+
     @MockBean
     private com.zte.gateway.audit.RequestLogAuditService requestLogAuditService;
 

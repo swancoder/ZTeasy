@@ -1,5 +1,6 @@
 package com.zte.gateway.filter;
 
+import com.zte.gateway.policy.activation.TestActivation;
 import com.zte.gateway.policy.def.PolicyDefaultsProperties;
 import com.zte.gateway.policy.def.PolicyDefinitionStore;
 import com.zte.gateway.policy.def.PolicyDocument;
@@ -48,7 +49,7 @@ class ServiceToServiceAuthorizationFilterTest {
         defaults = new PolicyDefaultsProperties();
         defaults.setDefaultEffect(RuleEffect.DENY);
         defaults.setUserClientId("zte-gateway");
-        filter = new ServiceToServiceAuthorizationFilter(policyDefinitionStore, matcher, defaults);
+        filter = new ServiceToServiceAuthorizationFilter(policyDefinitionStore, TestActivation.allActive(matcher), defaults);
     }
 
     private JwtAuthenticationToken jwtWithAzp(String azp) {
