@@ -76,7 +76,8 @@ auditable — the opposite of a mesh's "hide it in the sidecar" approach. See
 | 30 | Credential hygiene and identity-cache reconciliation: cloud credentials only in the gitignored `deploy/azure/out/cloud-credentials.env` (generator fails loudly without them, and rewrites the cloud's OIDC client secrets), repo keeps only obviously-local dev values; `IdentitySyncService` reconciles each identity type against what the IdP still reports, so a realm re-import no longer duplicates every user | [030](adr/ADR-030-credential-hygiene-and-identity-reconciliation.md) |
 | 31 | Policy-audit surfacing + activation overlay: gateway pushes the policy document to zt-agents' structured `/analyze` (works in the cloud, unlike the fetch flow), persisted runs with read-time freshness (`policy_audit_runs`), per-rule on/off toggle (`policy_rule_overrides` + in-memory mirror) applied at all four decision points with `POLICY_INACTIVE_MATCH` logging, console Run/Last-Results drawer with Implement/Modify and orange audit flags; `zte.gateway.ca-cert` closes zt-agents' TLS gap toward the gateway | [031](adr/ADR-031-policy-audit-surfacing-and-activation-overlay.md) |
 | 32 | ACAP lifecycle and response masking: `acap_profile_lifecycle`/`acap_reauthorizations` overlay (suspend/resume/retire, re-authorization history) with SUSPENDED/RETIRED→DENY and overdue→HOLD enforcement (amending ADR-022's display-only posture), real `AcapDataMaskingFilter` replacing the pass-through stub (structure-aware, marker-based, unknown shapes pass through logged), persistent daily threshold usage (`acap_threshold_usage`, write-behind + startup restore), profiles for agent-a/agent-b | [032](adr/ADR-032-acap-lifecycle-and-response-masking.md) |
-| 33+ | Backlog (rate limiting, ABAC…) | see §9 |
+| 33 | Demo durability and cloud-only configuration: `db-backup` job (`pg_dump` → Azure Files share) with the same share mounted read-only at `/docker-entrypoint-initdb.d` so the official Postgres image restores it on every start, `power.sh stop` backing up first and aborting on failure, R2DBC validation-on-borrow so a restarted database no longer 500s the gateway, `ZTE_GATEWAY_CA_CERT` (metering had never reported: the property was read but never set), `ZTE_POLICY_FILE` on the share (makes Reload Policies re-read an editable document), `attach-volume.sh` | [033](adr/ADR-033-demo-durability-and-cloud-configuration.md) |
+| 34+ | Backlog (rate limiting, ABAC…) | see §9 |
 
 **Testing:** `./gradlew test` (unit — every package below has direct
 coverage for its pure decision logic; I/O-calling code that has no
@@ -626,12 +627,15 @@ topology and the live-run findings: `docs/azure-deployment-plan.md`.
   over.
 - **`deploy/azure/`** — `deploy.sh` (two-phase provisioning),
   `push-images.sh`, `make-cloud-realm.py` (cloud realm import; accepts
-  several origins), `create-app-with-certs.sh` / `attach-certs-to-job.sh`
-  (raw ARM `PUT`, since the CLI's `--yaml` path is rejected by this
-  resource provider), `bind-custom-domain.sh` (custom domain + managed
-  certificate + issuer repoint), `power.sh` (`stop`/`start`/`status` —
-  deactivates or reactivates every app's revision so the stack can be parked
-  overnight), `Dockerfile.keycloak`.
+  several origins), `create-app-with-certs.sh` / `attach-certs-to-job.sh` /
+  `attach-volume.sh` (raw ARM `PUT`, since the CLI's `--yaml` path is
+  rejected by this resource provider; the last one attaches or detaches any
+  share on an app, with the secret re-supply that a full `PUT` forces),
+  `bind-custom-domain.sh` (custom domain + managed certificate + issuer
+  repoint), `db-backup-job.sh` (the `pg_dump`-to-share job — ADR-033),
+  `power.sh` (`stop`/`start`/`status` — deactivates or reactivates every
+  app's revision so the stack can be parked overnight; `stop` runs the
+  backup first and refuses to proceed if it fails), `Dockerfile.keycloak`.
 - **Two front doors** (ADR-028): `gateway-web` (HTTP ingress, custom domain,
   Azure managed certificate) for browsers, and `gateway` (TCP passthrough)
   for agent traffic that must keep its client certificate all the way to the
@@ -956,7 +960,7 @@ automatically instead of needing its own `WebFilter` (ADR-012).
 | Medium | `/api/v1/internal/**` is protected by a shared header secret, not authentication (ADR-027 amendment) | Closes the accidental public exposure a public ingress created; a service account + policy rule is still the real fix (ADR-007) |
 | Medium (cloud) | Two gateway apps run the same background jobs (health polling, IdP sync, route refresh) against shared state, and MCP session state — already in-memory — is now split between them (ADR-028) | Harmless at demo scale since agents only use the TCP app; needs leader election or a jobs-disabled flag before scaling |
 | Medium (cloud) | The custom domain's managed certificate renews only while its CNAME keeps pointing at `gateway-web`; a repoint fails renewal silently | Named in ADR-028; no monitoring on it today |
-| Medium (cloud) | Postgres and Keycloak state is ephemeral (in-container), so any restart — including `power.sh stop`/`start` — wipes the audit trail and approval queue and re-imports the realm | Deliberate demo tradeoff; `DB_HOST` is the seam to a managed database |
+| Medium (cloud) | Postgres runs on ephemeral in-container storage (SMB Azure Files cannot host a data directory), so durability rests on a dump: `power.sh stop` backs up and `start` restores, but an unplanned crash loses everything written since the last dump. Keycloak state stays fully ephemeral and re-imports its realm on every start | ADR-033; `DB_HOST` is still the seam to a managed database, and a Premium FileStorage NFS share would restore a real data volume |
 | Medium | MCP session state in-memory, single-instance | Needs sticky routing or a shared store before scaling out |
 | Medium | True-`401` requests aren't captured in `request_logs` | Named; doesn't affect any existing test |
 | Medium | `idp_identities`/`idp_identity_relations` can be stale up to the sync interval (15 min default) | Deliberate tradeoff to keep policy evaluation zero-I/O; manual sync gives an immediate override. Identities are also reconciled each sync (ADR-030) — relations are not |
@@ -1017,6 +1021,7 @@ automatically instead of needing its own `WebFilter` (ADR-012).
 | [030](adr/ADR-030-credential-hygiene-and-identity-reconciliation.md) | Credential Hygiene and Identity-Cache Reconciliation |
 | [031](adr/ADR-031-policy-audit-surfacing-and-activation-overlay.md) | Policy-Audit Surfacing and the Activation Overlay |
 | [032](adr/ADR-032-acap-lifecycle-and-response-masking.md) | ACAP Lifecycle Management and Response Masking (amends ADR-022) |
+| [033](adr/ADR-033-demo-durability-and-cloud-configuration.md) | Demo Durability and the Cloud-Only Configuration (amends ADR-027) |
 
 ---
 

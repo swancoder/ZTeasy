@@ -54,9 +54,13 @@ gotcha, documented rather than hidden.
 
 ## Limits
 
-- **State is ephemeral by design**: the database and identity provider keep
-  data inside their containers, so a restart — including a stop/start cycle —
-  clears the audit trail and approval queue and re-imports the realm.
+- **Durability is a dump, not a disk** (ADR-033): the database runs on
+  ephemeral container storage because SMB Azure Files cannot host a Postgres
+  data directory. `power.sh stop` dumps to a share and every start restores
+  from it, so a planned stop keeps the audit trail, approvals, policy toggles
+  and ACAP lifecycle — an unplanned crash loses whatever came after the last
+  dump. Keycloak keeps no such backup and re-imports its realm on every start,
+  which also invalidates sessions.
 - Deployment is scripted but not declarative: no infrastructure-as-code, and
   re-running the scripts is the only reconciliation.
 - Images are pushed under a single moving tag, so rollback means finding a

@@ -156,6 +156,9 @@ zte-lightweight/
 │   ├── push-images.sh     Builds and pushes every image to GHCR (private)
 │   ├── bind-custom-domain.sh  Prints the required DNS records; binds domain + managed cert
 │   ├── power.sh           stop / start / status — park the whole stack overnight
+│   │                      (stop backs the database up first, and aborts if that fails)
+│   ├── db-backup-job.sh   The pg_dump-to-share job the stop depends on (ADR-033)
+│   ├── attach-volume.sh   Attach/detach an Azure Files share on an app (raw ARM PUT)
 │   ├── make-cloud-realm.py    Cloud realm import (multi-origin redirect URIs)
 │   └── Dockerfile.keycloak    Keycloak image with that realm baked in
 │

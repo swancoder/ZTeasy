@@ -82,10 +82,13 @@ pages exposed."
   HTTP-ingress app) is the production path.
 - Ephemeral Postgres/Keycloak state: every restart wipes audit history and
   Keycloak sessions. Named, deliberate demo tradeoff; `DB_HOST` env is the
-  upgrade seam.
+  upgrade seam. **Amended by ADR-033** for the database half — a dump/restore
+  pair now carries it across a planned stop; Keycloak's half still stands.
 - `zt-agents` can't TLS-validate the gateway's internal endpoint (no
   ZTE-CA truststore) — its auditor call fails in this topology until a
   truststore is mounted; shipped anyway for inventory completeness.
+  **Closed by ADR-033**: `ZTE_GATEWAY_CA_CERT` and the certs share, which
+  also turned out to be what had kept token metering from ever reporting.
 - The `/auth/**` proxy widens the gateway's unauthenticated surface to
   include Keycloak's login pages when enabled — mitigated by Keycloak's own
   auth on everything sensitive, and by the flag defaulting off outside the
