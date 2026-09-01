@@ -4,9 +4,12 @@
 Gateway fronting both plain REST traffic and AI agent (MCP) traffic under one
 policy engine and one audit trail.
 
-This document describes the system **as it currently behaves** — what
-exists, how it fits together, what's configurable, what's tested, and what's
-left. It deliberately does not re-narrate *how* each decision was reached or
+This document describes **how the system is built** — what exists, how it
+fits together, what's configurable, what's tested, and what's left. For the
+product-level view (what each capability does, what it depends on, how mature
+it is) see [FEATURES.md](FEATURES.md) and the per-feature specifications it
+links; they describe behaviour and deliberately do not repeat this file's
+architecture. It deliberately does not re-narrate *how* each decision was reached or
 *how* each bug was found — that's what the ADRs are for (§11 links every
 one; the verbatim task-prompt log, `prompts-hist/`, is maintainer-local and
 no longer in the repo — ADR-024). If you're extending this system, read §8

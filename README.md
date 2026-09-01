@@ -3,8 +3,10 @@
 **Lightweight Zero Trust Environment (MVP)**
 Demonstrating AI-driven development: Gemini as Architect, Claude as Engineer.
 
-For the full technical specification (architecture, component specs, data
-model, API reference, risk register, and the progress-flagged roadmap), see
+For **what the product does** — every capability, how they depend on each
+other, and how mature each one is — see the
+[Feature Catalogue](docs/FEATURES.md). For **how it is built** (architecture,
+component specs, data model, API reference, risk register, roadmap), see
 [docs/SPECS.md](docs/SPECS.md). This README stays a quick-start summary.
 
 ---
