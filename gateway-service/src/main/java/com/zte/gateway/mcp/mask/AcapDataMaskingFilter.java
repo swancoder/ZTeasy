@@ -54,13 +54,35 @@ public class AcapDataMaskingFilter implements DataMaskingFilter {
         this.objectMapper = objectMapper;
     }
 
+    /**
+     * @param acapKeys profile lookup order for this caller (ADR-039): one key for an
+     *                 agent, username-then-roles for a person. Masking that looked up
+     *                 by a single id would silently stop masking the moment the caller
+     *                 was a human governed by a role profile — the response would come
+     *                 back complete, and nothing would say so.
+     */
+    @Override
+    public JsonRpcResponse mask(java.util.List<String> acapKeys, String toolName, JsonRpcResponse response) {
+        String agentId = acapKeys == null || acapKeys.isEmpty() ? null : acapKeys.get(0);
+        if (agentId == null || toolName == null || !toolName.startsWith(READ_PREFIX)
+                || response == null || response.result() == null
+                || Boolean.TRUE.equals(response.result().get("isError"))) {
+            return response;
+        }
+        return maskWithProfile(profileStore.find(acapKeys), agentId, toolName, response);
+    }
+
     @Override
     public JsonRpcResponse mask(String agentId, String toolName, JsonRpcResponse response) {
         if (agentId == null || toolName == null || !toolName.startsWith(READ_PREFIX)
                 || response.result() == null || Boolean.TRUE.equals(response.result().get("isError"))) {
             return response;
         }
-        Optional<AcapProfile> profile = profileStore.find(agentId);
+        return maskWithProfile(profileStore.find(agentId), agentId, toolName, response);
+    }
+
+    private JsonRpcResponse maskWithProfile(Optional<AcapProfile> profile, String agentId, String toolName,
+                                             JsonRpcResponse response) {
         if (profile.isEmpty()) {
             return response;
         }

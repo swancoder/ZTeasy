@@ -84,7 +84,8 @@ auditable — the opposite of a mesh's "hide it in the sidecar" approach. See
 | 38 | Authenticated gateway→MCP hop: the bridge requires TLS with a client certificate and authorises `CN=zte-gateway-mcp` specifically — a hop identity nothing else holds, because the shared `client.p12` is also on the agent runner; health stays open to any CA-signed peer; the bridge refuses to start without it | [038](adr/ADR-038-authenticating-the-mcp-backend-hop.md) |
 | 39 | Chat console: `McpCaller` so an MCP decision can be about a person (`user:`/`role:` sources, ACAP looked up by username then role — agent path unchanged), gateway LLM egress holding the vendor key and metering tokens from the vendor's own response, `/api/v1/me/events` scoped in SQL, `zt-chat` backend running the tool loop with the user's own token, `zt-chat-ui` two-panel console at `/chat/` with client `zte-chat-ui` and role `CHAT_USER`, ACAP profile keyed `role:CHAT_USER` | [039](adr/ADR-039-chat-console-user-governed-mcp-and-llm-egress.md) |
 | 40 | One front door: the two-app split of ADR-028 merged back into a single gateway on the custom domain, using `ingress.clientCertificateMode: Accept` so the edge requests a client certificate and relays it in `X-Forwarded-Client-Cert`; `ForwardedClientCertificate` validates the chain against our own CA (the edge accepts any certificate), and a forged header was measured to be stripped by the edge before adopting the design | [040](adr/ADR-040-one-front-door.md) |
-| 41+ | Backlog (rate limiting, ABAC…) | see §9 |
+| 41 | Chat-only demo: the synthetic agents (`agent-a`, `agent-b`, the CRM assistant) and the pre-ACAP tool surface retired from the shipped configuration, the `agent-runner` job deleted; one governed identity remains (`role:CHAT_USER`) with the shape the agent profile had. Integration tests keep an agent and their own policy/profile fixtures under `src/it`. Masking fixed to use the caller's profile lookup order — it had been silently returning unmasked responses to people | [041](adr/ADR-041-retiring-the-synthetic-agents.md) |
+| 42+ | Backlog (rate limiting, ABAC…) | see §9 |
 
 **Testing:** `./gradlew test` (unit — every package below has direct
 coverage for its pure decision logic; I/O-calling code that has no
@@ -1100,6 +1101,7 @@ automatically instead of needing its own `WebFilter` (ADR-012).
 | [038](adr/ADR-038-authenticating-the-mcp-backend-hop.md) | Authenticating the Gateway → MCP Backend Hop (closes ADR-018's untouched hop) |
 | [039](adr/ADR-039-chat-console-user-governed-mcp-and-llm-egress.md) | Chat Console — Governing a Person Like an Agent, and Model Egress Through the Gate |
 | [040](adr/ADR-040-one-front-door.md) | One Front Door — Merging the Two Gateways (supersedes ADR-028) |
+| [041](adr/ADR-041-retiring-the-synthetic-agents.md) | Retiring the Synthetic Agents — the Demo is a Person |
 
 ---
 

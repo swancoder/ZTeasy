@@ -103,8 +103,6 @@ sourceSets {
 // so that no file in this repository pairs a client id with a working secret.
 val itRealmSecrets = mapOf(
     "__ZTE_SECRET_ZTE_GATEWAY__"                 to "it-fixture-zte-gateway",
-    "__ZTE_SECRET_AGENT_A__"                     to "it-fixture-agent-a",
-    "__ZTE_SECRET_AGENT_B__"                     to "it-fixture-agent-b",
     "__ZTE_SECRET_SERVICE_A__"                   to "it-fixture-service-a",
     "__ZTE_SECRET_CRM_ACCOUNT_HEALTH_EMEA_01__"  to "it-fixture-crm-account-health",
 )

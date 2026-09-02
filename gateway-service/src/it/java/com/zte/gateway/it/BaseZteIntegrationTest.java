@@ -72,8 +72,6 @@ abstract class BaseZteIntegrationTest {
      */
     static final String IT_DB_PASSWORD             = "it-fixture-postgres";
     static final String IT_GATEWAY_CLIENT_SECRET   = "it-fixture-zte-gateway";
-    static final String IT_AGENT_A_SECRET          = "it-fixture-agent-a";
-    static final String IT_AGENT_B_SECRET          = "it-fixture-agent-b";
     static final String IT_CRM_AGENT_SECRET        = "it-fixture-crm-account-health";
 
     static final KeycloakContainer      KEYCLOAK;
@@ -258,8 +256,8 @@ abstract class BaseZteIntegrationTest {
     }
 
     /**
-     * Returns a JWT access token for an MCP agent client ({@code agent-a} /
-     * {@code agent-b}) via the Client Credentials grant — see ADR-010. Unlike
+     * Returns a JWT access token for an MCP agent client via the Client
+     * Credentials grant — see ADR-010. Unlike
      * {@link #getAdminToken()}/{@link #getUserToken()}, there is no username —
      * the token identifies the client itself (via the {@code azp} claim).
      */

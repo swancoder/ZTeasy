@@ -58,8 +58,6 @@ USER_PASSWORD_VARS = {
 # cloud must not reuse them, since anyone can read them.
 CLIENT_SECRET_VARS = {
     "zte-gateway": "ZTE_SECRET_ZTE_GATEWAY",
-    "agent-a": "ZTE_SECRET_AGENT_A",
-    "agent-b": "ZTE_SECRET_AGENT_B",
     "service-a": "ZTE_SECRET_SERVICE_A",
     "crm-account-health-emea-01": "ZTE_SECRET_CRM_ACCOUNT_HEALTH_EMEA_01",
 }

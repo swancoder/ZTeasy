@@ -155,38 +155,6 @@
       ]
     },
     {
-      "clientId": "agent-a",
-      "name": "MCP Agent A",
-      "description": "Confidential OIDC client for Agent A (hubspot-mcp). Client Credentials grant only \u2014 no interactive user flow.",
-      "enabled": true,
-      "protocol": "openid-connect",
-      "clientAuthenticatorType": "client-secret",
-      "secret": "__ZTE_SECRET_AGENT_A__",
-      "publicClient": false,
-      "bearerOnly": false,
-      "standardFlowEnabled": false,
-      "implicitFlowEnabled": false,
-      "directAccessGrantsEnabled": false,
-      "serviceAccountsEnabled": true,
-      "authorizationServicesEnabled": false
-    },
-    {
-      "clientId": "agent-b",
-      "name": "MCP Agent B",
-      "description": "Confidential OIDC client for Agent B (hubspot-mcp). Client Credentials grant only \u2014 no interactive user flow.",
-      "enabled": true,
-      "protocol": "openid-connect",
-      "clientAuthenticatorType": "client-secret",
-      "secret": "__ZTE_SECRET_AGENT_B__",
-      "publicClient": false,
-      "bearerOnly": false,
-      "standardFlowEnabled": false,
-      "implicitFlowEnabled": false,
-      "directAccessGrantsEnabled": false,
-      "serviceAccountsEnabled": true,
-      "authorizationServicesEnabled": false
-    },
-    {
       "clientId": "service-a",
       "name": "Service A (gateway-fronted service2service identity)",
       "description": "Confidential OIDC client (ADR-017) for gateway-fronted service2service calls as 'service-a'. Distinct from service-a's own internal direct-mTLS call to service-b. Client Credentials grant only.",

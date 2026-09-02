@@ -268,21 +268,10 @@ for app in keycloak gateway-web service-a service-b; do
   $AZ containerapp revision restart -n "$app" -g "$RG" --revision "$REV" -o none || true
 done
 
-echo "── agent-runner job (manual trigger) ──"
-$AZ containerapp job create -n agent-runner -g "$RG" --environment "$ENV_NAME" \
-    --trigger-type Manual --replica-timeout 600 --replica-retry-limit 0 \
-    --image "$IMG/hubspot-mcp-agents:$TAG" --cpu 0.25 --memory 0.5Gi \
-    "${REG_ARGS[@]}" \
-    --env-vars "KEYCLOAK_TOKEN_URL=http://keycloak:8080/auth/realms/zte-realm/protocol/openid-connect/token" \
-      "GATEWAY_URL=$ORIGIN" \
-      GATEWAY_CLIENT_CERT=/app/certs/client.pem \
-      AGENT_A_CLIENT_ID=agent-a "AGENT_A_CLIENT_SECRET=${ZTE_SECRET_AGENT_A:?source cloud-credentials.env}" \
-      AGENT_B_CLIENT_ID=agent-b "AGENT_B_CLIENT_SECRET=${ZTE_SECRET_AGENT_B:?source cloud-credentials.env}" \
-      AGENT_CRM_CLIENT_ID=crm-account-health-emea-01 \
-      "AGENT_CRM_CLIENT_SECRET=${ZTE_SECRET_CRM_ACCOUNT_HEALTH_EMEA_01:?source cloud-credentials.env}" \
-    -o none 2>/dev/null || echo "(job exists — leaving as is)"
-# attach the certs volume to the job (client.pem) — YAML-only operation
-bash deploy/azure/attach-certs-to-job.sh agent-runner
+# Stage 42: no agent-runner job. The demo is the chat console, where a person
+# exercises the same tools an agent would have — so there is no synthetic traffic
+# to generate, and nothing that holds a client certificate except the gateway and
+# the chat backend.
 
 echo "── register the MCP bridge in the APIM inventory ──"
 # InventoryBootstrapSeeder only seeds service-a/service-b, so the bridge
@@ -323,5 +312,4 @@ echo " Admin Console:    $ORIGIN/admin/index.html"
 echo " Approval Center:  $ORIGIN/approver/index.html"
 echo " Chat Console:     $ORIGIN/chat/index.html"
 echo " Logins:           deploy/azure/out/cloud-credentials.env (local only)"
-echo " Demo run:         az containerapp job start -n agent-runner -g $RG"
 echo "══════════════════════════════════════════════════════"

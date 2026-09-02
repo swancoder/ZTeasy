@@ -24,6 +24,15 @@ public class McpForwardService {
         this.dataMaskingFilter = dataMaskingFilter;
     }
 
+    /**
+     * ADR-039: masking needs the same profile lookup the decision used, which for a
+     * person is username-then-roles rather than a single id.
+     */
+    public Mono<JsonRpcResponse> execute(java.util.List<String> acapKeys, JsonRpcRequest rpc) {
+        return backendClient.forward(rpc)
+                .map(response -> dataMaskingFilter.mask(acapKeys, rpc.toolName(), response));
+    }
+
     public Mono<JsonRpcResponse> execute(String agentId, JsonRpcRequest rpc) {
         return backendClient.forward(rpc)
                 .map(response -> dataMaskingFilter.mask(agentId, rpc.toolName(), response));

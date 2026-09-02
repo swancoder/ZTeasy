@@ -29,6 +29,7 @@ import java.util.UUID;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyList;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.verify;
@@ -216,7 +217,9 @@ class McpProxySecurityWebFluxTest {
         when(policyEngine.evaluate(any(com.zte.gateway.mcp.policy.McpCaller.class), eq("get_deals"), any()))
                 .thenReturn(PolicyDecision.allow());
         JsonRpcResponse backendResponse = JsonRpcResponse.success(7, Map.of("content", "3 deals"));
-        when(forwardService.execute(anyString(), any())).thenReturn(Mono.just(backendResponse));
+        // ADR-039: the proxy forwards with the caller's profile lookup order, so masking
+        // can find a person's role-keyed profile rather than a username that has none.
+        when(forwardService.execute(anyList(), any())).thenReturn(Mono.just(backendResponse));
 
         webTestClient.mutateWith(mockJwt().jwt(jwt -> jwt.claim("azp", "agent-a")))
                 .post().uri("/message?sessionId=session-1")
@@ -225,7 +228,7 @@ class McpProxySecurityWebFluxTest {
                 .exchange()
                 .expectStatus().isAccepted();
 
-        verify(forwardService).execute(anyString(), any());
+        verify(forwardService).execute(anyList(), any());
 
         @SuppressWarnings("unchecked")
         ArgumentCaptor<ServerSentEvent<String>> captor = ArgumentCaptor.forClass(ServerSentEvent.class);

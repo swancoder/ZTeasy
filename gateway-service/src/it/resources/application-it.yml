@@ -11,6 +11,13 @@ server:
                          # client config in MtlsHttpClientConfig)
 
 zte:
+  # Stage 42: the suite reads its own policy document and its own ACAP profiles,
+  # not the demo's — see zte-policies-it.yaml's header.
+  policy:
+    file: classpath:zte-policies-it.yaml
+  acap:
+    profiles-location: classpath:acap-profiles-it/*.yaml
+
   mtls:
     enabled: false      # skips MtlsHttpClientConfig — no client.p12 needed in tests
     key-password: it-fixture-unused   # nothing loads a keystore under this profile

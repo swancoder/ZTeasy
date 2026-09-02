@@ -17,4 +17,13 @@ public interface DataMaskingFilter {
      * @param toolName the tool whose result this is (drives resource mapping)
      */
     JsonRpcResponse mask(String agentId, String toolName, JsonRpcResponse response);
+
+    /**
+     * Mask against the first profile matching {@code acapKeys} (ADR-039). An agent
+     * has one key; a person is username-then-roles, and looking such a caller up by
+     * a single id would quietly return an unmasked response.
+     */
+    default JsonRpcResponse mask(java.util.List<String> acapKeys, String toolName, JsonRpcResponse response) {
+        return mask(acapKeys == null || acapKeys.isEmpty() ? null : acapKeys.get(0), toolName, response);
+    }
 }

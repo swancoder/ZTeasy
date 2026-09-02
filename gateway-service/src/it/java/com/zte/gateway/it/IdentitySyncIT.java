@@ -37,7 +37,7 @@ class IdentitySyncIT extends BaseZteIntegrationTest {
         .then()
             .statusCode(200)
             // ADMIN/USER roles + zte-admin/zte-test-user users + at least
-            // zte-gateway/agent-a/agent-b/zte-admin-ui clients, at least.
+            // zte-gateway/crm-account-health-emea-01/zte-admin-ui clients, at least.
             .body("synced", greaterThanOrEqualTo(8));
 
         given()
@@ -84,8 +84,7 @@ class IdentitySyncIT extends BaseZteIntegrationTest {
             .get("/api/v1/admin/identities/search")
         .then()
             .statusCode(200)
-            .body("name", hasItem("agent-a"))
-            .body("name", hasItem("agent-b"))
+            .body("name", hasItem("crm-account-health-emea-01"))
             .body("name", hasItem("zte-gateway"));
     }
 

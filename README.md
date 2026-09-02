@@ -217,6 +217,7 @@ zte-lightweight/
 | [ADR-038](docs/adr/ADR-038-authenticating-the-mcp-backend-hop.md) | Authenticating the Gateway → MCP Backend Hop | Accepted |
 | [ADR-039](docs/adr/ADR-039-chat-console-user-governed-mcp-and-llm-egress.md) | Chat Console — Governing a Person Like an Agent | Accepted |
 | [ADR-040](docs/adr/ADR-040-one-front-door.md) | One Front Door — Merging the Two Gateways (supersedes ADR-028) | Accepted |
+| [ADR-041](docs/adr/ADR-041-retiring-the-synthetic-agents.md) | Retiring the Synthetic Agents — the Demo is a Person | Accepted |
 
 ---
 
@@ -417,17 +418,19 @@ curl -sk https://localhost:8080/api/v1/admin/governance/out-of-policy -H "Author
 
 ## Agent Authentication (Stage 9)
 
-Agent A and Agent B (the `hubspot-mcp` sibling project) authenticate to this gateway via
-OAuth2 **Client Credentials** — a service authenticating as itself, not on behalf of a user.
+An agent authenticates to this gateway via OAuth2 **Client Credentials** — a service authenticating as itself, not on behalf of a user.
 See [ADR-010](docs/adr/ADR-010-agent-oauth2-client-credentials.md).
 
-Two confidential clients live in the existing `zte-realm` (`keycloak/realm-export.json`):
-`agent-a` and `agent-b`, both Client-Credentials-only (no interactive login). Fetch a token
-and call the MCP proxy:
+As of [ADR-041](docs/adr/ADR-041-retiring-the-synthetic-agents.md) the demo itself no
+longer ships synthetic agents — a person in the Chat Console exercises the same tools
+under the same engine. One Client-Credentials client remains in the realm,
+`crm-account-health-emea-01`, because the integration suite has no browser and must
+authenticate as *something*; the machine-identity flow below is unchanged and is what
+a real agent would use.
 
 ```bash
 TOKEN=$(curl -s -X POST http://localhost:8180/realms/zte-realm/protocol/openid-connect/token \
-  -d "grant_type=client_credentials&client_id=agent-a&client_secret=$ZTE_SECRET_AGENT_A" \
+  -d "grant_type=client_credentials&client_id=crm-account-health-emea-01&client_secret=$ZTE_SECRET_CRM_ACCOUNT_HEALTH_EMEA_01" \
   | python3 -c "import sys,json; print(json.load(sys.stdin)['access_token'])")
 
 # As of ADR-018, /sse is a protected path: a JWT alone is no longer enough, a client

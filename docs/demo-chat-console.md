@@ -101,8 +101,7 @@ Tool 'send_email' held for human approval by rule 'mcp-hold-chat-user-send-email
 
 The assistant says plainly that nothing was sent. Now switch to the Approval
 Center as **`zte-dpo`**: the item is there, raised by `zte-admin`, routed to
-`role:APPROVER`, with a countdown to its deadline. Approve it and the tool call
-executes — the same decision path an agent's held call goes through.
+`role:APPROVER`, with a countdown to its deadline. Approve it and the tool call executes.
 
 Two details worth pointing at: the routing is by policy (`routeTo:
 "role:APPROVER"`), so it does not matter whether a person or a robot composed the
@@ -125,6 +124,6 @@ application. The same figures roll up in the executive dashboard per user.
   deployment. Each re-reads the policy file every 30 seconds
   (`zte.policy.file-refresh-ms`), so wait that long — or press "Reload Policies",
   which reloads only the instance that served the click.
-- **The model picks an odd tool:** it is shown every tool the backend advertises,
-  including the pre-ACAP ones, deliberately — the refusal is the demonstration.
-  Superseded tools are marked as such in the description it reads.
+- **The model picks an odd tool:** it is shown every tool the backend advertises
+  and finds out from the gate which it may use — the refusal is the demonstration.
+  Since ADR-041 there is one name per capability, so the choice is narrower.

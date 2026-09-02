@@ -148,7 +148,7 @@ public class McpProxyHandler {
             auditService.record(new McpAuditEvent(PROCESS_ID, agentId, "tools/list", "ALLOWED", Instant.now(),
                     sessionId, "Tool discovery", httpContext.traceId(), httpContext.clientIp(),
                     httpContext.userAgent(), identity.displayIdentity(), null));
-            return forwardService.execute(agentId, rpc).flatMap(response -> emit(sessionId, response));
+            return forwardService.execute(identity.caller().acapKeys(), rpc).flatMap(response -> emit(sessionId, response));
         }
 
         PolicyDecision decision = policyEngine.evaluate(identity.caller(), toolName, rpc.toolArguments());
@@ -179,7 +179,7 @@ public class McpProxyHandler {
             }
             case ALLOW -> {
                 log.debug("MCP ALLOW sessionId={} agentId={} tool={}", sessionId, agentId, toolName);
-                yield forwardService.execute(agentId, rpc)
+                yield forwardService.execute(identity.caller().acapKeys(), rpc)
                         .doOnNext(resp -> auditService.record(
                                 new McpAuditEvent(PROCESS_ID, agentId, toolName, "ALLOWED", Instant.now(), sessionId,
                                         null, httpContext.traceId(), httpContext.clientIp(), httpContext.userAgent(),

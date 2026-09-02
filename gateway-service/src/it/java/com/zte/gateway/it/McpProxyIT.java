@@ -51,82 +51,6 @@ class McpProxyIT extends BaseZteIntegrationTest {
     }
 
     @Test
-    @DisplayName("Agent A calling its granted tool (get_deals): forwarded to backend, result injected into SSE")
-    void agentA_allowedTool_isForwardedToBackend_andResultInjectedIntoSseStream() {
-        WIREMOCK.stubFor(post(urlPathEqualTo("/message"))
-                .willReturn(aResponse()
-                        .withStatus(200)
-                        .withHeader("Content-Type", "application/json")
-                        .withBody("""
-                                {"jsonrpc":"2.0","id":1,
-                                 "result":{"content":[{"type":"text","text":"3 deals"}]},
-                                 "error":null}
-                                """)));
-
-        String token = getAgentToken("agent-a", IT_AGENT_A_SECRET);
-        AtomicReference<String> sessionId = new AtomicReference<>();
-
-        StepVerifier.create(openSseStream(token))
-                .assertNext(handshake -> {
-                    assertThat(handshake.event()).isEqualTo("endpoint");
-                    sessionId.set(extractSessionId(handshake.data()));
-                })
-                .then(() -> postMessage(token, sessionId.get(), 1, "get_deals"))
-                .assertNext(result -> {
-                    assertThat(result.event()).isEqualTo("message");
-                    JsonNode json = readTree(result.data());
-                    assertThat(json.get("id").asInt()).isEqualTo(1);
-                    assertThat(json.get("result").toString()).contains("3 deals");
-                    assertThat(json.get("error").isNull()).isTrue();
-                })
-                .thenCancel()
-                .verify(Duration.ofSeconds(10));
-
-        WIREMOCK.verify(1, postRequestedFor(urlPathEqualTo("/message"))
-                .withRequestBody(matchingJsonPath("$.params.name", equalTo("get_deals"))));
-    }
-
-    @Test
-    @DisplayName("Agent A calling a tool it has no grant for: denial injected into SSE, backend never called")
-    void agentA_toolWithNoGrant_isDenied_backendNeverCalled() {
-        String token = getAgentToken("agent-a", IT_AGENT_A_SECRET);
-        AtomicReference<String> sessionId = new AtomicReference<>();
-
-        StepVerifier.create(openSseStream(token))
-                .assertNext(handshake -> sessionId.set(extractSessionId(handshake.data())))
-                .then(() -> postMessage(token, sessionId.get(), 2, "update_deal_stage"))
-                .assertNext(result -> {
-                    JsonNode json = readTree(result.data());
-                    assertThat(json.get("id").asInt()).isEqualTo(2);
-                    assertThat(json.get("result").get("isError").asBoolean()).isTrue();
-                })
-                .thenCancel()
-                .verify(Duration.ofSeconds(10));
-
-        WIREMOCK.verify(0, postRequestedFor(urlPathEqualTo("/message")));
-    }
-
-    @Test
-    @DisplayName("Agent B calling a destructive-shaped tool: denied by the deny-list rule, backend never called")
-    void agentB_destructiveTool_isDenied_backendNeverCalled() {
-        String token = getAgentToken("agent-b", IT_AGENT_B_SECRET);
-        AtomicReference<String> sessionId = new AtomicReference<>();
-
-        StepVerifier.create(openSseStream(token))
-                .assertNext(handshake -> sessionId.set(extractSessionId(handshake.data())))
-                .then(() -> postMessage(token, sessionId.get(), 3, "delete_deal"))
-                .assertNext(result -> {
-                    JsonNode json = readTree(result.data());
-                    assertThat(json.get("id").asInt()).isEqualTo(3);
-                    assertThat(json.get("result").get("isError").asBoolean()).isTrue();
-                })
-                .thenCancel()
-                .verify(Duration.ofSeconds(10));
-
-        WIREMOCK.verify(0, postRequestedFor(urlPathEqualTo("/message")));
-    }
-
-    @Test
     @DisplayName("Held tool call (Stage 1, ADR-019): 🟡 SSE status, backend untouched until an admin approves it")
     void heldTool_emitsHeldStatus_thenAdminApprove_forwardsToBackend() {
         // The SSE stream is cancelled right after the "held" event (see thenCancel()
@@ -205,7 +129,7 @@ class McpProxyIT extends BaseZteIntegrationTest {
         StepVerifier.create(openSseStream(token))
                 .assertNext(handshake -> sessionId.set(extractSessionId(handshake.data())))
                 .then(() -> postMessage(token, sessionId.get(), 10, "read_contacts",
-                        "{\"territory\":\"EMEA\",\"fields\":[\"name\",\"company\"]}"))
+                        "{\"territory\":\"EMEA\",\"fields\":[\"company\",\"lifecyclestage\"]}"))
                 .assertNext(result -> {
                     JsonNode json = readTree(result.data());
                     assertThat(json.get("result").toString()).contains("3 contacts");
@@ -300,7 +224,7 @@ class McpProxyIT extends BaseZteIntegrationTest {
     @Test
     @DisplayName("POST /message with an unknown sessionId → 400, nothing to inject into")
     void unknownSessionId_returns400() {
-        String token = getAgentToken("agent-a", IT_AGENT_A_SECRET);
+        String token = getAgentToken("crm-account-health-emea-01", IT_CRM_AGENT_SECRET);
 
         given()
             .baseUri("http://localhost:" + gatewayPort)

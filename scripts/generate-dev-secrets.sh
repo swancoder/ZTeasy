@@ -33,7 +33,6 @@ KEYS_SECRET=(
   ZTE_OBO_SECRET                          # HMAC key for X-ZTE-User-Context (ADR-004)
   ZTE_INTERNAL_API_KEY                    # /api/v1/internal/** shared secret (ADR-027)
   ZTE_SECRET_ZTE_GATEWAY                  # OIDC client secrets — must match the realm
-  ZTE_SECRET_AGENT_A
   ZTE_SECRET_AGENT_B
   ZTE_SECRET_SERVICE_A
   ZTE_SECRET_CRM_ACCOUNT_HEALTH_EMEA_01

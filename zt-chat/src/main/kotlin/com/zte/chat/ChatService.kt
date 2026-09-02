@@ -25,7 +25,9 @@ class ChatService(
     private val mcp: McpClient,
     private val mapper: ObjectMapper,
     @Value("\${zte.chat.max-tool-rounds:4}") private val maxRounds: Int,
-    @Value("\${zte.chat.superseded-tools:get_contacts=read_contacts,get_deals=read_deals,update_deal_stage=update_deal,export_all_data=read_contacts}")
+    // Empty by default since stage 42 retired the pre-ACAP tool surface; the mechanism
+    // stays for a deployment whose backend still advertises superseded names.
+    @Value("\${zte.chat.superseded-tools:}")
     private val superseded: String
 ) {
     private val log = LoggerFactory.getLogger(ChatService::class.java)
@@ -34,11 +36,8 @@ class ChatService(
         You are a CRM assistant inside ZTeasy, a Zero Trust gateway demo.
         You have CRM tools available. Use them when the user asks for CRM data or actions.
 
-        Prefer the scoped tools: read_contacts, read_deals, read_activities, draft_followup,
-        send_email. The older get_contacts / get_deals / update_deal_stage / export_all_data
-        tools are still advertised by the backend but are not covered by the scope profiles
-        this gateway enforces, so they are refused. If you catch yourself reaching for one,
-        use the read_* equivalent and pass the territory and the specific fields you need.
+        When reading, pass the territory and the specific fields you need — the gateway
+        scopes both, and asking for everything is how you get refused.
 
         Some calls will be refused by policy, or held for a human approval. When that
         happens, tell the user plainly what was refused and the reason the system gave.

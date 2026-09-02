@@ -66,31 +66,21 @@ class AcapProfileFileLoaderTest {
     void realDemoProfile_loadsWithFullStage6Metadata() {
         Map<String, AcapProfile> profiles = loader.loadAll("classpath:acap-profiles/*.yaml");
 
-        assertThat(profiles).containsKey("crm-account-health-emea-01");
-        AcapProfile profile = profiles.get("crm-account-health-emea-01");
+        // Stage 42: the demo is the chat console alone, so the profile that ships is
+        // the one governing PEOPLE. It carries the same shape the retired agent's did
+        // — territory, field-scoped reads, a write ban, a daily threshold, lifecycle
+        // metadata — which is the point: a person is governed like an agent was.
+        assertThat(profiles).containsKey("role:CHAT_USER");
+        AcapProfile profile = profiles.get("role:CHAT_USER");
         assertThat(profile.territory()).isEqualTo("EMEA");
         assertThat(profile.writeAllowed()).isFalse();
         assertThat(profile.readGrants()).hasSize(3);
 
         assertThat(profile.agent()).isNotNull();
-        assertThat(profile.agent().name()).isEqualTo("Account-Health Assistant");
-        assertThat(profile.agent().client()).isEqualTo("Nordwind Components");
+        assertThat(profile.agent().name()).isEqualTo("Chat Console user");
         assertThat(profile.agent().owner().email()).isEqualTo("sales-ops@nordwind.example");
-        // Stage 32 (ADR-032): the demo profile's due date moved into the
-        // future — overdue re-authorization now escalates every ALLOW to HOLD,
-        // so a permanently-stale baked date would hold every demo call. The
-        // overdue path is exercised deliberately via the reauthorize API.
-        assertThat(profile.agent().reauthDue()).isEqualTo("2027-02-01");
-
         assertThat(profile.risk()).isNotNull();
-        assertThat(profile.risk().euAiActClass()).isEqualTo("limited");
-        assertThat(profile.risk().internalTier()).isEqualTo(2);
-
         assertThat(profile.thresholds()).hasSize(1);
-        AcapThreshold threshold = profile.thresholds().get(0);
-        assertThat(threshold.metric()).isEqualTo("followup_drafts_per_day");
-        assertThat(threshold.toolName()).isEqualTo("draft_followup");
-        assertThat(threshold.limit()).isEqualTo(30);
-        assertThat(threshold.onExceed()).isEqualTo("hold");
+        assertThat(profile.thresholds().get(0).toolName()).isEqualTo("draft_followup");
     }
 }

@@ -20,7 +20,6 @@
 #   open https://localhost:8443/admin/index.html
 #   open https://localhost:8443/approver/index.html
 #   logins: deploy/azure/out/cloud-credentials.env (gitignored)
-#   docker compose -f docker-compose.cloud.yml --profile demo run --rm agent-runner
 # ============================================================
 
 x-external-origin: &external-origin ${ZTE_EXTERNAL_ORIGIN:-https://localhost:8443}
@@ -168,10 +167,15 @@ services:
     restart: unless-stopped
     env_file:
       - ../hubspot-mcp/.env   # HUBSPOT_TOKEN — the only component with HubSpot egress
+    environment:
       # ADR-038: the hop the gateway makes to this bridge is authenticated. The
       # bridge refuses to start without these, which is deliberate — it used to be
       # insecure by default and documented as such, and the documentation is not
       # what an attacker reads.
+      #
+      # These were briefly written under env_file: (a list, not a mapping), which
+      # made this whole file unparseable — and nothing noticed, because the cloud
+      # mirror is not exercised by any test. Validated explicitly now.
       MCP_BRIDGE_TLS_CERT: /app/certs/mcp-bridge.crt
       MCP_BRIDGE_TLS_KEY:  /app/certs/mcp-bridge.key
       MCP_BRIDGE_TLS_CA:   /app/certs/ca.crt
@@ -213,27 +217,6 @@ services:
       # zt-agents at that CA, so every call to the gateway — the auditor's
       # policy fetch and the token metering report alike — failed TLS.
       ZTE_GATEWAY_CA_CERT: /app/certs/ca.crt
-    volumes:
-      - ./certs:/app/certs:ro
-    networks: [zte-cloud]
-
-  # On-demand demo job — not started by default; run with:
-  #   docker compose -f docker-compose.cloud.yml --profile demo run --rm agent-runner
-  agent-runner:
-    build:
-      context: ../hubspot-mcp
-      dockerfile: Dockerfile.agents
-    profiles: [demo]
-    environment:
-      KEYCLOAK_TOKEN_URL:  http://keycloak:8080/auth/realms/zte-realm/protocol/openid-connect/token
-      GATEWAY_URL:         https://gateway:8080
-      GATEWAY_CLIENT_CERT: /app/certs/client.pem
-      AGENT_A_CLIENT_ID:   agent-a
-      AGENT_A_CLIENT_SECRET: ${ZTE_SECRET_AGENT_A?run scripts/generate-dev-secrets.sh}
-      AGENT_B_CLIENT_ID:   agent-b
-      AGENT_B_CLIENT_SECRET: ${ZTE_SECRET_AGENT_B?run scripts/generate-dev-secrets.sh}
-      AGENT_CRM_CLIENT_ID: crm-account-health-emea-01
-      AGENT_CRM_CLIENT_SECRET: ${ZTE_SECRET_CRM_ACCOUNT_HEALTH_EMEA_01?run scripts/generate-dev-secrets.sh}
     volumes:
       - ./certs:/app/certs:ro
     networks: [zte-cloud]
