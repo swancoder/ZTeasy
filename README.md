@@ -211,6 +211,7 @@ zte-lightweight/
 | [ADR-032](docs/adr/ADR-032-acap-lifecycle-and-response-masking.md) | ACAP Lifecycle Management and Response Masking (amends ADR-022) | Accepted |
 | [ADR-033](docs/adr/ADR-033-demo-durability-and-cloud-configuration.md) | Demo Durability and the Cloud-Only Configuration (amends ADR-027) | Accepted |
 | [ADR-034](docs/adr/ADR-034-approval-routing-and-expiry.md) | Approval Routing, Entitlement and Expiry (extends ADR-019) | Accepted |
+| [ADR-035](docs/adr/ADR-035-approval-notifications.md) | Approval Notifications — Addressing, Channels and Delivery Evidence | Accepted |
 
 ---
 
@@ -311,7 +312,20 @@ difference. Every held call also carries a deadline (`ZTE_APPROVALS_TTL_MINUTES`
 default 24h) with a countdown on the card; past it the item turns `EXPIRED`
 (swept every `ZTE_APPROVALS_SWEEP_INTERVAL_MS`, default 60s), stays visible
 greyed out, and is audited as a `DENY`/`408` — a late approval is refused with
-`409`. Nobody is notified when an item is raised; the page polls.
+`409`.
+
+**Notifications (ADR-035).** Who may decide and who gets told are different
+questions: an unrouted call stays decidable by anyone, but it is *addressed* to
+`zte.approvals.default-notify` (`role:APPROVER` by default), resolved to real
+usernames from the identity cache. Both surfaces show an "N for you" badge and
+offer an opt-in desktop notification (asked for behind a button, never on load).
+Set `ZTE_APPROVALS_WEBHOOK_URL` to a Slack/Teams incoming webhook — or any
+JSON endpoint — and each held call also posts there; `ZTE_APPROVALS_LINK_BASE`
+adds a link back. The payload names the agent, tool, audience and deadline and
+deliberately **omits the call's arguments**, which are the sensitive part and
+stay behind a login. Every attempt is recorded in `approval_notifications` as
+`SENT`/`FAILED`/`SKIPPED` and shown per item, so "was anyone told?" is
+answerable — including when the answer is "no channel is configured".
 
 ```bash
 # Try it: log in as the USER-role account (scripts/set-keycloak-password.sh

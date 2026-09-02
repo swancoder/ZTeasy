@@ -18,6 +18,8 @@ import reactor.core.publisher.Mono;
 
 import java.time.Duration;
 import java.time.Instant;
+import java.util.HashMap;
+import java.util.List;
 import java.util.Map;
 import java.util.UUID;
 
@@ -49,12 +51,20 @@ public class PendingApprovalService {
     private final ObjectMapper objectMapper;
 
     private final ApprovalEntitlement entitlement;
+    private final ApprovalAudience audience;
+    private final ApprovalNotifier notifier;
+    private final ApprovalNotificationRepository notifications;
     private final Duration ttl;
 
     public PendingApprovalService(PendingApprovalRepository repository, McpForwardService forwardService,
                                    McpAuditService auditService, McpSessionManager sessionManager,
                                    ObjectMapper objectMapper, ApprovalEntitlement entitlement,
+                                   ApprovalAudience audience, ApprovalNotifier notifier,
+                                   ApprovalNotificationRepository notifications,
                                    @Value("${zte.approvals.ttl-minutes:1440}") long ttlMinutes) {
+        this.audience = audience;
+        this.notifier = notifier;
+        this.notifications = notifications;
         this.repository = repository;
         this.forwardService = forwardService;
         this.auditService = auditService;
@@ -70,12 +80,41 @@ public class PendingApprovalService {
                                        String userAgent, String displayIdentity) {
         PendingApproval approval = PendingApproval.requested(sessionId, agentId, toolName, writeJson(rpc.id()),
                 writeJson(rpc.toolArguments()), routeTo, reason, traceId, clientIp, userAgent, displayIdentity, ttl);
-        return repository.save(approval);
+        // Notify after the row is durable, never before: a message pointing at an
+        // approval that failed to persist would be worse than no message.
+        return repository.save(approval).doOnNext(notifier::notifyRaised);
     }
 
     /** Everything still awaiting a human decision, oldest first — the Admin Console's "Approvals" tab. */
     public Flux<PendingApproval> listPending() {
         return repository.findByStatusOrderByRequestedAtAsc(PendingApprovalStatus.PENDING.name());
+    }
+
+    /**
+     * The queue as one viewer sees it (ADR-034/ADR-035) — entitlement, countdown,
+     * addressee and delivery status resolved together, so both approval surfaces
+     * cannot disagree about any of them. Deliveries are fetched in one query for
+     * the whole page rather than one per row.
+     */
+    public Mono<List<ApprovalView>> listPendingFor(ApprovalEntitlement.Decider decider) {
+        return listPending().collectList().flatMap(pending -> {
+            if (pending.isEmpty()) {
+                return Mono.just(List.<ApprovalView>of());
+            }
+            List<UUID> ids = pending.stream().map(PendingApproval::id).toList();
+            return notifications.findByApprovalIdInOrderByCreatedAtDesc(ids)
+                    .collectList()
+                    .map(rows -> {
+                        Map<UUID, ApprovalNotification> latest = new HashMap<>();
+                        for (ApprovalNotification n : rows) {
+                            latest.putIfAbsent(n.approvalId(), n);   // ordered newest-first
+                        }
+                        Instant now = Instant.now();
+                        return pending.stream()
+                                .map(a -> ApprovalView.of(a, entitlement, audience, decider, latest.get(a.id()), now))
+                                .toList();
+                    });
+        });
     }
 
     public Mono<PendingApproval> approve(UUID id, ApprovalEntitlement.Decider decider) {

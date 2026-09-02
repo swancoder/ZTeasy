@@ -33,6 +33,22 @@ public class ApprovalEntitlement {
     }
 
     /**
+     * Does this URN name this person? Shared with notification addressing (ADR-035)
+     * so "who may decide" and "who gets told" can never drift into different
+     * interpretations of the same string.
+     */
+    public boolean matches(String urn, Decider decider) {
+        if (urn == null || urn.isBlank()) {
+            return false;
+        }
+        String u = urn.trim();
+        if (u.startsWith("role:")) return decider.roles().contains(u.substring("role:".length()));
+        if (u.startsWith("user:")) return u.substring("user:".length()).equals(decider.username());
+        if (u.startsWith("group:")) return false;
+        return decider.roles().contains(u);
+    }
+
+    /**
      * @return empty when the decider may act, otherwise the reason they may not —
      *         phrased for the person reading it, since it reaches the UI verbatim.
      */

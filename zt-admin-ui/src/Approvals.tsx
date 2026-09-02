@@ -12,6 +12,7 @@ import TableHead from '@mui/material/TableHead'
 import TableRow from '@mui/material/TableRow'
 import Typography from '@mui/material/Typography'
 import Stack from '@mui/material/Stack'
+import Chip from '@mui/material/Chip'
 import Tooltip from '@mui/material/Tooltip'
 import ConfirmDialog from './ConfirmDialog'
 import type { PendingApproval } from './types'
@@ -41,6 +42,10 @@ export default function Approvals({ accessToken }: Props) {
   const [snackbar, setSnackbar] = useState<{ message: string; severity: 'success' | 'error' } | null>(null)
   const [decidingId, setDecidingId] = useState<string | null>(null)
   const [rejectTarget, setRejectTarget] = useState<PendingApproval | null>(null)
+  // ADR-035: what is addressed to this viewer, which is not the same as what they
+  // are allowed to decide — an unrouted call is decidable by anyone but owned by
+  // the configured default audience.
+  const forYou = approvals.filter((a) => a.addressedToYou && a.status === 'PENDING').length
 
   const fetchApprovals = useCallback(async () => {
     setError(null)
@@ -119,6 +124,10 @@ export default function Approvals({ accessToken }: Props) {
         </Button>
       </Box>
 
+      {forYou > 0 && (
+        <Chip color="warning" size="small" label={`${forYou} addressed to you`} sx={{ mb: 2 }} />
+      )}
+
       {approvals.length === 0 ? (
         <Typography color="text.secondary">
           Nothing held right now — calls matching an agentMcpToolHolds rule will show up here.
@@ -133,6 +142,7 @@ export default function Approvals({ accessToken }: Props) {
                 <TableCell>Agent</TableCell>
                 <TableCell>Tool</TableCell>
                 <TableCell>Routed to</TableCell>
+                <TableCell>Notified</TableCell>
                 <TableCell>Arguments</TableCell>
                 <TableCell>Reason</TableCell>
                 <TableCell align="right">Actions</TableCell>
@@ -149,6 +159,24 @@ export default function Approvals({ accessToken }: Props) {
                   <TableCell>{approval.toolName}</TableCell>
                   <TableCell sx={{ fontFamily: 'monospace', fontSize: '0.8rem' }}>
                     {approval.routeTo ?? 'anyone'}
+                  </TableCell>
+                  <TableCell>
+                    <Tooltip title={approval.addressedTo ? `addressed to ${approval.addressedTo}` : ''}>
+                      <span
+                        style={{
+                          color:
+                            approval.notificationStatus === 'SENT'
+                              ? undefined
+                              : approval.notificationStatus === 'FAILED'
+                                ? '#c62828'
+                                : '#8a8a8a',
+                        }}
+                      >
+                        {approval.notificationStatus === 'SENT'
+                          ? new Date(approval.notifiedAt!).toLocaleTimeString()
+                          : (approval.notificationStatus?.toLowerCase() ?? 'no record')}
+                      </span>
+                    </Tooltip>
                   </TableCell>
                   <TableCell sx={{ fontFamily: 'monospace', fontSize: '0.8rem', maxWidth: 260 }}>
                     <Tooltip title={approval.argumentsJson ?? '—'}>

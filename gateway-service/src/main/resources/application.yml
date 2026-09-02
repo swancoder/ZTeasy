@@ -176,6 +176,23 @@ zte:
     # sweep is what keeps the queue honest; the deadline check on the decision
     # path is what keeps a late decision from executing.
     sweep-interval-ms: ${ZTE_APPROVALS_SWEEP_INTERVAL_MS:60000}
+    # Who is TOLD about a held call that names no approver of its own (ADR-035).
+    # Not the same question as who may decide it: permission stays broad (any
+    # interactive user), while the message gets a named addressee, because an
+    # item addressed to everyone is an item addressed to no one.
+    default-notify: ${ZTE_APPROVALS_DEFAULT_NOTIFY:role:APPROVER}
+    # Base URL used to build the link in a notification (e.g. https://demo.zteasy.tech).
+    # Blank means the message carries no link — a wrong link is worse than none.
+    link-base: ${ZTE_APPROVALS_LINK_BASE:}
+    webhook:
+      # Slack/Teams incoming webhook, or any endpoint accepting JSON. Blank
+      # disables notification entirely, and that fact is still recorded against
+      # each held call rather than left as silence.
+      #
+      # This is an outbound hop from the perimeter to a third party: the URL is a
+      # secret, and the payload deliberately excludes the call's arguments.
+      url: ${ZTE_APPROVALS_WEBHOOK_URL:}
+      timeout-ms: ${ZTE_APPROVALS_WEBHOOK_TIMEOUT_MS:5000}
 
   # ── ACAP per-agent scope profiles (Stage 3 / ADR-020) — additive, opt-in ──
   # tightening on top of agentMcpToolCalls/agentMcpToolHolds above. Unlike

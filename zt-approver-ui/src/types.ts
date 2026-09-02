@@ -19,6 +19,12 @@ export interface PendingApproval {
   canDecide: boolean
   refusalReason: string | null
   secondsRemaining: number
+  addressedTo: string | null
+  // ADR-035: separate from canDecide on purpose — an unrouted call may be decided
+  // by anyone, but it is still addressed to someone, so that it has an owner.
+  addressedToYou: boolean
+  notificationStatus: 'SENT' | 'FAILED' | 'SKIPPED' | null
+  notifiedAt: string | null
   decidedAt: string | null
   decidedBy: string | null
   traceId: string | null

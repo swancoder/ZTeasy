@@ -37,12 +37,15 @@ class PendingApprovalServiceTest {
     @Mock McpForwardService forwardService;
     @Mock McpAuditService auditService;
     @Mock McpSessionManager sessionManager;
+    @Mock ApprovalAudience   audience;
+    @Mock ApprovalNotifier   notifier;
+    @Mock ApprovalNotificationRepository notificationRepository;
 
     private final ObjectMapper objectMapper = new ObjectMapper();
 
     private PendingApprovalService newService() {
         return new PendingApprovalService(repository, forwardService, auditService, sessionManager, objectMapper,
-                new ApprovalEntitlement(), 1440);
+                new ApprovalEntitlement(), audience, notifier, notificationRepository, 1440);
     }
 
     private PendingApproval pending(UUID id) {

@@ -1,6 +1,6 @@
 # FEAT-06 — Human-in-the-Loop Approvals
 
-**Maturity:** Working. Routing and expiry landed in ADR-034 (a hold rule may name `role:APPROVER`, enforced with a 403; items carry a deadline and expire into an audited terminal state). Still no notification: the queue is polled, nobody is told.
+**Maturity:** Working. Routing and expiry landed in ADR-034 (a hold rule may name `role:APPROVER`, enforced with a 403; items carry a deadline and expire into an audited terminal state). Notification landed in ADR-035: a per-viewer badge, an opt-in desktop notification and an outbound webhook, with every delivery attempt recorded. No retry and no reminder before the deadline yet.
 **Depends on:** FEAT-04 (produces holds), FEAT-02 (who may decide)
 **Feeds:** FEAT-07 (decisions are audited), FEAT-10/11 (queue depth, refusals)
 **Detail:** [SPECS §5.4](../SPECS.md) · [ADR-019](../adr/ADR-019-hold-decision-and-approval-queue.md), [ADR-026](../adr/ADR-026-standalone-approver-ui.md)
@@ -56,8 +56,14 @@ hold no realm role, so an agent can never approve its own call.
   (ADR-026's posture). A hold rule opts into an owner with `routeTo:
   role:APPROVER`, which the gateway enforces with a 403 — but rules that don't
   set it stay open to every interactive user.
-- No notifications: an approver must be looking at the page (it polls every
-  15 seconds). This is the largest remaining gap in the feature.
+- **A failed delivery is never retried** (ADR-035). The attempt is recorded as
+  `FAILED` and nothing tries again, so a transient outage at the chat provider
+  loses that notification permanently.
+- **No reminder before the deadline.** An item notified once when raised gets no
+  second chance to be seen before it expires — the natural pair to ADR-034's
+  expiry, deliberately out of scope for ADR-035.
+- One webhook URL for every audience: `role:FINANCE` cannot be sent somewhere
+  different from `role:APPROVER`.
 - **Expiry is swept on a timer**, so an item can read as PENDING for up to one
   sweep interval past its deadline. Deciding it in that window is refused by the
   decision path itself, so the display lags but the enforcement does not.

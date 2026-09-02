@@ -3,7 +3,6 @@ package com.zte.gateway.admin;
 import com.zte.gateway.mcp.approval.ApprovalAlreadyDecidedException;
 import com.zte.gateway.mcp.approval.ApprovalNotFoundException;
 import com.zte.gateway.mcp.approval.ApprovalApiSupport;
-import com.zte.gateway.mcp.approval.ApprovalEntitlement;
 import com.zte.gateway.mcp.approval.ApprovalView;
 import com.zte.gateway.mcp.approval.PendingApproval;
 import com.zte.gateway.mcp.approval.PendingApprovalService;
@@ -35,18 +34,14 @@ import java.util.UUID;
 class AdminApprovalsController {
 
     private final PendingApprovalService approvalService;
-    private final ApprovalEntitlement    entitlement;
 
-    AdminApprovalsController(PendingApprovalService approvalService, ApprovalEntitlement entitlement) {
+    AdminApprovalsController(PendingApprovalService approvalService) {
         this.approvalService = approvalService;
-        this.entitlement = entitlement;
     }
 
     @GetMapping
     public Mono<List<ApprovalView>> list(@AuthenticationPrincipal Jwt jwt) {
-        ApprovalEntitlement.Decider decider = ApprovalApiSupport.decider(jwt);
-        return approvalService.listPending().collectList()
-                .map(pending -> ApprovalApiSupport.views(pending, entitlement, decider));
+        return approvalService.listPendingFor(ApprovalApiSupport.decider(jwt));
     }
 
     @PostMapping("/{id}/approve")

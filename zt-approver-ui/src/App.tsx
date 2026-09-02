@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { useAuth } from 'react-oidc-context'
 import Box from '@mui/material/Box'
 import Button from '@mui/material/Button'
@@ -86,6 +86,37 @@ function ApprovalQueue({ accessToken, username, onSignOut }: QueueProps) {
   const [snackbar, setSnackbar] = useState<{ message: string; severity: 'success' | 'error' } | null>(null)
   const [decidingId, setDecidingId] = useState<string | null>(null)
   const [declineTarget, setDeclineTarget] = useState<PendingApproval | null>(null)
+  const forYou = approvals.filter((a) => a.addressedToYou && a.status === 'PENDING').length
+
+  // ADR-035. Two rules here are deliberate. Permission is never requested on load
+  // — an unprompted browser dialog is how people learn to click "Block" — so it is
+  // asked for behind a button. And what gets announced is what is addressed to
+  // THIS viewer, not everything they are technically allowed to decide: an alert
+  // for every held call is an alert nobody reads.
+  const [notifyEnabled, setNotifyEnabled] = useState(
+    typeof Notification !== 'undefined' && Notification.permission === 'granted',
+  )
+  const announcedRef = useRef<Set<string>>(new Set())
+
+  const enableNotifications = async () => {
+    if (typeof Notification === 'undefined') return
+    const result = await Notification.requestPermission()
+    setNotifyEnabled(result === 'granted')
+  }
+
+  const announce = useCallback((items: PendingApproval[]) => {
+    if (!notifyEnabled || typeof Notification === 'undefined') return
+    for (const a of items) {
+      if (!a.addressedToYou || a.status !== 'PENDING' || announcedRef.current.has(a.id)) continue
+      announcedRef.current.add(a.id)
+      new Notification('Approval needed', {
+        // Same discipline as the server-side webhook: name the agent and the tool,
+        // never the arguments — those are readable in the page, behind a login.
+        body: `${a.displayIdentity ?? a.agentId} is held on ${a.toolName}`,
+        tag: a.id,
+      })
+    }
+  }, [notifyEnabled])
 
   const fetchApprovals = useCallback(async () => {
     try {
@@ -95,12 +126,14 @@ function ApprovalQueue({ accessToken, username, onSignOut }: QueueProps) {
       if (!res.ok) {
         throw new Error(`GET /api/v1/approver/approvals -> ${res.status}`)
       }
-      setApprovals(await res.json())
+      const items: PendingApproval[] = await res.json()
+      setApprovals(items)
+      announce(items)
       setError(null)
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e))
     }
-  }, [accessToken])
+  }, [accessToken, announce])
 
   useEffect(() => {
     fetchApprovals().finally(() => setLoading(false))
@@ -150,10 +183,20 @@ function ApprovalQueue({ accessToken, username, onSignOut }: QueueProps) {
 
       <Box sx={{ p: 3, maxWidth: 720, mx: 'auto' }}>
         <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 3 }}>
-          <Typography variant="h5">Pending approvals ({approvals.length})</Typography>
-          <Button variant="outlined" size="small" onClick={fetchApprovals}>
-            Refresh
-          </Button>
+          <Stack direction="row" spacing={1.5} sx={{ alignItems: 'center' }}>
+            <Typography variant="h5">Pending approvals ({approvals.length})</Typography>
+            {forYou > 0 && <Chip color="warning" label={`${forYou} for you`} />}
+          </Stack>
+          <Stack direction="row" spacing={1}>
+            {typeof Notification !== 'undefined' && !notifyEnabled && (
+              <Button variant="text" size="small" onClick={enableNotifications}>
+                Notify me
+              </Button>
+            )}
+            <Button variant="outlined" size="small" onClick={fetchApprovals}>
+              Refresh
+            </Button>
+          </Stack>
         </Box>
 
         {loading ? (
@@ -210,6 +253,15 @@ function ApprovalQueue({ accessToken, username, onSignOut }: QueueProps) {
                       Routed to: <b>{approval.routeTo}</b>
                     </Typography>
                   )}
+                  <Typography variant="body2" color="text.secondary">
+                    Notified: {approval.notificationStatus === 'SENT'
+                      ? `${approval.addressedTo} at ${new Date(approval.notifiedAt!).toLocaleTimeString()}`
+                      : approval.notificationStatus === 'FAILED'
+                        ? `delivery to ${approval.addressedTo} failed`
+                        : approval.notificationStatus === 'SKIPPED'
+                          ? 'nobody — no channel configured, or the audience is empty'
+                          : 'no record'}
+                  </Typography>
                   {approval.reason && (
                     <Typography variant="body2" color="text.secondary">
                       Held because: {approval.reason}

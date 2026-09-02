@@ -5,14 +5,15 @@ import org.springframework.http.ResponseEntity;
 import org.springframework.security.oauth2.jwt.Jwt;
 import reactor.core.publisher.Mono;
 
-import java.time.Instant;
 import java.util.List;
 import java.util.Map;
 
 /**
  * The parts the Admin Console's approvals tab and the standalone Approval Center
- * (ADR-026) must do identically: read the decider out of a token, render the queue
- * for that decider, and turn a refusal into the right status code.
+ * (ADR-026) must do identically: read the decider out of a token, and turn a
+ * refusal into the right status code. Rendering the queue for that decider lives
+ * in {@code PendingApprovalService.listPendingFor}, which also needs the delivery
+ * rows (ADR-035).
  *
  * <p>Shared deliberately — two surfaces onto one queue that disagreed about who may
  * decide what would be a governance bug, not a UI inconsistency.
@@ -32,12 +33,6 @@ public final class ApprovalApiSupport {
         List<String> roles = realmAccess == null ? List.of()
                 : (List<String>) realmAccess.getOrDefault("roles", List.of());
         return ApprovalEntitlement.Decider.of(username != null ? username : jwt.getSubject(), roles);
-    }
-
-    public static List<ApprovalView> views(List<PendingApproval> approvals, ApprovalEntitlement entitlement,
-                                            ApprovalEntitlement.Decider decider) {
-        Instant now = Instant.now();
-        return approvals.stream().map(a -> ApprovalView.of(a, entitlement, decider, now)).toList();
     }
 
     /**
