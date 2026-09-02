@@ -53,6 +53,12 @@ on it.
 - **The conversation lives in the browser** and is lost on refresh — deliberate
   (no server-side store of a person's CRM conversation), but it means the trace
   panel outlives the chat it explains.
+- **Markdown renders, HTML does not.** The assistant's answers are markdown —
+  tables above all, since that is the shape of "four deals and their amounts" —
+  and are rendered as such. Raw HTML is deliberately not enabled: this text is
+  composed by a model out of CRM records, which this system treats as untrusted
+  data, and links open with `noopener` so a rendered one cannot reach back into
+  the page.
 - **Non-streaming**: the answer appears when it is complete. Streaming through a
   policy gate was judged the wrong first bet.
 - **The tool list is deliberately unfiltered**, so a model is shown tools this

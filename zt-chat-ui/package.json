@@ -16,7 +16,9 @@
     "oidc-client-ts": "^3.5.0",
     "react": "^19.2.8",
     "react-dom": "^19.2.8",
-    "react-oidc-context": "^3.3.1"
+    "react-markdown": "^10.1.0",
+    "react-oidc-context": "^3.3.1",
+    "remark-gfm": "^4.0.1"
   },
   "devDependencies": {
     "@types/node": "^24.13.3",

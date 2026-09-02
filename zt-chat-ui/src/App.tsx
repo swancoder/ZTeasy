@@ -11,6 +11,7 @@ import Stack from '@mui/material/Stack'
 import TextField from '@mui/material/TextField'
 import Typography from '@mui/material/Typography'
 import Alert from '@mui/material/Alert'
+import Markdown from './Markdown'
 import type { ChatReply, MyEvent, MySpend, Turn } from './types'
 
 // The trace polls; the conversation does not. A decision can arrive without the
@@ -186,7 +187,9 @@ function Console({ accessToken, username, onSignOut }: ConsoleProps) {
                   ) : turn.error ? (
                     <Alert severity="error" sx={{ py: 0 }}>{turn.error}</Alert>
                   ) : (
-                    <Typography variant="body1" sx={{ whiteSpace: 'pre-wrap' }}>{turn.content}</Typography>
+                    turn.role === 'assistant'
+                      ? <Markdown>{turn.content}</Markdown>
+                      : <Typography variant="body1" sx={{ whiteSpace: 'pre-wrap' }}>{turn.content}</Typography>
                   )}
                   {turn.steps && turn.steps.length > 0 && (
                     <Stack spacing={0.5} sx={{ mt: 1.5 }}>
