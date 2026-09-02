@@ -981,6 +981,11 @@ did this documents exactly what was investigated and found.
   telemetry's exact-name-match requirement.
 - Code-split `zt-admin-ui`'s bundle (`swagger-ui-react` roughly tripled it).
 
+**Chat console** (ADR-039): markdown from the model is rendered as plain text, so
+tables the assistant produces arrive as raw pipes — the CRM answers that read best
+as a table are exactly the ones that look worst. Needs a markdown renderer in
+`zt-chat-ui` (tables, lists, code, and links that open safely).
+
 **Approvals** (ADR-034 closed routing/entitlement/expiry; ADR-035 notification;
 ADR-036 reminders): still open — retry for a failed delivery, reaping `CLAIMED`
 rows left by an instance that died mid-send, escalation to a different audience,
