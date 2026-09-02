@@ -25,12 +25,21 @@ risk:
   euAiActClass: limited
   internalTier: 2
 
+# The field names below are the CRM's REAL property names, because that is what a
+# model sees in a result and will ask for next. They used to be prettier logical
+# names the portal does not have: a request in those names came back as nulls, and
+# a request in the real ones was refused by this list — "reads: deals" was true on
+# paper and false in every actual call.
+#
+# What is deliberately absent is the point of the profile: firstname, lastname and
+# email for a contact, hubspot_owner_id for a deal. A person asking the assistant
+# for "our contacts with their emails" is refused, and the refusal names the fields.
 scope:
   read:
     - resource: contacts
-      fields: [name, company, lifecycle_stage, last_activity, deal_ids]
+      fields: [company, lifecyclestage, createdate, hs_object_id]
     - resource: deals
-      fields: [name, stage, amount, close_date, risk_flag]
+      fields: [dealname, dealstage, amount, closedate, risk_flag]
     - resource: activities
       fields: []
   # A person may read the CRM through the assistant and may not change it that

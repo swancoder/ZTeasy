@@ -38,11 +38,14 @@ risk:
   internalTier: 2
 
 scope:
+  # Real CRM property names (see role-chat-user.yaml for why): a profile written in
+  # names the portal does not have denies every genuine call and permits only ones
+  # that return nulls.
   read:
     - resource: contacts
-      fields: [name, company, lifecycle_stage, last_activity, deal_ids]
+      fields: [company, lifecyclestage, createdate, hs_object_id]
     - resource: deals
-      fields: [name, stage, amount, close_date, risk_flag]
+      fields: [dealname, dealstage, amount, closedate, risk_flag]
     - resource: activities
       fields: []   # no field restriction on activities
   writeAllowed: false
