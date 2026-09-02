@@ -27,6 +27,8 @@ import java.util.List;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
@@ -84,6 +86,41 @@ class ServiceToServiceAuthorizationFilterTest {
 
         verify(chain).filter(any());
         verifyNoInteractions(policyDefinitionStore);
+    }
+
+    /**
+     * ADR-039. This filter judged a caller by comparing {@code azp} to ONE client id,
+     * so a browser console calling a routed path was treated as a service with no
+     * service-to-service rule — and denied, moments after the user filter had already
+     * allowed it on the person's roles. The chat console hit exactly that, twice,
+     * because the gateway had three separate answers to "who is a machine".
+     *
+     * <p>Every interactive console must pass through here untouched; deciding them is
+     * the user filter's job.
+     */
+    @Test
+    void everyInteractiveConsoleToken_passesThroughWithoutPolicyLookup() {
+        for (String console : new String[]{"zte-gateway", "zte-admin-ui", "zte-approver-ui", "zte-chat-ui"}) {
+            when(chain.filter(any())).thenReturn(Mono.empty());
+
+            StepVerifier.create(filter.filter(exchange(), chain)
+                            .contextWrite(ReactiveSecurityContextHolder.withAuthentication(jwtWithAzp(console))))
+                    .verifyComplete();
+        }
+        verify(chain, times(4)).filter(any());
+        verifyNoInteractions(policyDefinitionStore);
+    }
+
+    /** An agent is still this filter's business — the fix must not open the s2s path. */
+    @Test
+    void agentToken_isStillJudgedHere() {
+        withRules(new PolicyRule("s1", RuleEffect.ALLOW, "agent-a", "service-a", null, null, 0));
+
+        StepVerifier.create(filter.filter(exchange(), chain)
+                        .contextWrite(ReactiveSecurityContextHolder.withAuthentication(jwtWithAzp("agent-b"))))
+                .verifyComplete();
+
+        verify(chain, never()).filter(any());
     }
 
     @Test

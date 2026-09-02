@@ -245,7 +245,24 @@ the token came from — because two definitions of "who is a person" is one too 
 burying the decisions the panel exists to show. `/api/v1/me/` is now on the same
 audit-exclusion list `/api/v1/admin/` has been on since ADR-013.
 
+**4. And there was a third definition of "machine".** After fixing the two above,
+the console was still refused — but the log showed why in one line:
+
+```
+ZteAuthorizationFilter:              ZT-ALLOW (rule=u2s-chat-user-chat-api) roles=[ADMIN, CHAT_USER, APPROVER]
+ServiceToServiceAuthorizationFilter: SVC2SVC-DENY caller=zte-chat-ui target=chat
+```
+
+The user filter allowed it on the person's roles, and the service-to-service
+filter denied it moments later because it made the same single-client-id
+comparison independently. Three filters each answered "who is a machine" for
+themselves; fixing two of them left a system that allowed and denied the same
+request. All three now call `PolicyDefaultsProperties.isUserClient`, and a test
+pins that every interactive console passes through the s2s filter untouched while
+an agent still does not.
+
 The general lesson, and it is not a new one for this project: a check that uses a
 different credential, client or path than the real caller does is not a check of
 the real caller. It was a curl with the convenient client id, and it certified
-something that had never worked.
+something that had never worked — twice, because the first fix was verified the
+same way as the original.

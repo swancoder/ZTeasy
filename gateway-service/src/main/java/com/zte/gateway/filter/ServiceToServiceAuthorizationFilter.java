@@ -85,7 +85,13 @@ public class ServiceToServiceAuthorizationFilter implements GlobalFilter, Ordere
                     }
 
                     String callerService = jwtAuth.getToken().getClaimAsString("azp");
-                    if (callerService == null || callerService.equals(policyDefaults.getUserClientId())) {
+                    // ADR-039: the SAME definition of a person the rest of the gateway uses.
+                    // This compared against a single client id, so a browser console calling a
+                    // routed path was judged a service with no service-to-service rule — the
+                    // user filter above had already allowed it, and this one denied it anyway.
+                    // Three places once disagreed about who is a machine; they now share one
+                    // answer, because that is the kind of disagreement nobody reads a log to find.
+                    if (callerService == null || policyDefaults.isUserClient(callerService)) {
                         return chain.filter(exchange); // interactive user — not this filter's concern
                     }
 
