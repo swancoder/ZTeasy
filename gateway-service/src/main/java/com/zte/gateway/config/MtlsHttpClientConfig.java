@@ -47,7 +47,7 @@ public class MtlsHttpClientConfig {
     @Value("${zte.mtls.certs-dir:./certs}")
     private String certsDir;
 
-    @Value("${zte.mtls.key-password:zte-pass}")
+    @Value("${zte.mtls.key-password}")
     private String keyPassword;
 
     // Set by the @Bean method below; referenced by the @Scheduled method.

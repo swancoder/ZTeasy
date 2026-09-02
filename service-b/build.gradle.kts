@@ -3,6 +3,11 @@ plugins {
 }
 
 dependencies {
+    // ADR-037: secrets have no committed defaults any more, so a local run reads
+    // them from the gitignored .env in the repo root — the same mechanism ADR-008
+    // chose for zt-agents, and the same file docker compose substitutes from.
+    implementation(libs.spring.dotenv)
+
     // Internal library — provides UserContextTokenService, ReloadableSslContextFactory
     implementation(project(":auth-library"))
 

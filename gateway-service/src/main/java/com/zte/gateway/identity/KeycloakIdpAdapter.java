@@ -43,7 +43,7 @@ public class KeycloakIdpAdapter implements IdpClient {
                                @Value("${zte.idp.keycloak.base-uri:http://localhost:8180}") String baseUri,
                                @Value("${zte.idp.keycloak.realm:zte-realm}") String realm,
                                @Value("${zte.idp.keycloak.client-id:zte-gateway}") String clientId,
-                               @Value("${zte.idp.keycloak.client-secret:zte-gateway-secret}") String clientSecret) {
+                               @Value("${zte.idp.keycloak.client-secret}") String clientSecret) {
         this.client = builder.baseUrl(baseUri).build();
         this.realm = realm;
         this.clientId = clientId;

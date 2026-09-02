@@ -22,7 +22,7 @@ services:
     environment:
       POSTGRES_DB:       zte_db
       POSTGRES_USER:     zte_user
-      POSTGRES_PASSWORD: zte_pass
+      POSTGRES_PASSWORD: ${DB_PASSWORD?run scripts/generate-dev-secrets.sh}
     ports:
       - "5432:5432"
     volumes:
@@ -60,7 +60,11 @@ services:
     ports:
       - "8180:8080"    # expose on 8180 to avoid conflict with gateway (8080)
     volumes:
-      - ./keycloak:/opt/keycloak/data/import:ro
+      # The generated realm only (ADR-037): keycloak/realm-export.json is a template
+      # whose client secrets are placeholders, and importing it would create clients
+      # nothing can authenticate as. Run:
+      #   python3 deploy/azure/make-cloud-realm.py --local
+      - ./keycloak/local:/opt/keycloak/data/import:ro
     healthcheck:
       # No curl/wget in the quay.io Keycloak image (RHEL9-minimal base) — use bash's /dev/tcp instead.
       test: ["CMD-SHELL", "exec 3<>/dev/tcp/127.0.0.1/8080 && printf 'GET /health/ready HTTP/1.1\\r\\nHost: localhost\\r\\nConnection: close\\r\\n\\r\\n' >&3 && grep -q '\"status\": \"UP\"' <&3"]
@@ -80,7 +84,7 @@ services:
     restart: unless-stopped
     environment:
       ZTE_CERTS_DIR:    /app/certs
-      ZTE_OBO_SECRET:   ${ZTE_OBO_SECRET:-zte-obo-dev-secret-change-in-production}
+      ZTE_OBO_SECRET:   ${ZTE_OBO_SECRET?run scripts/generate-dev-secrets.sh}
       SERVICE_B_URI:    https://service-b:8082
     ports:
       - "8081:8081"   # HTTPS + mTLS (API)
@@ -107,7 +111,7 @@ services:
     restart: unless-stopped
     environment:
       ZTE_CERTS_DIR:  /app/certs
-      ZTE_OBO_SECRET: ${ZTE_OBO_SECRET:-zte-obo-dev-secret-change-in-production}
+      ZTE_OBO_SECRET: ${ZTE_OBO_SECRET?run scripts/generate-dev-secrets.sh}
     ports:
       - "8082:8082"   # HTTPS + mTLS (API)
       - "9082:9082"   # HTTP (management / health probe)
@@ -138,7 +142,7 @@ services:
 #      DB_PORT:              5432
 #      DB_NAME:              zte_db
 #      DB_USER:              zte_user
-#      DB_PASSWORD:          zte_pass
+#      DB_PASSWORD:          ${DB_PASSWORD}
 #      KEYCLOAK_ISSUER_URI:  http://keycloak:8080/realms/zte-realm
 #      KEYCLOAK_JWKS_URI:    http://keycloak:8080/realms/zte-realm/protocol/openid-connect/certs
 #    ports:

@@ -59,7 +59,7 @@ A helper script (`scripts/set-keycloak-password.sh`) sets the `zte-admin` passwo
 
 3. **Hashed credentials are brittle; kcadm.sh is reliable.** Keycloak 24 requires PBKDF2-SHA256 hashed credentials in import JSON. Pre-computing a correct hash without running Keycloak is error-prone. A silently wrong hash results in an unusable user with no error. Using `kcadm.sh` to set the password post-startup is explicit, verifiable, and idiomatic (it's Keycloak's own CLI tool).
 
-4. **Client secret in JSON is acceptable dev-only.** `zte-gateway-secret` is the client secret for the `zte-gateway` OIDC client. It is hardcoded in `realm-export.json` and mirrored in `application.yml` as a default. This is never acceptable in staging or production — production must inject via `KEYCLOAK_CLIENT_SECRET` environment variable from a secret manager.
+4. **Client secret in JSON is acceptable dev-only.** The `zte-gateway` OIDC client's secret was hardcoded in `realm-export.json` and mirrored in `application.yml` as a default. (**Reversed by ADR-037**: the tracked realm is now a template carrying placeholders, the defaults are gone, and the value that used to sit here has been rotated.) This is never acceptable in staging or production — production must inject via `KEYCLOAK_CLIENT_SECRET` environment variable from a secret manager.
 
 5. **Realm name `zte-realm` (not `zte`).** The explicit realm name avoids ambiguity with Keycloak's internal `master` realm and follows the `kebab-case` naming convention defined in CLAUDE.md. All URIs in `application.yml` and `docker-compose.yml` are updated to `realms/zte-realm`.
 
@@ -71,7 +71,7 @@ A helper script (`scripts/set-keycloak-password.sh`) sets the `zte-admin` passwo
 |---|---|---|
 | `--import-realm` skips existing realm on container restart | Medium | Documented. Reset with `docker compose down && docker compose up -d`. Dev-file H2 is container-local so this always produces clean state. |
 | User `zte-admin` has no password after import | Medium | `scripts/set-keycloak-password.sh` must be run once after first `docker compose up`. README/onboarding docs must highlight this step. |
-| `zte-gateway-secret` is hardcoded in git | High (prod) | Marked as dev-only. Production deployment must override via environment variable / secret manager. Scope limited to local dev branch. |
+| The gateway client secret is hardcoded in git (closed by ADR-037) | High (prod) | Marked as dev-only. Production deployment must override via environment variable / secret manager. Scope limited to local dev branch. |
 | No multi-env support in plain JSON | Low (now) | Acceptable for single dev environment. Keycloak Config CLI provides variable substitution when multi-env is needed. |
 | Terraform not adopted for Keycloak | Low (now) | Logged as future migration path. When Kubernetes + production Keycloak are adopted, Terraform module for Keycloak is the correct IaC approach. |
 

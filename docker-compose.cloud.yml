@@ -34,7 +34,7 @@ services:
     environment:
       POSTGRES_DB:       zte_db
       POSTGRES_USER:     zte_user
-      POSTGRES_PASSWORD: zte_pass
+      POSTGRES_PASSWORD: ${DB_PASSWORD?run scripts/generate-dev-secrets.sh}
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U zte_user -d zte_db"]
       interval: 10s
@@ -51,7 +51,7 @@ services:
     environment:
       KC_DB:                    dev-file
       KEYCLOAK_ADMIN:           admin
-      KEYCLOAK_ADMIN_PASSWORD:  ${KEYCLOAK_ADMIN_PASSWORD:-admin}
+      KEYCLOAK_ADMIN_PASSWORD:  ${KEYCLOAK_ADMIN_PASSWORD?run scripts/generate-dev-secrets.sh}
       KC_HTTP_PORT:             8080
       # Serve everything under /auth so the gateway proxies /auth/** verbatim
       # (ADR-027) — no path rewriting anywhere.
@@ -90,7 +90,7 @@ services:
       DB_PORT:                 5432
       DB_NAME:                 zte_db
       DB_USER:                 zte_user
-      DB_PASSWORD:             zte_pass
+      DB_PASSWORD:             ${DB_PASSWORD?run scripts/generate-dev-secrets.sh}
       # Issuer = the fixed external frontend URL Keycloak stamps into tokens;
       # JWKS fetched over the internal network (no dependency on the external
       # origin resolving from inside the perimeter).
@@ -112,7 +112,7 @@ services:
       # ACAP profiles from the mounted directory rather than the image
       # (ADR-032) — mirrors the cloud, where they live on the certs share.
       ZTE_ACAP_PROFILES_LOCATION: file:/app/acap-profiles/*.yaml
-      ZTE_OBO_SECRET:          ${ZTE_OBO_SECRET:-zte-obo-dev-secret-change-in-production}
+      ZTE_OBO_SECRET:          ${ZTE_OBO_SECRET?run scripts/generate-dev-secrets.sh}
     ports:
       - "8443:8080"   # the ONLY externally published port in this topology
     volumes:
@@ -128,7 +128,7 @@ services:
     restart: unless-stopped
     environment:
       ZTE_CERTS_DIR:  /app/certs
-      ZTE_OBO_SECRET: ${ZTE_OBO_SECRET:-zte-obo-dev-secret-change-in-production}
+      ZTE_OBO_SECRET: ${ZTE_OBO_SECRET?run scripts/generate-dev-secrets.sh}
       SERVICE_B_URI:  https://service-b:8082
     volumes:
       - ./certs:/app/certs:ro
@@ -149,7 +149,7 @@ services:
     restart: unless-stopped
     environment:
       ZTE_CERTS_DIR:  /app/certs
-      ZTE_OBO_SECRET: ${ZTE_OBO_SECRET:-zte-obo-dev-secret-change-in-production}
+      ZTE_OBO_SECRET: ${ZTE_OBO_SECRET?run scripts/generate-dev-secrets.sh}
     volumes:
       - ./certs:/app/certs:ro
     healthcheck:
@@ -201,11 +201,11 @@ services:
       GATEWAY_URL:         https://gateway:8080
       GATEWAY_CLIENT_CERT: /app/certs/client.pem
       AGENT_A_CLIENT_ID:   agent-a
-      AGENT_A_CLIENT_SECRET: ${AGENT_A_CLIENT_SECRET:-agent-a-secret-dev-only}
+      AGENT_A_CLIENT_SECRET: ${ZTE_SECRET_AGENT_A?run scripts/generate-dev-secrets.sh}
       AGENT_B_CLIENT_ID:   agent-b
-      AGENT_B_CLIENT_SECRET: ${AGENT_B_CLIENT_SECRET:-agent-b-secret-dev-only}
+      AGENT_B_CLIENT_SECRET: ${ZTE_SECRET_AGENT_B?run scripts/generate-dev-secrets.sh}
       AGENT_CRM_CLIENT_ID: crm-account-health-emea-01
-      AGENT_CRM_CLIENT_SECRET: ${AGENT_CRM_CLIENT_SECRET:-crm-account-health-emea-01-secret-dev-only}
+      AGENT_CRM_CLIENT_SECRET: ${ZTE_SECRET_CRM_ACCOUNT_HEALTH_EMEA_01?run scripts/generate-dev-secrets.sh}
     volumes:
       - ./certs:/app/certs:ro
     networks: [zte-cloud]

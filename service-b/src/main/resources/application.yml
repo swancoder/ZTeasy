@@ -1,3 +1,8 @@
+# ADR-037: no secret has a default here. A default committed to a public repo is a
+# published credential — this project shipped one to a live deployment and only
+# noticed months later. Locally these come from the gitignored .env written by
+# scripts/generate-dev-secrets.sh (read by spring-dotenv); everywhere else the
+# environment must supply them, and startup fails loudly if it does not.
 spring:
   application:
     name: service-b
@@ -12,12 +17,12 @@ server:
   ssl:
     enabled: true
     key-store: file:${ZTE_CERTS_DIR:./certs}/service-b.p12
-    key-store-password: ${ZTE_KEY_PASSWORD:zte-pass}
+    key-store-password: ${ZTE_KEY_PASSWORD}
     key-store-type: PKCS12
     # need = reject connections without a valid client cert
     client-auth: need
     trust-store: file:${ZTE_CERTS_DIR:./certs}/truststore.p12
-    trust-store-password: ${ZTE_KEY_PASSWORD:zte-pass}
+    trust-store-password: ${ZTE_KEY_PASSWORD}
     trust-store-type: PKCS12
 
 # ── Separate HTTP management port (no client cert required for health probes) ──
@@ -37,7 +42,7 @@ management:
 # ── OBO token validation — same secret as the gateway ──────────────────────
 zte:
   obo:
-    secret: ${ZTE_OBO_SECRET:zte-obo-dev-secret-change-in-production}
+    secret: ${ZTE_OBO_SECRET}
     expiry-seconds: ${ZTE_OBO_EXPIRY_SECONDS:30}
 
 logging:

@@ -63,6 +63,19 @@ abstract class BaseZteIntegrationTest {
     // ── Singleton containers (started exactly once per JVM) ──────────────────
 
     static final PostgreSQLContainer<?> POSTGRES;
+    /**
+     * Fixture credentials for the containers this class creates (ADR-037). They are
+     * not secrets: the Postgres and Keycloak instances they unlock are created at
+     * the start of the run and destroyed at the end of it. The realm the tests
+     * import is generated from the tracked template, which carries placeholders —
+     * so no file in this repository pairs a client id with a working secret.
+     */
+    static final String IT_DB_PASSWORD             = "it-fixture-postgres";
+    static final String IT_GATEWAY_CLIENT_SECRET   = "it-fixture-zte-gateway";
+    static final String IT_AGENT_A_SECRET          = "it-fixture-agent-a";
+    static final String IT_AGENT_B_SECRET          = "it-fixture-agent-b";
+    static final String IT_CRM_AGENT_SECRET        = "it-fixture-crm-account-health";
+
     static final KeycloakContainer      KEYCLOAK;
     static final WireMockServer         WIREMOCK;
 
@@ -78,7 +91,7 @@ abstract class BaseZteIntegrationTest {
         POSTGRES = new PostgreSQLContainer<>("postgres:16-alpine")
                 .withDatabaseName("zte_db")
                 .withUsername("zte_user")
-                .withPassword("zte_pass");
+                .withPassword(IT_DB_PASSWORD);
 
         KEYCLOAK = new KeycloakContainer("quay.io/keycloak/keycloak:24.0.4")
                 .withRealmImportFile("realm-export.json"); // on classpath from keycloak/ dir
@@ -266,7 +279,7 @@ abstract class BaseZteIntegrationTest {
                 .contentType(ContentType.URLENC)
                 .formParam("grant_type",    "password")
                 .formParam("client_id",     "zte-gateway")
-                .formParam("client_secret", "zte-gateway-secret")
+                .formParam("client_secret", IT_GATEWAY_CLIENT_SECRET)
                 .formParam("username",      username)
                 .formParam("password",      TEST_PASSWORD)
                 .post(KEYCLOAK.getAuthServerUrl() + "/realms/zte-realm/protocol/openid-connect/token")

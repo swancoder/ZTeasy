@@ -213,6 +213,7 @@ zte-lightweight/
 | [ADR-034](docs/adr/ADR-034-approval-routing-and-expiry.md) | Approval Routing, Entitlement and Expiry (extends ADR-019) | Accepted |
 | [ADR-035](docs/adr/ADR-035-approval-notifications.md) | Approval Notifications — Addressing, Channels and Delivery Evidence | Accepted |
 | [ADR-036](docs/adr/ADR-036-approval-reminders.md) | Reminding Before the Deadline (claim-then-send across instances) | Accepted |
+| [ADR-037](docs/adr/ADR-037-no-secrets-in-the-repository.md) | No Secrets in the Repository (reverses ADR-030's dev-value exception) | Accepted |
 
 ---
 
@@ -382,13 +383,13 @@ and call the MCP proxy:
 
 ```bash
 TOKEN=$(curl -s -X POST http://localhost:8180/realms/zte-realm/protocol/openid-connect/token \
-  -d "grant_type=client_credentials&client_id=agent-a&client_secret=agent-a-secret-dev-only" \
+  -d "grant_type=client_credentials&client_id=agent-a&client_secret=$ZTE_SECRET_AGENT_A" \
   | python3 -c "import sys,json; print(json.load(sys.stdin)['access_token'])")
 
 # As of ADR-018, /sse is a protected path: a JWT alone is no longer enough, a client
 # certificate signed by the ZTE-CA is also required (server.ssl.client-auth: want +
 # MtlsEnforcementWebFilter) — -k accepts the dev self-signed CA on the gateway's own cert.
-curl -sk --cert certs/client.p12:zte-pass --cert-type P12 \
+curl -sk --cert certs/client.p12:$ZTE_KEY_PASSWORD --cert-type P12 \
   -N -H "Authorization: Bearer $TOKEN" https://localhost:8080/sse
 # → data: /message?sessionId=<id>  (open a second terminal to POST while this stays open)
 ```
@@ -940,25 +941,37 @@ curl -X POST https://demo.zteasy.tech/api/v1/admin/policies/reload -H "Authoriza
 #    (Node/npm build the Admin Console — see "Building without Node/npm installed" above
 #    if you want to skip it)
 
-# 2. Generate development certificates
-chmod +x certs/generate-certs.sh && ./certs/generate-certs.sh
+# 2. Generate local secrets into a gitignored .env (ADR-037 — the repository
+#    carries no values, not even "dev-only" ones, because a committed default
+#    is inherited by whatever forgets to override it, and this project shipped
+#    one to a live deployment). Idempotent: re-running tops the file up.
+./scripts/generate-dev-secrets.sh
 
-# 3. Start infrastructure (PostgreSQL + Keycloak)
+# 3. Generate development certificates (keystore password comes from .env)
+chmod +x certs/generate-certs.sh && set -a && . ./.env && set +a && ./certs/generate-certs.sh
+
+# 4. Generate the Keycloak realm — keycloak/realm-export.json is a template whose
+#    client secrets are placeholders; this substitutes the ones from .env into
+#    keycloak/local/realm.json, which is what compose imports.
+python3 deploy/azure/make-cloud-realm.py --local
+
+# 5. Start infrastructure (PostgreSQL + Keycloak). Compose reads the same .env,
+#    so a missing value stops it here with the variable's name rather than
+#    starting something with a published password.
 docker compose up -d
 
-# 4. Set Keycloak passwords (first time only). Defaults are localhost-only
-#    development values; override with ZTE_LOCAL_ADMIN_PASSWORD /
-#    ZTE_LOCAL_USER_PASSWORD, or pass them as arguments.
+# 6. Set Keycloak user passwords (first time only) — values come from .env
 ./scripts/set-keycloak-password.sh
 
-# 5. Start services (each in a separate terminal)
+# 7. Start services (each in a separate terminal). They read .env through
+#    spring-dotenv; without it they fail at startup naming the missing property.
 ./gradlew :gateway-service:bootRun
 ./gradlew :service-a:bootRun
 ./gradlew :service-b:bootRun
 
-# 6. Get an ADMIN token
+# 8. Get an ADMIN token
 TOKEN=$(curl -s -X POST http://localhost:8180/realms/zte-realm/protocol/openid-connect/token \
-  -d "grant_type=password&client_id=zte-gateway&client_secret=zte-gateway-secret" \
+  -d "grant_type=password&client_id=zte-gateway&client_secret=$ZTE_SECRET_ZTE_GATEWAY" \
   -d "username=zte-admin&password=$ZTE_LOCAL_ADMIN_PASSWORD" | python3 -c "import sys,json; print(json.load(sys.stdin)['access_token'])")
 
 # 7. Call the full chain: User → Gateway → Service A → Service B
@@ -966,7 +979,7 @@ TOKEN=$(curl -s -X POST http://localhost:8180/realms/zte-realm/protocol/openid-c
 # addition to the JWT — server.ssl.client-auth: want + MtlsEnforcementWebFilter. This
 # applies uniformly to this general REST-proxy surface, not just agent/MCP traffic, so
 # even this interactive-user demo call needs --cert now. -k accepts the dev self-signed CA.
-curl -sk --cert certs/client.p12:zte-pass --cert-type P12 \
+curl -sk --cert certs/client.p12:$ZTE_KEY_PASSWORD --cert-type P12 \
   -H "Authorization: Bearer $TOKEN" https://localhost:8080/api/v1/service-a/hello | python3 -m json.tool
 ```
 

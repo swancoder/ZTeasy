@@ -64,10 +64,43 @@ sourceSets {
     create("it") {
         compileClasspath += sourceSets.main.get().output + sourceSets.test.get().output
         runtimeClasspath += sourceSets.main.get().output + sourceSets.test.get().output
-        // Make keycloak/realm-export.json available as a classpath resource
-        resources.srcDir(rootDir.resolve("keycloak"))
+        // The realm the integration tests import is GENERATED from the tracked
+        // template (ADR-037), not the template itself: since the template carries
+        // placeholders instead of client secrets, importing it would create clients
+        // no test could authenticate as. The substituted values below exist only
+        // inside a Testcontainer that lives for the length of the run.
+        resources.srcDir(layout.buildDirectory.dir("it-realm"))
     }
 }
+
+// Fixture values, not credentials: they authenticate to a Keycloak container that
+// is created and destroyed by the test run. Kept out of the tracked realm anyway,
+// so that no file in this repository pairs a client id with a working secret.
+val itRealmSecrets = mapOf(
+    "__ZTE_SECRET_ZTE_GATEWAY__"                 to "it-fixture-zte-gateway",
+    "__ZTE_SECRET_AGENT_A__"                     to "it-fixture-agent-a",
+    "__ZTE_SECRET_AGENT_B__"                     to "it-fixture-agent-b",
+    "__ZTE_SECRET_SERVICE_A__"                   to "it-fixture-service-a",
+    "__ZTE_SECRET_CRM_ACCOUNT_HEALTH_EMEA_01__"  to "it-fixture-crm-account-health",
+)
+
+val generateItRealm by tasks.registering {
+    description = "Substitutes fixture secrets into the realm template for integrationTest (ADR-037)"
+    val template = rootDir.resolve("keycloak/realm-export.json")
+    val outDir = layout.buildDirectory.dir("it-realm")
+    inputs.file(template)
+    outputs.dir(outDir)
+    doLast {
+        val target = outDir.get().file("realm-export.json").asFile
+        target.parentFile.mkdirs()
+        var text = template.readText()
+        itRealmSecrets.forEach { (placeholder, value) -> text = text.replace(placeholder, value) }
+        check(!text.contains("__ZTE_SECRET_")) { "realm template has a placeholder with no fixture value" }
+        target.writeText(text)
+    }
+}
+
+tasks.named("processItResources") { dependsOn(generateItRealm) }
 
 val itImplementation: Configuration by configurations.getting {
     extendsFrom(configurations.testImplementation.get())
@@ -78,6 +111,11 @@ val itRuntimeOnly: Configuration by configurations.getting {
 }
 
 dependencies {
+    // ADR-037: secrets have no committed defaults any more, so a local run reads
+    // them from the gitignored .env in the repo root — the same mechanism ADR-008
+    // chose for zt-agents, and the same file docker compose substitutes from.
+    implementation(libs.spring.dotenv)
+
     // Internal library
     implementation(project(":auth-library"))
 

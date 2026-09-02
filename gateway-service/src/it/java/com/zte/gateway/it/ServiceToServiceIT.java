@@ -32,7 +32,7 @@ import static org.awaitility.Awaitility.await;
 @DisplayName("Service-to-service policy enforcement (ADR-017)")
 class ServiceToServiceIT extends BaseZteIntegrationTest {
 
-    private static final String SERVICE_A_CLIENT_SECRET = "service-a-s2s-secret-dev-only";
+    private static final String SERVICE_A_CLIENT_SECRET = "it-fixture-service-a";   // fixture, see BaseZteIntegrationTest
 
     @Test
     @DisplayName("service-a (client credentials) calling service-b's allowed /context endpoint succeeds and logs the OBO user")

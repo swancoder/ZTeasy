@@ -13,6 +13,17 @@ server:
 zte:
   mtls:
     enabled: false      # skips MtlsHttpClientConfig — no client.p12 needed in tests
+    key-password: it-fixture-unused   # nothing loads a keystore under this profile
+
+  # ADR-037: the application no longer carries secret defaults, so the profile that
+  # runs without an environment has to state its own. These are fixtures, matching
+  # the values substituted into the generated IT realm — they authenticate to
+  # containers that exist only for the duration of the run, and to nothing else.
+  obo:
+    secret: it-fixture-obo-signing-key
+  idp:
+    keycloak:
+      client-secret: it-fixture-zte-gateway
 
 # R2DBC pool: keep minimal for tests
 spring:

@@ -65,6 +65,16 @@ CLIENT_SECRET_VARS = {
 
 
 def main() -> None:
+    # --local: the same substitution for a developer machine (ADR-037). The tracked
+    # realm is a template carrying placeholders instead of client secrets, so SOME
+    # generator has to run before Keycloak can start — cloud and localhost may as
+    # well use the one that is already tested, rather than two that can drift.
+    if "--local" in sys.argv:
+        argv = [a for a in sys.argv if a != "--local"]
+        origin = argv[1] if len(argv) > 1 else "http://localhost:8080"
+        out = os.path.join(os.path.dirname(__file__), "..", "..", "keycloak", "local", "realm.json")
+        generate([origin.rstrip("/")], os.path.abspath(out))
+        return
     if len(sys.argv) < 2:
         sys.exit(__doc__)
     # Several origins may be given, comma-separated: the deployment serves the
@@ -74,7 +84,10 @@ def main() -> None:
     origins = [o.rstrip("/") for o in sys.argv[1].split(",") if o.strip()]
     out_path = sys.argv[2] if len(sys.argv) > 2 else os.path.join(
         os.path.dirname(__file__), "out", "realm-cloud.json")
+    generate(origins, out_path)
 
+
+def generate(origins: "list[str]", out_path: str) -> None:
     base_path = os.path.join(os.path.dirname(__file__), "..", "..", "keycloak", "realm-export.json")
     with open(base_path) as f:
         realm = json.load(f)

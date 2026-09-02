@@ -94,3 +94,7 @@ prompts-hist/
 # passwords, app YAMLs embedding the GHCR PAT) — never commit, even if the
 # generic out/ rule above is ever removed.
 deploy/azure/out/
+
+# Generated realm with real client secrets substituted in (ADR-037) — the tracked
+# keycloak/realm-export.json is the template and carries placeholders only.
+keycloak/local/

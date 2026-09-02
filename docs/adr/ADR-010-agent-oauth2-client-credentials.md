@@ -34,8 +34,8 @@ identity configuration for no benefit:
 
 | Client | Flows | Secret (dev-only) |
 |---|---|---|
-| `agent-a` | Client Credentials only (`serviceAccountsEnabled: true`, `standardFlowEnabled: false`, `directAccessGrantsEnabled: false`) | `agent-a-secret-dev-only` |
-| `agent-b` | same | `agent-b-secret-dev-only` |
+| `agent-a` | Client Credentials only (`serviceAccountsEnabled: true`, `standardFlowEnabled: false`, `directAccessGrantsEnabled: false`) | generated locally (ADR-037) |
+| `agent-b` | same | generated locally (ADR-037) |
 
 A Keycloak service-account token's `azp` (authorized party) claim is set to
 the client_id automatically — no protocol mapper needed, and it's the same
@@ -126,9 +126,9 @@ to `process`, not a rewire, once that's ready to test end-to-end.
   differentiation, "backend called once") no longer hold, since every
   authenticated call now gets the same stub outcome. Updated in place rather
   than left contradicting the new, intentional behavior.
-- **Dev-only client secrets** (`agent-a-secret-dev-only`, `agent-b-secret-dev-only`)
+- **Dev-only client secrets**, at the time committed to the repo (**removed by ADR-037**)
   hardcoded in `realm-export.json` — same accepted-for-MVP risk ADR-002
-  already flagged for `zte-gateway-secret`; must be env/secret-manager-injected
+  already flagged for the gateway client; must be env/secret-manager-injected
   before staging.
 - **No real authorization yet**: any client with a valid token from this
   realm gets the same stub, regardless of which client it is — `DummyMcpPolicyEngine`
@@ -149,5 +149,5 @@ to `process`, not a rewire, once that's ready to test end-to-end.
   distinguishable identities to authorize against.
 - Add an HTTP (or HTTP+SSE) transport to `hubspot_server.py`, or another
   bridging mechanism, before `McpBackendClient` can forward anywhere real.
-- Move `agent-a-secret-dev-only`/`agent-b-secret-dev-only` to environment
+- Move the agent client secrets to environment
   injection before any non-local environment.

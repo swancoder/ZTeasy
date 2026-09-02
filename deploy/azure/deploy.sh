@@ -48,7 +48,7 @@ STORAGE="${STORAGE:-zteasycerts$RANDOM}"
 REGISTRY="ghcr.io"
 IMG="${IMG:-ghcr.io/${GHCR_USER:?set GHCR_USER}}"
 TAG="${TAG:-azure-1}"
-OBO_SECRET="${ZTE_OBO_SECRET:-zte-obo-dev-secret-change-in-production}"
+OBO_SECRET="${ZTE_OBO_SECRET:?source deploy/azure/out/cloud-credentials.env}"
 # Shared secret for /api/v1/internal/** (ADR-027 amendment): with a public
 # ingress those endpoints would otherwise serve the policy document — and
 # accept reload — to anyone. Random per deployment unless pinned.
@@ -139,7 +139,8 @@ $AZ containerapp create -n postgres -g "$RG" --environment "$ENV_NAME" \
     --image postgres:16-alpine --ingress internal --transport tcp \
     --target-port 5432 --exposed-port 5432 --min-replicas 1 --max-replicas 1 \
     --cpu 0.5 --memory 1Gi \
-    --env-vars POSTGRES_DB=zte_db POSTGRES_USER=zte_user POSTGRES_PASSWORD=zte_pass -o none
+    --secrets "db-password=${DB_PASSWORD:?source deploy/azure/out/cloud-credentials.env}" \
+    --env-vars POSTGRES_DB=zte_db POSTGRES_USER=zte_user POSTGRES_PASSWORD=secretref:db-password -o none
 
 echo "── keycloak (phase-1: placeholder origin ok, updated in phase 2) ──"
 # The phase-1 keycloak image must exist in the registry BEFORE the app
@@ -191,7 +192,7 @@ fi
 
 echo "── gateway (phase-1 create → learn FQDN) ──"
 bash deploy/azure/create-app-with-certs.sh gateway "$IMG/zteasy-gateway:$TAG" 8080 \
-    "DB_HOST=postgres DB_PORT=5432 DB_NAME=zte_db DB_USER=zte_user DB_PASSWORD=zte_pass \
+    "DB_HOST=postgres DB_PORT=5432 DB_NAME=zte_db DB_USER=zte_user DB_PASSWORD=secretref:db-password \
      KEYCLOAK_JWKS_URI=http://keycloak:8080/auth/realms/zte-realm/protocol/openid-connect/certs \
      ZTE_AUTH_PROXY_ENABLED=true ZTE_AUTH_PROXY_URI=http://keycloak:8080 \
      ZTE_IDP_KEYCLOAK_BASE_URI=http://keycloak:8080/auth \
@@ -241,10 +242,10 @@ $AZ containerapp job create -n agent-runner -g "$RG" --environment "$ENV_NAME" \
     --env-vars "KEYCLOAK_TOKEN_URL=http://keycloak:8080/auth/realms/zte-realm/protocol/openid-connect/token" \
       "GATEWAY_URL=https://gateway:8080" \
       GATEWAY_CLIENT_CERT=/app/certs/client.pem \
-      AGENT_A_CLIENT_ID=agent-a AGENT_A_CLIENT_SECRET=agent-a-secret-dev-only \
-      AGENT_B_CLIENT_ID=agent-b AGENT_B_CLIENT_SECRET=agent-b-secret-dev-only \
+      AGENT_A_CLIENT_ID=agent-a "AGENT_A_CLIENT_SECRET=${ZTE_SECRET_AGENT_A:?source cloud-credentials.env}" \
+      AGENT_B_CLIENT_ID=agent-b "AGENT_B_CLIENT_SECRET=${ZTE_SECRET_AGENT_B:?source cloud-credentials.env}" \
       AGENT_CRM_CLIENT_ID=crm-account-health-emea-01 \
-      AGENT_CRM_CLIENT_SECRET=crm-account-health-emea-01-secret-dev-only \
+      "AGENT_CRM_CLIENT_SECRET=${ZTE_SECRET_CRM_ACCOUNT_HEALTH_EMEA_01:?source cloud-credentials.env}" \
     -o none 2>/dev/null || echo "(job exists — leaving as is)"
 # attach the certs volume to the job (client.pem) — YAML-only operation
 bash deploy/azure/attach-certs-to-job.sh agent-runner
@@ -258,7 +259,7 @@ echo "── register the MCP bridge in the APIM inventory ──"
 for attempt in $(seq 1 10); do
   ADMIN_TOKEN=$(curl -sk -m 30 -X POST \
       "$ORIGIN/auth/realms/zte-realm/protocol/openid-connect/token" \
-      -d "grant_type=password&client_id=zte-gateway&client_secret=zte-gateway-secret" \
+      -d "grant_type=password&client_id=zte-gateway&client_secret=${ZTE_SECRET_ZTE_GATEWAY:?source cloud-credentials.env}" \
       -d "username=zte-admin&password=${ZTE_PW_ZTE_ADMIN:?source deploy/azure/out/cloud-credentials.env}" \
       | python3 -c "import sys,json; print(json.load(sys.stdin).get('access_token',''))" 2>/dev/null || true)
   [ -n "$ADMIN_TOKEN" ] && break

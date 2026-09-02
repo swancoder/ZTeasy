@@ -23,7 +23,8 @@ NAME=db-backup
 $AZ containerapp job create -n "$NAME" -g "$RG" --environment "$ENV_NAME" \
     --trigger-type Manual --replica-timeout 300 --replica-retry-limit 0 \
     --image postgres:16-alpine --cpu 0.25 --memory 0.5Gi \
-    --env-vars PGPASSWORD=zte_pass \
+    --secrets "db-password=${DB_PASSWORD:?source deploy/azure/out/cloud-credentials.env}" \
+    --env-vars PGPASSWORD=secretref:db-password \
     -o none 2>/dev/null || echo "(job exists — updating)"
 
 SUB_ID=$($AZ account show --query id -o tsv)

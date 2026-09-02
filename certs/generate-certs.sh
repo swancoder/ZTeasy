@@ -35,7 +35,7 @@
 set -euo pipefail
 
 DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-PASS="${ZTE_KEY_PASSWORD:-zte-pass}"
+PASS="${ZTE_KEY_PASSWORD:?set ZTE_KEY_PASSWORD — run scripts/generate-dev-secrets.sh, or source deploy/azure/out/cloud-credentials.env}"
 DAYS_CA=3650   # 10 years — root CA, rotate with full PKI overhaul
 DAYS_SVC=365   # 1 year — service certs; automate rotation via CI/CD
 SUBJ_BASE="/C=IL/ST=Dev/L=Dev/O=ZTE-Lightweight"
@@ -46,7 +46,7 @@ info()  { echo -e "${GREEN}[INFO]${NC}  $*"; }
 warn()  { echo -e "${YELLOW}[WARN]${NC}  $*"; }
 
 info "Generating ZTE development certificates in: $DIR"
-info "Key password: $PASS (override with ZTE_KEY_PASSWORD env var)"
+info "Key password: taken from ZTE_KEY_PASSWORD (not printed — ADR-037)"
 cd "$DIR"
 
 # ── Verify tooling ──────────────────────────────────────────────────────────

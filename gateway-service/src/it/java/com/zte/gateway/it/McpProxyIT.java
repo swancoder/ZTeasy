@@ -63,7 +63,7 @@ class McpProxyIT extends BaseZteIntegrationTest {
                                  "error":null}
                                 """)));
 
-        String token = getAgentToken("agent-a", "agent-a-secret-dev-only");
+        String token = getAgentToken("agent-a", IT_AGENT_A_SECRET);
         AtomicReference<String> sessionId = new AtomicReference<>();
 
         StepVerifier.create(openSseStream(token))
@@ -89,7 +89,7 @@ class McpProxyIT extends BaseZteIntegrationTest {
     @Test
     @DisplayName("Agent A calling a tool it has no grant for: denial injected into SSE, backend never called")
     void agentA_toolWithNoGrant_isDenied_backendNeverCalled() {
-        String token = getAgentToken("agent-a", "agent-a-secret-dev-only");
+        String token = getAgentToken("agent-a", IT_AGENT_A_SECRET);
         AtomicReference<String> sessionId = new AtomicReference<>();
 
         StepVerifier.create(openSseStream(token))
@@ -109,7 +109,7 @@ class McpProxyIT extends BaseZteIntegrationTest {
     @Test
     @DisplayName("Agent B calling a destructive-shaped tool: denied by the deny-list rule, backend never called")
     void agentB_destructiveTool_isDenied_backendNeverCalled() {
-        String token = getAgentToken("agent-b", "agent-b-secret-dev-only");
+        String token = getAgentToken("agent-b", IT_AGENT_B_SECRET);
         AtomicReference<String> sessionId = new AtomicReference<>();
 
         StepVerifier.create(openSseStream(token))
@@ -146,7 +146,7 @@ class McpProxyIT extends BaseZteIntegrationTest {
                                  "error":null}
                                 """)));
 
-        String token = getAgentToken("crm-account-health-emea-01", "crm-account-health-emea-01-secret-dev-only");
+        String token = getAgentToken("crm-account-health-emea-01", IT_CRM_AGENT_SECRET);
         AtomicReference<String> sessionId = new AtomicReference<>();
         AtomicReference<String> approvalId = new AtomicReference<>();
 
@@ -199,7 +199,7 @@ class McpProxyIT extends BaseZteIntegrationTest {
                                 {"jsonrpc":"2.0","id":10,"result":{"content":[{"type":"text","text":"3 contacts"}]},"error":null}
                                 """)));
 
-        String token = getAgentToken("crm-account-health-emea-01", "crm-account-health-emea-01-secret-dev-only");
+        String token = getAgentToken("crm-account-health-emea-01", IT_CRM_AGENT_SECRET);
         AtomicReference<String> sessionId = new AtomicReference<>();
 
         StepVerifier.create(openSseStream(token))
@@ -219,7 +219,7 @@ class McpProxyIT extends BaseZteIntegrationTest {
     @Test
     @DisplayName("ACAP 🔴: read_contacts(NA) — same tool, wrong territory, denied by the ACAP profile, backend never called")
     void acapAgent_readContacts_wrongTerritory_isDenied_backendNeverCalled() {
-        String token = getAgentToken("crm-account-health-emea-01", "crm-account-health-emea-01-secret-dev-only");
+        String token = getAgentToken("crm-account-health-emea-01", IT_CRM_AGENT_SECRET);
         AtomicReference<String> sessionId = new AtomicReference<>();
 
         StepVerifier.create(openSseStream(token))
@@ -239,7 +239,7 @@ class McpProxyIT extends BaseZteIntegrationTest {
     @Test
     @DisplayName("ACAP 🔴: read_contacts(EMEA, fields=[id_number]) — same tool, disallowed field, denied (data minimization)")
     void acapAgent_readContacts_disallowedField_isDenied_backendNeverCalled() {
-        String token = getAgentToken("crm-account-health-emea-01", "crm-account-health-emea-01-secret-dev-only");
+        String token = getAgentToken("crm-account-health-emea-01", IT_CRM_AGENT_SECRET);
         AtomicReference<String> sessionId = new AtomicReference<>();
 
         StepVerifier.create(openSseStream(token))
@@ -260,7 +260,7 @@ class McpProxyIT extends BaseZteIntegrationTest {
     @Test
     @DisplayName("ACAP 🔴: update_deal — granted coarsely, denied by the read-only ACAP profile, backend never called")
     void acapAgent_updateDeal_isDenied_byReadOnlyProfile_backendNeverCalled() {
-        String token = getAgentToken("crm-account-health-emea-01", "crm-account-health-emea-01-secret-dev-only");
+        String token = getAgentToken("crm-account-health-emea-01", IT_CRM_AGENT_SECRET);
         AtomicReference<String> sessionId = new AtomicReference<>();
 
         StepVerifier.create(openSseStream(token))
@@ -300,7 +300,7 @@ class McpProxyIT extends BaseZteIntegrationTest {
     @Test
     @DisplayName("POST /message with an unknown sessionId → 400, nothing to inject into")
     void unknownSessionId_returns400() {
-        String token = getAgentToken("agent-a", "agent-a-secret-dev-only");
+        String token = getAgentToken("agent-a", IT_AGENT_A_SECRET);
 
         given()
             .baseUri("http://localhost:" + gatewayPort)

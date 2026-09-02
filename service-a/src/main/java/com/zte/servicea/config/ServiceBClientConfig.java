@@ -29,7 +29,7 @@ public class ServiceBClientConfig {
     @Bean
     public ReloadableSslContextFactory serviceBSslContextFactory(
             @Value("${zte.mtls.certs-dir:./certs}") String certsDir,
-            @Value("${zte.mtls.key-password:zte-pass}") String keyPassword) {
+            @Value("${zte.mtls.key-password}") String keyPassword) {
         return new ReloadableSslContextFactory(
                 certsDir + "/client.p12",
                 certsDir + "/truststore.p12",

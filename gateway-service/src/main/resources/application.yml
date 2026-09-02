@@ -1,3 +1,8 @@
+# ADR-037: no secret has a default here. A default committed to a public repo is a
+# published credential — this project shipped one to a live deployment and only
+# noticed months later. Locally these come from the gitignored .env written by
+# scripts/generate-dev-secrets.sh (read by spring-dotenv); everywhere else the
+# environment must supply them, and startup fails loudly if it does not.
 spring:
   application:
     name: gateway-service
@@ -6,7 +11,7 @@ spring:
   datasource:
     url: jdbc:postgresql://${DB_HOST:localhost}:${DB_PORT:5432}/${DB_NAME:zte_db}
     username: ${DB_USER:zte_user}
-    password: ${DB_PASSWORD:zte_pass}
+    password: ${DB_PASSWORD}
     driver-class-name: org.postgresql.Driver
     hikari:
       pool-name: flyway-pool
@@ -20,7 +25,7 @@ spring:
     enabled: true
     url: jdbc:postgresql://${DB_HOST:localhost}:${DB_PORT:5432}/${DB_NAME:zte_db}
     user: ${DB_USER:zte_user}
-    password: ${DB_PASSWORD:zte_pass}
+    password: ${DB_PASSWORD}
     locations: classpath:db/migration
     baseline-on-migrate: true
     validate-on-migrate: true
@@ -29,7 +34,7 @@ spring:
   r2dbc:
     url: r2dbc:postgresql://${DB_HOST:localhost}:${DB_PORT:5432}/${DB_NAME:zte_db}
     username: ${DB_USER:zte_user}
-    password: ${DB_PASSWORD:zte_pass}
+    password: ${DB_PASSWORD}
     pool:
       initial-size: 2
       max-size: 5
@@ -82,7 +87,7 @@ server:
   ssl:
     enabled: true
     key-store: file:${ZTE_CERTS_DIR:./certs}/gateway.p12
-    key-store-password: ${ZTE_KEY_PASSWORD:zte-pass}
+    key-store-password: ${ZTE_KEY_PASSWORD}
     key-store-type: PKCS12
     # ADR-018: "want", not "need" — the TLS handshake succeeds with or without a
     # client cert, so the Admin UI/Admin API/actuator stay cert-free over the same
@@ -90,7 +95,7 @@ server:
     # layer, by MtlsEnforcementWebFilter — not here.
     client-auth: want
     trust-store: file:${ZTE_CERTS_DIR:./certs}/truststore.p12
-    trust-store-password: ${ZTE_KEY_PASSWORD:zte-pass}
+    trust-store-password: ${ZTE_KEY_PASSWORD}
     trust-store-type: PKCS12
 
 # ── Downstream services — bootstrap seed values only (ADR-017): routing itself
@@ -124,12 +129,12 @@ zt-agents:
 zte:
   mtls:
     certs-dir: ${ZTE_CERTS_DIR:./certs}
-    key-password: ${ZTE_KEY_PASSWORD:zte-pass}
+    key-password: ${ZTE_KEY_PASSWORD}
     refresh-interval-ms: 300000   # check keystore file every 5 min; hot-swap if changed
 
   # ── On-behalf-of token (X-ZTE-User-Context) ──
   obo:
-    secret: ${ZTE_OBO_SECRET:zte-obo-dev-secret-change-in-production}
+    secret: ${ZTE_OBO_SECRET}
     expiry-seconds: ${ZTE_OBO_EXPIRY_SECONDS:30}
 
   # ── YAML policy definitions (Stage 10 / ADR-011) ──
@@ -220,7 +225,7 @@ zte:
       base-uri: ${ZTE_IDP_KEYCLOAK_BASE_URI:http://localhost:8180}
       realm: ${ZTE_IDP_KEYCLOAK_REALM:zte-realm}
       client-id: ${ZTE_IDP_KEYCLOAK_CLIENT_ID:zte-gateway}
-      client-secret: ${ZTE_IDP_KEYCLOAK_CLIENT_SECRET:zte-gateway-secret}
+      client-secret: ${ZTE_IDP_KEYCLOAK_CLIENT_SECRET}
 
   # ── APIM inventory registry (Stage 16 / ADR-016) ──
   inventory:
