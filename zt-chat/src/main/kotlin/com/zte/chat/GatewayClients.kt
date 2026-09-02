@@ -46,10 +46,41 @@ class GatewayClients(
             .build()
     }
 
+    /**
+     * Trusts the public CAs *and* ours (ADR-040).
+     *
+     * <p>The gateway used to be reached at `https://gateway:8080` with a certificate
+     * from our own dev CA — so trusting that CA alone was enough. Now there is one
+     * front door on a real domain, and its certificate comes from a public issuer via
+     * Azure. Our CA is still needed for the rest of the perimeter, so the trust store
+     * is the JDK's defaults plus ours rather than one or the other.
+     */
     private fun sslContext() = SslContextBuilder.forClient()
         .keyManager(keyManagerFactory())
-        .trustManager(File("$certsDir/ca.crt"))
+        .trustManager(trustManagerFactory())
         .build()
+
+    private fun trustManagerFactory(): javax.net.ssl.TrustManagerFactory {
+        val store = KeyStore.getInstance(KeyStore.getDefaultType()).apply { load(null, null) }
+
+        // The JDK's own trust anchors, so a publicly-issued certificate validates.
+        val defaults = javax.net.ssl.TrustManagerFactory
+            .getInstance(javax.net.ssl.TrustManagerFactory.getDefaultAlgorithm())
+            .apply { init(null as KeyStore?) }
+        defaults.trustManagers.filterIsInstance<javax.net.ssl.X509TrustManager>()
+            .flatMap { it.acceptedIssuers.asList() }
+            .forEachIndexed { i, cert -> store.setCertificateEntry("system-$i", cert) }
+
+        // Plus the perimeter's own CA.
+        File("$certsDir/ca.crt").inputStream().use { input ->
+            val ca = java.security.cert.CertificateFactory.getInstance("X.509").generateCertificate(input)
+            store.setCertificateEntry("zte-ca", ca)
+        }
+
+        return javax.net.ssl.TrustManagerFactory
+            .getInstance(javax.net.ssl.TrustManagerFactory.getDefaultAlgorithm())
+            .apply { init(store) }
+    }
 
     private fun keyManagerFactory(): KeyManagerFactory {
         // client.p12 is the shared perimeter identity (ADR-004). This service is

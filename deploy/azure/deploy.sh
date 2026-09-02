@@ -190,7 +190,7 @@ if [ -n "${ANTHROPIC_API_KEY:-}" ]; then
       --secrets "anthropic-key=$ANTHROPIC_API_KEY" "internal-api-key=$INTERNAL_KEY" \
       --env-vars "ANTHROPIC_API_KEY=secretref:anthropic-key" \
         "ZTE_INTERNAL_API_KEY=secretref:internal-api-key" \
-        "GATEWAY_INTERNAL_URI=https://gateway:8080" \
+        "GATEWAY_INTERNAL_URI=$ORIGIN" \
         "ZTE_GATEWAY_CA_CERT=/app/certs/ca.crt"
   # Without the CA it cannot speak TLS to the gateway at all (ADR-033).
   bash deploy/azure/attach-volume.sh zt-agents certs /app/certs ztagents-certs
@@ -201,7 +201,7 @@ echo "── zt-chat (ADR-039): the chat console's backend ──"
 # gateway, over mTLS, holding no model credential and no MCP hop certificate.
 bash deploy/azure/create-app-with-certs.sh chat "$IMG/zteasy-chat:$TAG" 8084 \
     "ZTE_CERTS_DIR=/app/certs MANAGEMENT_PORT=8084 \
-     ZTE_GATEWAY_URI=https://gateway:8080 \
+     ZTE_GATEWAY_URI=$ORIGIN \
      KEYCLOAK_JWKS_URI=http://keycloak:8080/auth/realms/zte-realm/protocol/openid-connect/certs \
      KEYCLOAK_ISSUER_URI=https://placeholder.invalid/auth/realms/zte-realm \
      ZTE_KEY_PASSWORD=$ZTE_KEY_PASSWORD"
@@ -209,8 +209,13 @@ bash deploy/azure/create-app-with-certs.sh chat "$IMG/zteasy-chat:$TAG" 8084 \
 # ADR-039: the model credential lives on the gateway and nowhere else, so the
 # chat backend cannot make a model call the perimeter does not meter.
 export SECRET_LLM_API_KEY="${ANTHROPIC_API_KEY:?set ANTHROPIC_API_KEY — the gateway holds the model key now}"
+# ADR-040: ONE front door. Azure's HTTP ingress can be told to request a client
+# certificate (clientCertificateMode) and forwards it to the app, verified there
+# against our CA — which is what makes a single app serve browsers on a real
+# domain and agents over mTLS at the same time. ADR-028 needed two apps because
+# that capability was not used; the reasoning it recorded is now out of date.
 echo "── gateway (phase-1 create → learn FQDN) ──"
-bash deploy/azure/create-app-with-certs.sh gateway "$IMG/zteasy-gateway:$TAG" 8080 \
+bash deploy/azure/create-app-with-certs.sh gateway-web "$IMG/zteasy-gateway:$TAG" 8080 \
     "DB_HOST=postgres DB_PORT=5432 DB_NAME=zte_db DB_USER=zte_user DB_PASSWORD=secretref:db-password \
      KEYCLOAK_JWKS_URI=http://keycloak:8080/auth/realms/zte-realm/protocol/openid-connect/certs \
      ZTE_AUTH_PROXY_ENABLED=true ZTE_AUTH_PROXY_URI=http://keycloak:8080 \
@@ -224,12 +229,21 @@ bash deploy/azure/create-app-with-certs.sh gateway "$IMG/zteasy-gateway:$TAG" 80
      ZTE_LLM_API_KEY=secretref:llm-api-key \
      ZTE_INTERNAL_API_KEY=secretref:internal-api-key \
      KEYCLOAK_ISSUER_URI=https://placeholder.invalid/auth/realms/zte-realm \
+     SERVER_SSL_ENABLED=false \
      ZTE_UI_OIDC_AUTHORITY=https://placeholder.invalid/auth/realms/zte-realm" \
-    external
+    external http
 
-GW_FQDN=$($AZ containerapp show -n gateway -g "$RG" --query properties.configuration.ingress.fqdn -o tsv)
-ORIGIN="https://${GW_FQDN}:8080"
+GW_FQDN=$($AZ containerapp show -n gateway-web -g "$RG" --query properties.configuration.ingress.fqdn -o tsv)
+ORIGIN="https://${GW_FQDN}"
 echo "gateway origin: $ORIGIN"
+
+# ADR-040: the edge must REQUEST a client certificate, or agents cannot present
+# one and MtlsEnforcementWebFilter refuses them. "Accept" (not "Require") because
+# browsers have none and must still get through; the gateway decides per path.
+$AZ rest --method patch \
+    --url "https://management.azure.com/subscriptions/$($AZ account show --query id -o tsv)/resourceGroups/${RG}/providers/Microsoft.App/containerApps/gateway-web?api-version=2024-03-01" \
+    --headers "Content-Type=application/json" \
+    --body '{"properties":{"configuration":{"ingress":{"clientCertificateMode":"Accept"}}}}' -o none
 
 echo "── phase 2: real origin everywhere ──"
 GATEWAY_EXTRA_SANS="DNS:${GW_FQDN}" ./certs/generate-certs.sh
@@ -239,7 +253,7 @@ docker build -f deploy/azure/Dockerfile.keycloak -t "$IMG/zteasy-keycloak:$TAG" 
 docker push "$IMG/zteasy-keycloak:$TAG"
 $AZ containerapp update -n keycloak -g "$RG" \
     --set-env-vars "KC_HOSTNAME_URL=$ORIGIN/auth" -o none
-$AZ containerapp update -n gateway -g "$RG" \
+$AZ containerapp update -n gateway-web -g "$RG" \
     --set-env-vars "KEYCLOAK_ISSUER_URI=$ORIGIN/auth/realms/zte-realm" \
       "ZTE_UI_OIDC_AUTHORITY=$ORIGIN/auth/realms/zte-realm" -o none
 # Every cert-holding app restarts: the phase-2 run above reissues the
@@ -248,7 +262,7 @@ $AZ containerapp update -n gateway -g "$RG" \
 # re-deploy no longer invalidates certs held by anything that isn't
 # restarted here — set ZTE_REGENERATE_CA=1 only when you intend a full PKI
 # swap. Keycloak restarts to re-import the origin-correct realm.
-for app in keycloak gateway service-a service-b; do
+for app in keycloak gateway-web service-a service-b; do
   REV=$($AZ containerapp revision list -n "$app" -g "$RG" \
         --query 'sort_by([],&properties.createdTime)[-1].name' -o tsv)
   $AZ containerapp revision restart -n "$app" -g "$RG" --revision "$REV" -o none || true
@@ -260,7 +274,7 @@ $AZ containerapp job create -n agent-runner -g "$RG" --environment "$ENV_NAME" \
     --image "$IMG/hubspot-mcp-agents:$TAG" --cpu 0.25 --memory 0.5Gi \
     "${REG_ARGS[@]}" \
     --env-vars "KEYCLOAK_TOKEN_URL=http://keycloak:8080/auth/realms/zte-realm/protocol/openid-connect/token" \
-      "GATEWAY_URL=https://gateway:8080" \
+      "GATEWAY_URL=$ORIGIN" \
       GATEWAY_CLIENT_CERT=/app/certs/client.pem \
       AGENT_A_CLIENT_ID=agent-a "AGENT_A_CLIENT_SECRET=${ZTE_SECRET_AGENT_A:?source cloud-credentials.env}" \
       AGENT_B_CLIENT_ID=agent-b "AGENT_B_CLIENT_SECRET=${ZTE_SECRET_AGENT_B:?source cloud-credentials.env}" \

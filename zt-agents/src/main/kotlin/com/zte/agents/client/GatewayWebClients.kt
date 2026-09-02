@@ -25,6 +25,24 @@ class GatewayWebClients(
 ) {
     private val log = LoggerFactory.getLogger(GatewayWebClients::class.java)
 
+    private fun trustManagerFactory(caPem: File): javax.net.ssl.TrustManagerFactory {
+        val store = java.security.KeyStore.getInstance(java.security.KeyStore.getDefaultType())
+            .apply { load(null, null) }
+        javax.net.ssl.TrustManagerFactory
+            .getInstance(javax.net.ssl.TrustManagerFactory.getDefaultAlgorithm())
+            .apply { init(null as java.security.KeyStore?) }
+            .trustManagers.filterIsInstance<javax.net.ssl.X509TrustManager>()
+            .flatMap { it.acceptedIssuers.asList() }
+            .forEachIndexed { i, cert -> store.setCertificateEntry("system-$i", cert) }
+        caPem.inputStream().use { input ->
+            store.setCertificateEntry("zte-ca",
+                java.security.cert.CertificateFactory.getInstance("X.509").generateCertificate(input))
+        }
+        return javax.net.ssl.TrustManagerFactory
+            .getInstance(javax.net.ssl.TrustManagerFactory.getDefaultAlgorithm())
+            .apply { init(store) }
+    }
+
     fun builder(): WebClient.Builder {
         val path = caCertPath.trim()
         if (path.isEmpty()) {
@@ -35,7 +53,11 @@ class GatewayWebClients(
             log.warn("zte.gateway.ca-cert points at '{}' which does not exist — building an untrusting client", path)
             return WebClient.builder()
         }
-        val sslContext = SslContextBuilder.forClient().trustManager(pem).build()
+        // ADR-040: the gateway now answers on a real domain whose certificate comes
+        // from a public issuer, while the rest of the perimeter still uses our CA.
+        // Trust both — trusting only ours stopped working the moment there was one
+        // front door instead of two.
+        val sslContext = SslContextBuilder.forClient().trustManager(trustManagerFactory(pem)).build()
         log.info("Gateway clients will trust the CA at {}", path)
         return WebClient.builder()
             .clientConnector(ReactorClientHttpConnector(HttpClient.create().secure { it.sslContext(sslContext) }))

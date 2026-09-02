@@ -32,7 +32,11 @@ RG="${RG:-zteasy-demo-rg}"
 # chat sits with the other downstream services: it must be up before the
 # gateways route to it, and it must be stopped with everything else — an app
 # left out of this list keeps billing all night while looking parked (ADR-039).
-APPS=(postgres keycloak service-b service-a chat mcp-bridge zt-agents gateway gateway-web)
+# ADR-040 merged the two front doors into one: `gateway-web` serves browsers AND
+# agents, and the old TCP-passthrough `gateway` app is deactivated (kept only so
+# the split can be restored quickly). Leaving it in this list would wake it up
+# every morning to do nothing but bill.
+APPS=(postgres keycloak service-b service-a chat mcp-bridge zt-agents gateway-web)
 
 latest_revision() {
   $AZ containerapp revision list -n "$1" -g "$RG" \

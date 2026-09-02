@@ -216,6 +216,7 @@ zte-lightweight/
 | [ADR-037](docs/adr/ADR-037-no-secrets-in-the-repository.md) | No Secrets in the Repository (reverses ADR-030's dev-value exception) | Accepted |
 | [ADR-038](docs/adr/ADR-038-authenticating-the-mcp-backend-hop.md) | Authenticating the Gateway → MCP Backend Hop | Accepted |
 | [ADR-039](docs/adr/ADR-039-chat-console-user-governed-mcp-and-llm-egress.md) | Chat Console — Governing a Person Like an Agent | Accepted |
+| [ADR-040](docs/adr/ADR-040-one-front-door.md) | One Front Door — Merging the Two Gateways (supersedes ADR-028) | Accepted |
 
 ---
 
@@ -929,9 +930,13 @@ topology, live-run gotchas and the security review:
 | People — Admin Console, Approval Center, login | `https://demo.zteasy.tech/admin/index.html`, `/approver/index.html` | Azure managed certificate, auto-renewing |
 | Agents — MCP over mTLS | `https://gateway.<env>.northeurope.azurecontainerapps.io:8080` | dev ZTE-CA, client certificate required |
 
-Two front doors onto one system: a browser-facing app (HTTP ingress, custom
-domain) and the agent-facing one (TCP passthrough, so the client certificate
-survives to the gate). Same image, same Postgres/Keycloak/MCP backend.
+One front door (ADR-040): a single gateway app on `demo.zteasy.tech` serving
+browsers and agents alike. Azure's HTTP ingress requests a client certificate
+(`clientCertificateMode: Accept`) and relays it to the gateway, which validates it
+against our own CA — the edge accepts any certificate, so that check is not
+optional. ADR-028 originally split this into two apps because TCP passthrough was
+the only way to keep a client certificate; that split, and the two copies of every
+in-memory thing it produced, is gone.
 
 ```bash
 # Provision from scratch (needs GHCR_USER/GHCR_PAT, HUBSPOT_TOKEN; see the plan)

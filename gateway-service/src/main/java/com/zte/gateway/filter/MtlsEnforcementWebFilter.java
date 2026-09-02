@@ -68,9 +68,12 @@ public class MtlsEnforcementWebFilter implements WebFilter, Ordered {
             .getBytes(StandardCharsets.UTF_8);
 
     private final boolean mtlsEnabled;
+    private final ForwardedClientCertificate forwarded;
 
-    public MtlsEnforcementWebFilter(@Value("${zte.mtls.enabled:true}") boolean mtlsEnabled) {
+    public MtlsEnforcementWebFilter(@Value("${zte.mtls.enabled:true}") boolean mtlsEnabled,
+                                     ForwardedClientCertificate forwarded) {
         this.mtlsEnabled = mtlsEnabled;
+        this.forwarded = forwarded;
     }
 
     @Override
@@ -93,7 +96,20 @@ public class MtlsEnforcementWebFilter implements WebFilter, Ordered {
         }
 
         SslInfo sslInfo = exchange.getRequest().getSslInfo();
-        if (sslInfo == null || sslInfo.getPeerCertificates() == null || sslInfo.getPeerCertificates().length == 0) {
+        boolean presentedDirectly = sslInfo != null && sslInfo.getPeerCertificates() != null
+                && sslInfo.getPeerCertificates().length > 0;
+
+        if (!presentedDirectly) {
+            // ADR-040: the certificate may have been relayed by the perimeter's edge
+            // instead of presented to this listener. Same requirement either way — the
+            // caller holds a key our CA vouched for — but one hop further out, and
+            // verified here rather than by the JVM's TLS layer.
+            var relayed = forwarded.verified(exchange);
+            if (relayed.isPresent()) {
+                log.debug("ZT-MTLS-OK path={} via forwarded certificate subject={}",
+                        path, relayed.get().getSubjectX500Principal());
+                return chain.filter(exchange);
+            }
             log.warn("ZT-MTLS-DENY path={} — no client certificate presented", path);
             return writeUnauthorized(exchange);
         }

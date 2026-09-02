@@ -1,6 +1,8 @@
 # ADR-028: Custom Domain with a Publicly-Trusted Certificate — a Second, Browser-Facing Ingress
 
-**Status:** Accepted
+**Status:** Accepted, then **superseded by [ADR-040](ADR-040-one-front-door.md)** (2026-09-02): Azure's HTTP ingress can request and forward a client certificate (`clientCertificateMode`), which this ADR did not use — so the two-app split it introduced is no longer necessary and has been merged back into one.
+
+**Original status:** Accepted
 **Date:** 2026-08-25
 **Stage:** 28
 

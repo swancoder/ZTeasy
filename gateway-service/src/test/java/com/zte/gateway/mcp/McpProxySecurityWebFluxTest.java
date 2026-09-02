@@ -91,6 +91,12 @@ class McpProxySecurityWebFluxTest {
         com.zte.gateway.policy.def.PolicyDefaultsProperties policyDefaultsProperties() {
             return new com.zte.gateway.policy.def.PolicyDefaultsProperties();
         }
+
+        /** ADR-040: the enforcement filter now asks this about a relayed certificate. */
+        @org.springframework.context.annotation.Bean
+        com.zte.gateway.filter.ForwardedClientCertificate forwardedClientCertificate() {
+            return new com.zte.gateway.filter.ForwardedClientCertificate("./certs", false);
+        }
     }
 
     @MockBean

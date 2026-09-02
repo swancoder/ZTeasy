@@ -83,7 +83,8 @@ auditable — the opposite of a mesh's "hide it in the sidecar" approach. See
 | 37 | No secrets in the repository: every default removed from `application.yml`/compose/scripts, `keycloak/realm-export.json` reduced to a template with placeholders, `scripts/generate-dev-secrets.sh` writing a gitignored `.env` (read by spring-dotenv and by compose), integration tests generating their realm from the template with `src/it`-only fixtures, and `deploy/azure/rotate-secrets.sh` rotating everything the repo had published | [037](adr/ADR-037-no-secrets-in-the-repository.md) |
 | 38 | Authenticated gateway→MCP hop: the bridge requires TLS with a client certificate and authorises `CN=zte-gateway-mcp` specifically — a hop identity nothing else holds, because the shared `client.p12` is also on the agent runner; health stays open to any CA-signed peer; the bridge refuses to start without it | [038](adr/ADR-038-authenticating-the-mcp-backend-hop.md) |
 | 39 | Chat console: `McpCaller` so an MCP decision can be about a person (`user:`/`role:` sources, ACAP looked up by username then role — agent path unchanged), gateway LLM egress holding the vendor key and metering tokens from the vendor's own response, `/api/v1/me/events` scoped in SQL, `zt-chat` backend running the tool loop with the user's own token, `zt-chat-ui` two-panel console at `/chat/` with client `zte-chat-ui` and role `CHAT_USER`, ACAP profile keyed `role:CHAT_USER` | [039](adr/ADR-039-chat-console-user-governed-mcp-and-llm-egress.md) |
-| 40+ | Backlog (rate limiting, ABAC…) | see §9 |
+| 40 | One front door: the two-app split of ADR-028 merged back into a single gateway on the custom domain, using `ingress.clientCertificateMode: Accept` so the edge requests a client certificate and relays it in `X-Forwarded-Client-Cert`; `ForwardedClientCertificate` validates the chain against our own CA (the edge accepts any certificate), and a forged header was measured to be stripped by the edge before adopting the design | [040](adr/ADR-040-one-front-door.md) |
+| 41+ | Backlog (rate limiting, ABAC…) | see §9 |
 
 **Testing:** `./gradlew test` (unit — every package below has direct
 coverage for its pure decision logic; I/O-calling code that has no
@@ -679,10 +680,14 @@ topology and the live-run findings: `docs/azure-deployment-plan.md`.
   `power.sh` (`stop`/`start`/`status` — deactivates or reactivates every
   app's revision so the stack can be parked overnight; `stop` runs the
   backup first and refuses to proceed if it fails), `Dockerfile.keycloak`.
-- **Two front doors** (ADR-028): `gateway-web` (HTTP ingress, custom domain,
-  Azure managed certificate) for browsers, and `gateway` (TCP passthrough)
-  for agent traffic that must keep its client certificate all the way to the
-  gate. Same image, same database, same Keycloak.
+- **One front door** (ADR-040, superseding ADR-028's split): `gateway-web` on
+  the custom domain serves browsers and agents alike. Azure's HTTP ingress is set
+  to `clientCertificateMode: Accept`, so it requests a client certificate and
+  relays it in `X-Forwarded-Client-Cert`; `ForwardedClientCertificate` validates
+  that certificate against our own CA, because the edge accepts any. TLS
+  terminates at the edge rather than at the gate — the trade ADR-040 records —
+  and a client-forged header was measured to be stripped before the design was
+  adopted.
 
 ---
 
@@ -1094,6 +1099,7 @@ automatically instead of needing its own `WebFilter` (ADR-012).
 | [037](adr/ADR-037-no-secrets-in-the-repository.md) | No Secrets in the Repository (reverses ADR-030's dev-value exception) |
 | [038](adr/ADR-038-authenticating-the-mcp-backend-hop.md) | Authenticating the Gateway → MCP Backend Hop (closes ADR-018's untouched hop) |
 | [039](adr/ADR-039-chat-console-user-governed-mcp-and-llm-egress.md) | Chat Console — Governing a Person Like an Agent, and Model Egress Through the Gate |
+| [040](adr/ADR-040-one-front-door.md) | One Front Door — Merging the Two Gateways (supersedes ADR-028) |
 
 ---
 

@@ -31,6 +31,15 @@ import static org.mockito.Mockito.*;
 @ExtendWith(MockitoExtension.class)
 class MtlsEnforcementWebFilterTest {
 
+    /**
+     * ADR-040 lets a certificate arrive relayed in a header instead of on the TLS
+     * session. These tests are about the direct path, so the relay always reports
+     * nothing — the relayed path has its own tests.
+     */
+    private static ForwardedClientCertificate noForwardedCert() {
+        return new ForwardedClientCertificate("./certs", false);
+    }
+
     @Mock WebFilterChain chain;
     @Mock SslInfo sslInfo;
     @Mock X509Certificate peerCert;
@@ -49,7 +58,7 @@ class MtlsEnforcementWebFilterTest {
         when(sslInfo.getPeerCertificates()).thenReturn(new X509Certificate[]{peerCert});
         MockServerWebExchange ex = exchange("/sse", sslInfo);
 
-        StepVerifier.create(new MtlsEnforcementWebFilter(true).filter(ex, chain)).verifyComplete();
+        StepVerifier.create(new MtlsEnforcementWebFilter(true, noForwardedCert()).filter(ex, chain)).verifyComplete();
 
         verify(chain).filter(ex);
         assertThat(ex.getResponse().getStatusCode()).isNull();
@@ -59,7 +68,7 @@ class MtlsEnforcementWebFilterTest {
     void protectedPath_noSslInfo_isRejectedWith401() {
         MockServerWebExchange ex = exchange("/sse", null);
 
-        StepVerifier.create(new MtlsEnforcementWebFilter(true).filter(ex, chain)).verifyComplete();
+        StepVerifier.create(new MtlsEnforcementWebFilter(true, noForwardedCert()).filter(ex, chain)).verifyComplete();
 
         verify(chain, never()).filter(any());
         assertThat(ex.getResponse().getStatusCode()).isEqualTo(HttpStatus.UNAUTHORIZED);
@@ -70,7 +79,7 @@ class MtlsEnforcementWebFilterTest {
         when(sslInfo.getPeerCertificates()).thenReturn(new X509Certificate[0]);
         MockServerWebExchange ex = exchange("/sse", sslInfo);
 
-        StepVerifier.create(new MtlsEnforcementWebFilter(true).filter(ex, chain)).verifyComplete();
+        StepVerifier.create(new MtlsEnforcementWebFilter(true, noForwardedCert()).filter(ex, chain)).verifyComplete();
 
         verify(chain, never()).filter(any());
         assertThat(ex.getResponse().getStatusCode()).isEqualTo(HttpStatus.UNAUTHORIZED);
@@ -80,7 +89,7 @@ class MtlsEnforcementWebFilterTest {
     void protectedS2sPath_noSslInfo_isRejectedWith401() {
         MockServerWebExchange ex = exchange("/api/v1/service-a/hello", null);
 
-        StepVerifier.create(new MtlsEnforcementWebFilter(true).filter(ex, chain)).verifyComplete();
+        StepVerifier.create(new MtlsEnforcementWebFilter(true, noForwardedCert()).filter(ex, chain)).verifyComplete();
 
         verify(chain, never()).filter(any());
         assertThat(ex.getResponse().getStatusCode()).isEqualTo(HttpStatus.UNAUTHORIZED);
@@ -91,7 +100,7 @@ class MtlsEnforcementWebFilterTest {
         when(chain.filter(any())).thenReturn(Mono.empty());
         MockServerWebExchange ex = exchange("/api/v1/admin/policies", null);
 
-        StepVerifier.create(new MtlsEnforcementWebFilter(true).filter(ex, chain)).verifyComplete();
+        StepVerifier.create(new MtlsEnforcementWebFilter(true, noForwardedCert()).filter(ex, chain)).verifyComplete();
 
         verify(chain).filter(ex);
         assertThat(ex.getResponse().getStatusCode()).isNull();
@@ -103,7 +112,7 @@ class MtlsEnforcementWebFilterTest {
         when(chain.filter(any())).thenReturn(Mono.empty());
         MockServerWebExchange ex = exchange("/api/v1/approver/approvals", null);
 
-        StepVerifier.create(new MtlsEnforcementWebFilter(true).filter(ex, chain)).verifyComplete();
+        StepVerifier.create(new MtlsEnforcementWebFilter(true, noForwardedCert()).filter(ex, chain)).verifyComplete();
 
         verify(chain).filter(ex);
         assertThat(ex.getResponse().getStatusCode()).isNull();
@@ -114,7 +123,7 @@ class MtlsEnforcementWebFilterTest {
         when(chain.filter(any())).thenReturn(Mono.empty());
         MockServerWebExchange ex = exchange("/api/v1/internal/policies", null);
 
-        StepVerifier.create(new MtlsEnforcementWebFilter(true).filter(ex, chain)).verifyComplete();
+        StepVerifier.create(new MtlsEnforcementWebFilter(true, noForwardedCert()).filter(ex, chain)).verifyComplete();
 
         verify(chain).filter(ex);
     }
@@ -124,7 +133,7 @@ class MtlsEnforcementWebFilterTest {
         when(chain.filter(any())).thenReturn(Mono.empty());
         MockServerWebExchange ex = exchange("/admin/index.html", null);
 
-        StepVerifier.create(new MtlsEnforcementWebFilter(true).filter(ex, chain)).verifyComplete();
+        StepVerifier.create(new MtlsEnforcementWebFilter(true, noForwardedCert()).filter(ex, chain)).verifyComplete();
 
         verify(chain).filter(ex);
     }
@@ -137,7 +146,7 @@ class MtlsEnforcementWebFilterTest {
         when(chain.filter(any())).thenReturn(Mono.empty());
         MockServerWebExchange ex = exchange("/sse", null);
 
-        StepVerifier.create(new MtlsEnforcementWebFilter(false).filter(ex, chain)).verifyComplete();
+        StepVerifier.create(new MtlsEnforcementWebFilter(false, noForwardedCert()).filter(ex, chain)).verifyComplete();
 
         verify(chain).filter(ex);
         assertThat(ex.getResponse().getStatusCode()).isNull();
