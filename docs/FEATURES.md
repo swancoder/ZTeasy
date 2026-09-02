@@ -74,7 +74,7 @@ what it produces flows the other way.
 | [FEAT-03](features/FEAT-03-mtls-enforcement.md) | Smart mTLS Enforcement | Client certificates required on agent/service paths, not on browser paths | Production-shaped, shared cert |
 | [FEAT-04](features/FEAT-04-mcp-gate.md) | MCP Tool-Call Gate | Intercepts every agent tool call and decides allow / deny / hold before the backend sees it | Production-shaped |
 | [FEAT-05](features/FEAT-05-acap-scope-profiles.md) | ACAP Scope Profiles | Per-agent limits on arguments, fields, territory, writes and daily volume | Working, schema subset |
-| [FEAT-06](features/FEAT-06-human-approvals.md) | Human-in-the-Loop Approvals | Held calls go to a durable queue and a dedicated approver UI | Working, no routing/SLA |
+| [FEAT-06](features/FEAT-06-human-approvals.md) | Human-in-the-Loop Approvals | Held calls go to a durable queue and a dedicated approver UI, routed to a named owner, with a deadline and reminders | Working, no retry on a failed notification |
 | [FEAT-07](features/FEAT-07-audit-trail.md) | Unified Audit Trail | One table records REST and agent traffic with correlation ids | Production-shaped |
 | [FEAT-08](features/FEAT-08-identity-sync.md) | IdP Identity Sync | Mirrors Keycloak users/groups/roles/clients so policy can name them and orphans surface | Production-ready |
 | [FEAT-09](features/FEAT-09-inventory-registry.md) | Service Registry & Dynamic Routing | Onboarded services become routable, discoverable and health-monitored without redeploy | Working, Spring-shaped health |
