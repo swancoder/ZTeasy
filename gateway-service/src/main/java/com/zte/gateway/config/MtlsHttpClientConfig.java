@@ -7,6 +7,7 @@ import org.springframework.beans.factory.annotation.Value;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
+import org.springframework.context.annotation.Primary;
 import org.springframework.http.client.reactive.ReactorClientHttpConnector;
 import org.springframework.scheduling.annotation.Scheduled;
 import reactor.netty.http.client.HttpClient;
@@ -80,7 +81,16 @@ public class MtlsHttpClientConfig {
                 .secure(spec -> spec.sslContext(factory.current()));
     }
 
+    /**
+     * @Primary since ADR-038: a second {@link ReactorClientHttpConnector} now exists
+     * for the MCP hop, and Spring Boot's {@code ClientHttpConnectorAutoConfiguration}
+     * injects this type by parameter with no qualifier — with two candidates and no
+     * primary it fails the whole context at startup, which is exactly what happened
+     * on the live deployment the first time this shipped. This one stays the default
+     * for every outbound call; the MCP hop asks for its own by name.
+     */
     @Bean
+    @Primary
     public ReactorClientHttpConnector reactorClientHttpConnector(HttpClient httpClient) {
         return new ReactorClientHttpConnector(httpClient);
     }

@@ -1,6 +1,6 @@
 # FEAT-16 — Perimeter Hardening
 
-**Maturity:** Working
+**Maturity:** Working. The last unauthenticated hop (gateway→MCP backend) was closed in ADR-038.
 **Depends on:** FEAT-15 (defines the perimeter)
 **Feeds:** the trustworthiness of every other feature
 **Detail:** [azure-deployment-plan.md](../azure-deployment-plan.md) · [ADR-027](../adr/ADR-027-azure-container-apps-deployment.md), [ADR-030](../adr/ADR-030-credential-hygiene-and-identity-reconciliation.md)

@@ -104,14 +104,22 @@ public class AutoDiscoveryWorker {
     private static final Logger log = LoggerFactory.getLogger("ZTE-INVENTORY-DISCOVERY");
 
     private final WebClient.Builder webClientBuilder;
+    /** ADR-038: an MCP backend authorises the gateway by a hop-specific certificate. */
+    private final org.springframework.beans.factory.ObjectProvider<
+            org.springframework.http.client.reactive.ReactorClientHttpConnector> mcpConnector;
     private final InventoryRepository repository;
     private final ObjectMapper objectMapper;
     private final Duration timeout;
 
-    public AutoDiscoveryWorker(WebClient.Builder webClientBuilder, InventoryRepository repository,
+    public AutoDiscoveryWorker(WebClient.Builder webClientBuilder,
+                                @org.springframework.beans.factory.annotation.Qualifier("mcpBackendConnector")
+                                org.springframework.beans.factory.ObjectProvider<
+                                        org.springframework.http.client.reactive.ReactorClientHttpConnector> mcpConnector,
+                                InventoryRepository repository,
                                 ObjectMapper objectMapper,
                                 @Value("${zte.inventory.discovery-timeout-ms:5000}") long timeoutMs) {
         this.webClientBuilder = webClientBuilder;
+        this.mcpConnector = mcpConnector;
         this.repository = repository;
         this.objectMapper = objectMapper;
         this.timeout = Duration.ofMillis(timeoutMs);
@@ -212,7 +220,13 @@ public class AutoDiscoveryWorker {
                 "method", "tools/list",
                 "params", Map.of());
 
-        return webClientBuilder.baseUrl(baseUrl).build()
+        // Discovery talks to the same endpoint the proxy does, so it needs the same
+        // identity (ADR-038) — otherwise onboarding an MCP backend would fail with a
+        // 403 that looks like the backend being down.
+        var connector = mcpConnector.getIfAvailable();
+        WebClient.Builder builder = connector == null ? webClientBuilder
+                : webClientBuilder.clone().clientConnector(connector);
+        return builder.baseUrl(baseUrl).build()
                 .post()
                 .uri("/message")
                 .contentType(MediaType.APPLICATION_JSON)

@@ -81,7 +81,8 @@ auditable — the opposite of a mesh's "hide it in the sidecar" approach. See
 | 35 | Approval notifications: `addressedToYou` separate from `canDecide` (an unrouted call is decidable by anyone but addressed to `zte.approvals.default-notify`, `role:APPROVER` by default, resolved to people from the identity cache), "N for you" badge plus opt-in desktop notification on both surfaces, outbound webhook whose payload deliberately omits the call arguments, and `approval_notifications` recording every attempt including `SKIPPED` | [035](adr/ADR-035-approval-notifications.md) |
 | 36 | Reminders before the deadline: thresholds as fractions of each item's own lifetime (`zte.approvals.reminder-fractions`, default `0.5`), and claim-then-send under `UNIQUE (approval_id, stage) WHERE kind = 'REMINDER'` so two gateway instances produce one message — expiry defends itself by changing status, a reminder changes nothing | [036](adr/ADR-036-approval-reminders.md) |
 | 37 | No secrets in the repository: every default removed from `application.yml`/compose/scripts, `keycloak/realm-export.json` reduced to a template with placeholders, `scripts/generate-dev-secrets.sh` writing a gitignored `.env` (read by spring-dotenv and by compose), integration tests generating their realm from the template with `src/it`-only fixtures, and `deploy/azure/rotate-secrets.sh` rotating everything the repo had published | [037](adr/ADR-037-no-secrets-in-the-repository.md) |
-| 38+ | Backlog (rate limiting, ABAC…) | see §9 |
+| 38 | Authenticated gateway→MCP hop: the bridge requires TLS with a client certificate and authorises `CN=zte-gateway-mcp` specifically — a hop identity nothing else holds, because the shared `client.p12` is also on the agent runner; health stays open to any CA-signed peer; the bridge refuses to start without it | [038](adr/ADR-038-authenticating-the-mcp-backend-hop.md) |
+| 39+ | Backlog (rate limiting, ABAC…) | see §9 |
 
 **Testing:** `./gradlew test` (unit — every package below has direct
 coverage for its pure decision logic; I/O-calling code that has no
@@ -926,8 +927,6 @@ did this documents exactly what was investigated and found.
 ## 9. Roadmap / Backlog
 
 **MCP proxy hardening:**
-- Authenticate `McpBackendClient` → backend (bearer token or mTLS) — the one
-  hop ADR-018's inbound enforcement explicitly didn't touch.
 - Bounded buffer + overflow policy for `LoggingMcpAuditService` and
   `RequestLogAuditService` (both currently unbounded).
 - Incremental relay for a backend that streams multiple SSE events per tool
@@ -1085,6 +1084,7 @@ automatically instead of needing its own `WebFilter` (ADR-012).
 | [035](adr/ADR-035-approval-notifications.md) | Approval Notifications — Addressing, Channels and Delivery Evidence |
 | [036](adr/ADR-036-approval-reminders.md) | Reminding Before the Deadline (claim-then-send across instances) |
 | [037](adr/ADR-037-no-secrets-in-the-repository.md) | No Secrets in the Repository (reverses ADR-030's dev-value exception) |
+| [038](adr/ADR-038-authenticating-the-mcp-backend-hop.md) | Authenticating the Gateway → MCP Backend Hop (closes ADR-018's untouched hop) |
 
 ---
 

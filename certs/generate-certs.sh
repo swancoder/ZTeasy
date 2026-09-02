@@ -159,8 +159,39 @@ openssl pkcs12 -export \
     -out gateway.p12 -passout "pass:${PASS}" \
     -name "gateway"
 
-# ── 6. Truststore (CA cert only) ────────────────────────────────────────────
-info "6/6  Generating shared truststore (CA cert only) ..."
+# ── 6. MCP backend hop: its own server cert AND its own client identity ─────
+# ADR-038. Everything else in this PKI shares one client identity
+# (client.p12, CN=zte-internal-client) — and the agent-runner holds it too, so
+# "presents a cert signed by our CA" would let an agent call the MCP backend
+# directly and skip the gate entirely. This hop therefore gets a client cert
+# nothing else is given, and the bridge authorises by that CN.
+info "6/7  Generating MCP bridge server + gateway-only client certificates ..."
+openssl req -newkey rsa:2048 \
+    -keyout mcp-bridge.key -out mcp-bridge.csr \
+    -nodes -subj "${SUBJ_BASE}/CN=mcp-bridge"
+
+openssl x509 -req \
+    -in mcp-bridge.csr -CA ca.crt -CAkey ca.key -CAcreateserial \
+    -out mcp-bridge.crt -days $DAYS_SVC \
+    -extfile <(printf "subjectAltName=DNS:mcp-bridge,DNS:localhost,IP:127.0.0.1\nextendedKeyUsage=serverAuth")
+
+openssl req -newkey rsa:2048 \
+    -keyout gateway-mcp-client.key -out gateway-mcp-client.csr \
+    -nodes -subj "${SUBJ_BASE}/CN=zte-gateway-mcp"
+
+openssl x509 -req \
+    -in gateway-mcp-client.csr -CA ca.crt -CAkey ca.key -CAcreateserial \
+    -out gateway-mcp-client.crt -days $DAYS_SVC \
+    -extfile <(printf "extendedKeyUsage=clientAuth")
+
+openssl pkcs12 -export \
+    -in gateway-mcp-client.crt -inkey gateway-mcp-client.key \
+    -certfile ca.crt \
+    -out gateway-mcp-client.p12 -passout "pass:${PASS}" \
+    -name "zte-gateway-mcp"
+
+# ── 7. Truststore (CA cert only) ────────────────────────────────────────────
+info "7/7  Generating shared truststore (CA cert only) ..."
 rm -f truststore.p12
 keytool -import -trustcacerts \
     -alias zte-ca \

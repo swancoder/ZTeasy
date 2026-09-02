@@ -176,7 +176,13 @@ $AZ containerapp create -n mcp-bridge -g "$RG" --environment "$ENV_NAME" \
     --target-port 9090 --exposed-port 9090 --min-replicas 1 --max-replicas 1 \
     --cpu 0.25 --memory 0.5Gi "${REG_ARGS[@]}" \
     --secrets "hubspot-token=${HUBSPOT_TOKEN:?set HUBSPOT_TOKEN}" \
-    --env-vars "HUBSPOT_TOKEN=secretref:hubspot-token" -o none
+    --env-vars "HUBSPOT_TOKEN=secretref:hubspot-token" \
+      "MCP_BRIDGE_TLS_CERT=/app/certs/mcp-bridge.crt" \
+      "MCP_BRIDGE_TLS_KEY=/app/certs/mcp-bridge.key" \
+      "MCP_BRIDGE_TLS_CA=/app/certs/ca.crt" -o none
+# ADR-038: the bridge verifies a certificate issued to the gateway alone, so it
+# needs the certs share like every other cert holder.
+bash deploy/azure/attach-volume.sh mcp-bridge certs /app/certs mcpcerts
 
 if [ -n "${ANTHROPIC_API_KEY:-}" ]; then
   echo "── zt-agents ──"
@@ -197,7 +203,7 @@ bash deploy/azure/create-app-with-certs.sh gateway "$IMG/zteasy-gateway:$TAG" 80
      ZTE_AUTH_PROXY_ENABLED=true ZTE_AUTH_PROXY_URI=http://keycloak:8080 \
      ZTE_IDP_KEYCLOAK_BASE_URI=http://keycloak:8080/auth \
      SERVICE_A_URI=https://service-a:8081 SERVICE_B_URI=https://service-b:8082 \
-     MCP_BACKEND_URI=http://mcp-bridge:9090 \
+     MCP_BACKEND_URI=https://mcp-bridge:9090 \
      ZT_AGENTS_URI=http://zt-agents:8083 \
      ZTE_CERTS_DIR=/app/certs ZTE_OBO_SECRET=$OBO_SECRET \
      ZTE_ACAP_PROFILES_LOCATION=file:/app/certs/acap-profiles/*.yaml \

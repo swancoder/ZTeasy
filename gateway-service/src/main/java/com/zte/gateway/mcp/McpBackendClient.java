@@ -23,9 +23,21 @@ public class McpBackendClient {
 
     private final WebClient webClient;
 
+    /**
+     * @param mcpConnector the hop-specific mTLS identity (ADR-038). Absent only when
+     *                     {@code zte.mtls.enabled=false} — the integration-test profile —
+     *                     in which case the shared builder is used unchanged, exactly as
+     *                     before this hop was authenticated.
+     */
     public McpBackendClient(WebClient.Builder builder,
+                             @org.springframework.beans.factory.annotation.Qualifier("mcpBackendConnector")
+                             org.springframework.beans.factory.ObjectProvider<
+                                     org.springframework.http.client.reactive.ReactorClientHttpConnector> mcpConnector,
                              @Value("${mcp-backend.uri:http://localhost:9090}") String backendUri) {
-        this.webClient = builder.baseUrl(backendUri).build();
+        var connector = mcpConnector.getIfAvailable();
+        this.webClient = (connector == null
+                ? builder
+                : builder.clientConnector(connector)).baseUrl(backendUri).build();
     }
 
     public Mono<JsonRpcResponse> forward(JsonRpcRequest request) {

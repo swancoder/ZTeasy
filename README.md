@@ -214,6 +214,7 @@ zte-lightweight/
 | [ADR-035](docs/adr/ADR-035-approval-notifications.md) | Approval Notifications — Addressing, Channels and Delivery Evidence | Accepted |
 | [ADR-036](docs/adr/ADR-036-approval-reminders.md) | Reminding Before the Deadline (claim-then-send across instances) | Accepted |
 | [ADR-037](docs/adr/ADR-037-no-secrets-in-the-repository.md) | No Secrets in the Repository (reverses ADR-030's dev-value exception) | Accepted |
+| [ADR-038](docs/adr/ADR-038-authenticating-the-mcp-backend-hop.md) | Authenticating the Gateway → MCP Backend Hop | Accepted |
 
 ---
 

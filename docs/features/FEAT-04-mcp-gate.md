@@ -1,6 +1,6 @@
 # FEAT-04 — MCP Tool-Call Gate
 
-**Maturity:** Production-shaped
+**Maturity:** Production-shaped. Since ADR-038 the backend itself refuses anyone but the gateway, so the gate is enforced by the destination rather than assumed by the network.
 **Depends on:** FEAT-02 (rules), FEAT-03 (transport), FEAT-05 (argument limits), FEAT-08 (agent identities)
 **Feeds:** FEAT-06 (holds), FEAT-07 (audit), FEAT-10/11 (reporting)
 **Detail:** [SPECS §5.4](../SPECS.md) · [ADR-009](../adr/ADR-009-mcp-proxy-interception-layer.md), [ADR-011](../adr/ADR-011-yaml-policy-engine.md), [ADR-019](../adr/ADR-019-hold-decision-and-approval-queue.md)
