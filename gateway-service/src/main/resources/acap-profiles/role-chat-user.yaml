@@ -1,0 +1,47 @@
+# ACAP scope for PEOPLE, not for an agent (Stage 39, ADR-039).
+#
+# The agentId here is a role URN. ADR-039 made the profile lookup ordered —
+# user:<name> first, then each role: — so scope can be authored once for everyone
+# who holds CHAT_USER, while an individual who needs their own still gets one by
+# being named directly.
+#
+# The scope itself is deliberately the same shape the CRM agent gets, because that
+# is the point of the exercise: a person asking a chat assistant for CRM data is
+# governed by the same territory, the same field list and the same write ban as an
+# autonomous agent doing it. Nothing here is softer because a human is typing.
+agentId: role:CHAT_USER
+territory: EMEA
+
+agent:
+  name: Chat Console user
+  client: ZTeasy demo
+  owner:
+    name: Sales Operations Lead
+    email: sales-ops@nordwind.example
+  deploymentDate: "2026-09-02"
+  reauthDue: "2027-02-01"
+
+risk:
+  euAiActClass: limited
+  internalTier: 2
+
+scope:
+  read:
+    - resource: contacts
+      fields: [name, company, lifecycle_stage, last_activity, deal_ids]
+    - resource: deals
+      fields: [name, stage, amount, close_date, risk_flag]
+    - resource: activities
+      fields: []
+  # A person may read the CRM through the assistant and may not change it that
+  # way. Writing is not forbidden to them as employees — it is forbidden through
+  # this door, where an assistant would be composing the change.
+  writeAllowed: false
+
+thresholds:
+  # Every model round is billed, and a chat can loop far faster than a scheduled
+  # agent. This caps the tool that costs the most per call before it caps a person.
+  - metric: followup_drafts_per_day
+    toolName: draft_followup
+    limit: 20
+    onExceed: hold

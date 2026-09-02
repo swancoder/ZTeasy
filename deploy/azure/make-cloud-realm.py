@@ -39,6 +39,7 @@ BROWSER_CLIENT_PATHS = {
     "zte-gateway": "/*",
     "zte-admin-ui": "/admin/*",
     "zte-approver-ui": "/approver/*",
+    "zte-chat-ui": "/chat/*",
 }
 
 # username -> env var holding its password

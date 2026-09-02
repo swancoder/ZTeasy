@@ -15,6 +15,13 @@ RUN cd zt-approver-ui && npm install
 COPY zt-approver-ui zt-approver-ui
 RUN cd zt-approver-ui && npm run build
 
+# ADR-039: the third console. Same two-step (manifest, install, sources, build)
+# so a source-only change does not reinstall node_modules.
+COPY zt-chat-ui/package.json zt-chat-ui/
+RUN cd zt-chat-ui && npm install
+COPY zt-chat-ui zt-chat-ui
+RUN cd zt-chat-ui && npm run build
+
 # ── Gradle build stage ───────────────────────────────────────
 FROM eclipse-temurin:21-jdk-alpine AS build
 WORKDIR /app
@@ -33,9 +40,11 @@ COPY gateway-service/src gateway-service/src
 # The pre-built SPA bundles, exactly where processResources expects them
 COPY --from=ui-build /app/zt-admin-ui/dist zt-admin-ui/dist
 COPY --from=ui-build /app/zt-approver-ui/dist zt-approver-ui/dist
+COPY --from=ui-build /app/zt-chat-ui/dist zt-chat-ui/dist
 
 RUN chmod +x gradlew && ./gradlew :gateway-service:bootJar --no-daemon -x test \
-      -x npmInstall -x buildAdminUi -x npmInstallApproverUi -x buildApproverUi
+      -x npmInstall -x buildAdminUi -x npmInstallApproverUi -x buildApproverUi \
+      -x npmInstallChatUi -x buildChatUi
 
 # ── Runtime stage ─────────────────────────────────────────────
 FROM eclipse-temurin:21-jre-alpine

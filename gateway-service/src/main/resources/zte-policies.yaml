@@ -282,7 +282,49 @@ agentMcpToolCalls:
 # Javadoc for why). effect is unused here (matched via matchAny, not
 # evaluate) but kept ALLOW by convention for readability. mcpTarget
 # (ADR-023) scoped the same way as the grants above.
+  # ── ADR-039: the same tools, granted to a person ─────────────────────────
+  # A human in the chat console gets exactly the coarse grants the CRM agent has.
+  # What they may actually do with them is then tightened by the ACAP profile
+  # keyed to their role (role-chat-user.yaml): EMEA only, listed fields only,
+  # no writes. The demo's point is that the sentence above is true for a person.
+  - id: mcp-allow-chat-user-read-contacts
+    effect: ALLOW
+    source: CHAT_USER
+    target: read_contacts
+    mcpTarget: hubspot-mcp
+  - id: mcp-allow-chat-user-read-deals
+    effect: ALLOW
+    source: CHAT_USER
+    target: read_deals
+    mcpTarget: hubspot-mcp
+  - id: mcp-allow-chat-user-read-activities
+    effect: ALLOW
+    source: CHAT_USER
+    target: read_activities
+    mcpTarget: hubspot-mcp
+  - id: mcp-allow-chat-user-draft-followup
+    effect: ALLOW
+    source: CHAT_USER
+    target: draft_followup
+    mcpTarget: hubspot-mcp
+  # Sending mail to a customer is allowed coarsely and held below, exactly as it
+  # is for the agent — a person typing the request does not change who it reaches.
+  - id: mcp-allow-chat-user-send-email
+    effect: ALLOW
+    source: CHAT_USER
+    target: send_email
+    mcpTarget: hubspot-mcp
+
 agentMcpToolHolds:
+  - id: mcp-hold-chat-user-send-email
+    effect: ALLOW
+    source: CHAT_USER
+    target: send_email
+    mcpTarget: hubspot-mcp
+    # Same owner as the agent's equivalent (ADR-034): who approves an outbound
+    # customer email should not depend on whether a person or a robot composed it.
+    routeTo: "role:APPROVER"
+
   - id: mcp-hold-crm-account-health-send-email
     effect: ALLOW
     source: "client:crm-account-health-emea-01"

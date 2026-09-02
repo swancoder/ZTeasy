@@ -196,6 +196,19 @@ if [ -n "${ANTHROPIC_API_KEY:-}" ]; then
   bash deploy/azure/attach-volume.sh zt-agents certs /app/certs ztagents-certs
 fi
 
+echo "── zt-chat (ADR-039): the chat console's backend ──"
+# A downstream service like service-a/service-b: reachable only through the
+# gateway, over mTLS, holding no model credential and no MCP hop certificate.
+bash deploy/azure/create-app-with-certs.sh chat "$IMG/zteasy-chat:$TAG" 8084 \
+    "ZTE_CERTS_DIR=/app/certs MANAGEMENT_PORT=8084 \
+     ZTE_GATEWAY_URI=https://gateway:8080 \
+     KEYCLOAK_JWKS_URI=http://keycloak:8080/auth/realms/zte-realm/protocol/openid-connect/certs \
+     KEYCLOAK_ISSUER_URI=https://placeholder.invalid/auth/realms/zte-realm \
+     ZTE_KEY_PASSWORD=$ZTE_KEY_PASSWORD"
+
+# ADR-039: the model credential lives on the gateway and nowhere else, so the
+# chat backend cannot make a model call the perimeter does not meter.
+export SECRET_LLM_API_KEY="${ANTHROPIC_API_KEY:?set ANTHROPIC_API_KEY — the gateway holds the model key now}"
 echo "── gateway (phase-1 create → learn FQDN) ──"
 bash deploy/azure/create-app-with-certs.sh gateway "$IMG/zteasy-gateway:$TAG" 8080 \
     "DB_HOST=postgres DB_PORT=5432 DB_NAME=zte_db DB_USER=zte_user DB_PASSWORD=secretref:db-password \
@@ -208,6 +221,7 @@ bash deploy/azure/create-app-with-certs.sh gateway "$IMG/zteasy-gateway:$TAG" 80
      ZTE_CERTS_DIR=/app/certs ZTE_OBO_SECRET=$OBO_SECRET \
      ZTE_ACAP_PROFILES_LOCATION=file:/app/certs/acap-profiles/*.yaml \
      ZTE_POLICY_FILE=file:/app/certs/zte-policies.yaml \
+     ZTE_LLM_API_KEY=secretref:llm-api-key \
      ZTE_INTERNAL_API_KEY=secretref:internal-api-key \
      KEYCLOAK_ISSUER_URI=https://placeholder.invalid/auth/realms/zte-realm \
      ZTE_UI_OIDC_AUTHORITY=https://placeholder.invalid/auth/realms/zte-realm" \
@@ -277,6 +291,14 @@ if [ -n "$ADMIN_TOKEN" ]; then
       "$ORIGIN/api/v1/admin/inventory" \
       -d '{"name":"hubspot-mcp","targetType":"MCP","baseUrl":"http://mcp-bridge:9090"}')
   echo "inventory onboard hubspot-mcp -> $CODE"
+  # ADR-039: the chat backend is routed by the same inventory-driven mechanism
+  # (/api/v1/chat/** -> this baseUrl), so it has to be registered like any other
+  # service rather than hard-wired into the gateway.
+  CODE=$(curl -sk -m 60 -o /dev/null -w '%{http_code}' -X POST \
+      -H "Authorization: Bearer $ADMIN_TOKEN" -H "Content-Type: application/json" \
+      "$ORIGIN/api/v1/admin/inventory" \
+      -d '{"name":"chat","targetType":"REST","baseUrl":"https://chat:8084"}')
+  echo "inventory onboard chat -> $CODE"
 else
   echo "WARN: could not obtain an admin token — onboard hubspot-mcp manually via the Registry tab" >&2
 fi
@@ -285,6 +307,7 @@ echo
 echo "══════════════════════════════════════════════════════"
 echo " Admin Console:    $ORIGIN/admin/index.html"
 echo " Approval Center:  $ORIGIN/approver/index.html"
+echo " Chat Console:     $ORIGIN/chat/index.html"
 echo " Logins:           deploy/azure/out/cloud-credentials.env (local only)"
 echo " Demo run:         az containerapp job start -n agent-runner -g $RG"
 echo "══════════════════════════════════════════════════════"

@@ -15,10 +15,11 @@ docker build -f gateway-service/Dockerfile -t "$IMG/zteasy-gateway:$TAG" .
 docker build -f service-a/Dockerfile       -t "$IMG/zteasy-service-a:$TAG" .
 docker build -f service-b/Dockerfile       -t "$IMG/zteasy-service-b:$TAG" .
 docker build -f zt-agents/Dockerfile       -t "$IMG/zteasy-zt-agents:$TAG" .
+docker build -f zt-chat/Dockerfile         -t "$IMG/zteasy-chat:$TAG" .
 docker build -f ../hubspot-mcp/Dockerfile.bridge -t "$IMG/hubspot-mcp-bridge:$TAG" ../hubspot-mcp
 docker build -f ../hubspot-mcp/Dockerfile.agents -t "$IMG/hubspot-mcp-agents:$TAG" ../hubspot-mcp
 
-for image in zteasy-gateway zteasy-service-a zteasy-service-b zteasy-zt-agents hubspot-mcp-bridge hubspot-mcp-agents; do
+for image in zteasy-gateway zteasy-service-a zteasy-service-b zteasy-zt-agents zteasy-chat hubspot-mcp-bridge hubspot-mcp-agents; do
   docker push "$IMG/$image:$TAG"
 done
-echo "pushed 6 images to $IMG/*:$TAG (keep them PRIVATE — see ADR-027)"
+echo "pushed 7 images to $IMG/*:$TAG (keep them PRIVATE — see ADR-027)"

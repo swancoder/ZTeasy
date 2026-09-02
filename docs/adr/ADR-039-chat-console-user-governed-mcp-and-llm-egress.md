@@ -1,6 +1,6 @@
 # ADR-039 — A chat console: governing a person the way we governed an agent
 
-**Status:** Accepted · 2026-09-02 · **Phases A and B of 4 implemented**
+**Status:** Accepted · 2026-09-02 · **All four phases implemented and verified live**
 **Context:** Stage 39 · builds on ADR-010 (agent identity), ADR-020 (ACAP scope), ADR-029 (metering)
 
 ## Context
@@ -147,3 +147,60 @@ neither can be mistaken for an empty result.
 Four tool rounds per message, then the assistant says it stopped. Every round is a
 metered model call, so an unbounded loop spends real money; "the model will stop"
 is not a budget.
+
+## Phases C and D — the console, and what the live run showed
+
+Two panels: the conversation on the left, on the right every decision the gateway
+made about that person. The trace polls on its own timer rather than only after a
+message, because a decision can arrive without the person typing — an approval
+decided elsewhere, or an agent's call under the same rules.
+
+Deployment mirrors the other consoles: a third SPA bundle with its own Keycloak
+client (`zte-chat-ui`) and its own realm role (`CHAT_USER`), served at `/chat/`;
+the backend is a downstream service registered in the inventory like any other, so
+`/api/v1/chat/**` routes to it by the same mechanism that routes `service-a`.
+
+### The scope that governs a person
+
+`role-chat-user.yaml` is an ACAP profile whose `agentId` is a role URN. It gives a
+human exactly what the CRM agent gets: EMEA only, a named field list, no writes.
+Nothing is softer because a person is typing.
+
+### Verified live, end to end
+
+| asked | happened |
+|---|---|
+| "how many EMEA contacts?" | model chose `email, firstname, lastname` → **DENIED** by the role's ACAP field list, and the assistant reported the refusal and its reason |
+| same, with allowed fields | **ALLOWED**, 9 contacts returned |
+| "email rep@nordwind.example" | **HELD**, routed to `role:APPROVER`, visible in the Approval Center as raised by `zte-test-user`, decidable by the DPO |
+
+The person's own trace showed all of it — `/api/v1/chat`, `/api/v1/llm/messages`,
+`/sse`, `tools/list`, `read_contacts` ALLOW, `send_email` HOLD — and their spend
+came back as **15,434 input / 1,018 output tokens over 6 calls, 56,642 micros**,
+attributed to `zte-test-user` by the gateway that made the calls.
+
+The first scenario is the one worth showing. Nobody wrote a demo script that
+picks forbidden fields: the model asked for the fields it thought it needed, and
+the field list in a policy file stopped it. That is the product working.
+
+## Self-critique (phases C and D)
+
+- **The chat backend borrowed another service's certificate** in its first
+  deployed config (`service-a.p12`), and the gateway refused the connection for a
+  name mismatch — correctly. Fixed with its own `chat.p12`; the lesson is that a
+  service presenting another's certificate is indistinguishable from it to
+  anything checking, and reusing one is not a shortcut but a merge of two
+  identities.
+- **Tool arguments still reach the model unfiltered on the way out.** ADR-032's
+  masking applies to responses. A person can therefore type a customer's data into
+  a chat message and it will go to the vendor — the gateway meters that call but
+  does not inspect its content.
+- **No budget, only a meter.** A person can spend until someone notices. The ACAP
+  threshold mechanism already escalates a tool call to HOLD on a daily limit; the
+  same shape applied to `costMicros` is the obvious next step and is not built.
+- **The conversation lives in the browser.** Refreshing the page loses it. That is
+  deliberate (no server-side store of a user's CRM conversation), but it means the
+  trace panel outlives the chat it explains.
+- **`tools/list` is unfiltered by design** (phase B) — worth re-stating here,
+  because the demo now depends on it: the model is shown tools it may not use so
+  that the refusal happens in front of the person.

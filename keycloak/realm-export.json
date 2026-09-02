@@ -72,6 +72,13 @@
         "composite": false,
         "clientRole": false,
         "containerId": "zte-realm"
+      },
+      {
+        "name": "CHAT_USER",
+        "description": "May use the Chat Console: spend tokens through the gateway and call MCP tools as themselves (ADR-039)",
+        "composite": false,
+        "clientRole": false,
+        "containerId": "zte-realm"
       }
     ],
     "client": {}
@@ -316,6 +323,61 @@
           }
         }
       ]
+    },
+    {
+      "clientId": "zte-chat-ui",
+      "name": "ZTeasy Chat Console",
+      "description": "Public SPA client for the chat console (ADR-039)",
+      "enabled": true,
+      "protocol": "openid-connect",
+      "publicClient": true,
+      "bearerOnly": false,
+      "standardFlowEnabled": true,
+      "implicitFlowEnabled": false,
+      "directAccessGrantsEnabled": false,
+      "serviceAccountsEnabled": false,
+      "authorizationServicesEnabled": false,
+      "redirectUris": [
+        "http://localhost:8080/chat/*",
+        "https://localhost:8443/chat/*"
+      ],
+      "webOrigins": [
+        "http://localhost:8080",
+        "https://localhost:8443"
+      ],
+      "attributes": {
+        "pkce.code.challenge.method": "S256"
+      },
+      "protocolMappers": [
+        {
+          "name": "realm-roles-mapper",
+          "protocol": "openid-connect",
+          "protocolMapper": "oidc-usermodel-realm-role-mapper",
+          "consentRequired": false,
+          "config": {
+            "claim.name": "realm_access.roles",
+            "jsonType.label": "String",
+            "multivalued": "true",
+            "userinfo.token.claim": "true",
+            "id.token.claim": "true",
+            "access.token.claim": "true"
+          }
+        },
+        {
+          "name": "username-mapper",
+          "protocol": "openid-connect",
+          "protocolMapper": "oidc-usermodel-property-mapper",
+          "consentRequired": false,
+          "config": {
+            "userinfo.token.claim": "true",
+            "user.attribute": "username",
+            "id.token.claim": "true",
+            "access.token.claim": "true",
+            "claim.name": "preferred_username",
+            "jsonType.label": "String"
+          }
+        }
+      ]
     }
   ],
   "users": [
@@ -330,7 +392,8 @@
       "requiredActions": [],
       "realmRoles": [
         "ADMIN",
-        "APPROVER"
+        "APPROVER",
+        "CHAT_USER"
       ],
       "clientRoles": {}
     },
@@ -344,7 +407,8 @@
       "credentials": [],
       "requiredActions": [],
       "realmRoles": [
-        "USER"
+        "USER",
+        "CHAT_USER"
       ],
       "clientRoles": {}
     },
@@ -371,7 +435,8 @@
       "requiredActions": [],
       "realmRoles": [
         "CEO",
-        "USER"
+        "USER",
+        "CHAT_USER"
       ],
       "clientRoles": {}
     },

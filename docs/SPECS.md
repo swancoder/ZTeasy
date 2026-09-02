@@ -82,7 +82,8 @@ auditable — the opposite of a mesh's "hide it in the sidecar" approach. See
 | 36 | Reminders before the deadline: thresholds as fractions of each item's own lifetime (`zte.approvals.reminder-fractions`, default `0.5`), and claim-then-send under `UNIQUE (approval_id, stage) WHERE kind = 'REMINDER'` so two gateway instances produce one message — expiry defends itself by changing status, a reminder changes nothing | [036](adr/ADR-036-approval-reminders.md) |
 | 37 | No secrets in the repository: every default removed from `application.yml`/compose/scripts, `keycloak/realm-export.json` reduced to a template with placeholders, `scripts/generate-dev-secrets.sh` writing a gitignored `.env` (read by spring-dotenv and by compose), integration tests generating their realm from the template with `src/it`-only fixtures, and `deploy/azure/rotate-secrets.sh` rotating everything the repo had published | [037](adr/ADR-037-no-secrets-in-the-repository.md) |
 | 38 | Authenticated gateway→MCP hop: the bridge requires TLS with a client certificate and authorises `CN=zte-gateway-mcp` specifically — a hop identity nothing else holds, because the shared `client.p12` is also on the agent runner; health stays open to any CA-signed peer; the bridge refuses to start without it | [038](adr/ADR-038-authenticating-the-mcp-backend-hop.md) |
-| 39+ | Backlog (rate limiting, ABAC…) | see §9 |
+| 39 | Chat console: `McpCaller` so an MCP decision can be about a person (`user:`/`role:` sources, ACAP looked up by username then role — agent path unchanged), gateway LLM egress holding the vendor key and metering tokens from the vendor's own response, `/api/v1/me/events` scoped in SQL, `zt-chat` backend running the tool loop with the user's own token, `zt-chat-ui` two-panel console at `/chat/` with client `zte-chat-ui` and role `CHAT_USER`, ACAP profile keyed `role:CHAT_USER` | [039](adr/ADR-039-chat-console-user-governed-mcp-and-llm-egress.md) |
+| 40+ | Backlog (rate limiting, ABAC…) | see §9 |
 
 **Testing:** `./gradlew test` (unit — every package below has direct
 coverage for its pure decision logic; I/O-calling code that has no
@@ -1085,6 +1086,7 @@ automatically instead of needing its own `WebFilter` (ADR-012).
 | [036](adr/ADR-036-approval-reminders.md) | Reminding Before the Deadline (claim-then-send across instances) |
 | [037](adr/ADR-037-no-secrets-in-the-repository.md) | No Secrets in the Repository (reverses ADR-030's dev-value exception) |
 | [038](adr/ADR-038-authenticating-the-mcp-backend-hop.md) | Authenticating the Gateway → MCP Backend Hop (closes ADR-018's untouched hop) |
+| [039](adr/ADR-039-chat-console-user-governed-mcp-and-llm-egress.md) | Chat Console — Governing a Person Like an Agent, and Model Egress Through the Gate |
 
 ---
 

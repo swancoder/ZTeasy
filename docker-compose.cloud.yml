@@ -179,6 +179,25 @@ services:
       - ./certs:/app/certs:ro
     networks: [zte-cloud]
 
+  # ── Chat console backend (ADR-039) ──────────────────────────────────────
+  # Holds no model credential and no MCP hop certificate: it reaches the gateway
+  # and nothing past it, and every call it makes is made with a user's own token.
+  chat:
+    build:
+      context: .
+      dockerfile: zt-chat/Dockerfile
+    container_name: ztec-chat
+    restart: unless-stopped
+    environment:
+      ZTE_CERTS_DIR: /app/certs
+      ZTE_KEY_PASSWORD: ${ZTE_KEY_PASSWORD?run scripts/generate-dev-secrets.sh}
+      ZTE_GATEWAY_URI: https://gateway:8080
+      KEYCLOAK_ISSUER_URI: ${ZTE_EXTERNAL_ORIGIN:-https://localhost:8443}/auth/realms/zte-realm
+      KEYCLOAK_JWKS_URI: http://keycloak:8080/auth/realms/zte-realm/protocol/openid-connect/certs
+    volumes:
+      - ./certs:/app/certs:ro
+    networks: [zte-cloud]
+
   zt-agents:
     build:
       context: .

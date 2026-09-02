@@ -15,10 +15,12 @@ spring:
 server:
   port: ${SERVER_PORT:8084}
   ssl:
-    # Same posture as service-a/service-b (ADR-018): this service is reachable only
-    # through the gateway, and it still requires a client certificate to be reached.
+    # Same posture as service-a/service-b (ADR-018): reachable only through the
+    # gateway, and still requiring a client certificate to be reached. With its own
+    # certificate — borrowing service-a's made the gateway reject the connection for
+    # a name mismatch, correctly.
     enabled: ${ZTE_CHAT_SSL_ENABLED:true}
-    key-store: file:${ZTE_CERTS_DIR:./certs}/service-a.p12
+    key-store: file:${ZTE_CERTS_DIR:./certs}/chat.p12
     key-store-password: ${ZTE_KEY_PASSWORD}
     key-store-type: PKCS12
     client-auth: need

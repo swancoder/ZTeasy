@@ -159,6 +159,28 @@ openssl pkcs12 -export \
     -out gateway.p12 -passout "pass:${PASS}" \
     -name "gateway"
 
+# ── 6a. Chat backend server certificate (ADR-039) ───────────────────────────
+# Its own identity, not a borrowed one: the first cut of zt-chat's config reused
+# service-a.p12 and the gateway refused the connection with "No subject
+# alternative DNS name matching chat found" — which was the right refusal. A
+# service that presents another service's certificate is indistinguishable from
+# that service to anything checking.
+info "6a/7 Generating chat backend server certificate ..."
+openssl req -newkey rsa:2048 \
+    -keyout chat.key -out chat.csr \
+    -nodes -subj "${SUBJ_BASE}/CN=chat"
+
+openssl x509 -req \
+    -in chat.csr -CA ca.crt -CAkey ca.key -CAcreateserial \
+    -out chat.crt -days $DAYS_SVC \
+    -extfile <(printf "subjectAltName=DNS:chat,DNS:localhost,IP:127.0.0.1\nextendedKeyUsage=serverAuth")
+
+openssl pkcs12 -export \
+    -in chat.crt -inkey chat.key \
+    -certfile ca.crt \
+    -out chat.p12 -passout "pass:${PASS}" \
+    -name "chat"
+
 # ── 6. MCP backend hop: its own server cert AND its own client identity ─────
 # ADR-038. Everything else in this PKI shares one client identity
 # (client.p12, CN=zte-internal-client) — and the agent-runner holds it too, so
