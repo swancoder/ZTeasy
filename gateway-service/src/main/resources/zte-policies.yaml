@@ -282,6 +282,29 @@ agentMcpToolCalls:
 # Javadoc for why). effect is unused here (matched via matchAny, not
 # evaluate) but kept ALLOW by convention for readability. mcpTarget
 # (ADR-023) scoped the same way as the grants above.
+  # ── ADR-039: the legacy tool surface is refused with a reason ────────────
+  # get_*/…_all_data predate ACAP and carry no resource convention, so
+  # AcapScopeEvaluator cannot tighten them: no territory check, no field list.
+  # They were already refused by deny-by-default, but "no policy grants you this"
+  # tells the person nothing. An explicit DENY names the reason instead — and
+  # protects against someone later "fixing" the confusion with a grant, which
+  # would hand out unscoped access to the very data ACAP exists to scope.
+  - id: mcp-deny-legacy-unscoped-get-contacts
+    effect: DENY
+    source: CHAT_USER
+    target: get_contacts
+    mcpTarget: hubspot-mcp
+  - id: mcp-deny-legacy-unscoped-get-deals
+    effect: DENY
+    source: CHAT_USER
+    target: get_deals
+    mcpTarget: hubspot-mcp
+  - id: mcp-deny-legacy-unscoped-update-deal-stage
+    effect: DENY
+    source: CHAT_USER
+    target: update_deal_stage
+    mcpTarget: hubspot-mcp
+
   # ── ADR-039: the same tools, granted to a person ─────────────────────────
   # A human in the chat console gets exactly the coarse grants the CRM agent has.
   # What they may actually do with them is then tightened by the ACAP profile
@@ -301,6 +324,15 @@ agentMcpToolCalls:
     effect: ALLOW
     source: CHAT_USER
     target: read_activities
+    mcpTarget: hubspot-mcp
+  # Granted coarsely ON PURPOSE so the demo can show the two layers disagreeing:
+  # the rule below lets a person call update_deal, and the ACAP profile's
+  # writeAllowed:false refuses it anyway. Same word DENY, different source — which
+  # is the whole answer to "which file is the source of truth" (ADR-039).
+  - id: mcp-allow-chat-user-update-deal
+    effect: ALLOW
+    source: CHAT_USER
+    target: update_deal
     mcpTarget: hubspot-mcp
   - id: mcp-allow-chat-user-draft-followup
     effect: ALLOW

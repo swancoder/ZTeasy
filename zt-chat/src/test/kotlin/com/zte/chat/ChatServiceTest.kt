@@ -23,7 +23,7 @@ class ChatServiceTest {
     private val mapper = ObjectMapper()
     private val llm: LlmClient = mock()
     private val mcp: McpClient = mock()
-    private val service = ChatService(llm, mcp, mapper, 4)
+    private val service = ChatService(llm, mcp, mapper, 4, "get_contacts=read_contacts")
 
     private fun history(text: String): ArrayNode = mapper.createArrayNode().apply {
         add(mapper.createObjectNode().apply { put("role", "user"); put("content", text) })

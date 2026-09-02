@@ -144,6 +144,10 @@ zte:
     # ADR-032). Matters only in multi-instance deployments, where a toggle
     # made on one instance is otherwise invisible to the others.
     overlay-refresh-ms: ${ZTE_POLICY_OVERLAY_REFRESH_MS:20000}
+    # How often each instance re-reads the policy FILE (ADR-039). The console's
+    # reload button only reloads the instance that served it, and MCP decisions are
+    # made by the other one — an edit that looked applied was not.
+    file-refresh-ms: ${ZTE_POLICY_FILE_REFRESH_MS:30000}
     default-effect: ${ZTE_POLICY_DEFAULT_EFFECT:DENY}
     user-client-id: ${ZTE_POLICY_USER_CLIENT_ID:zte-gateway}
     # Every client whose tokens carry a person (ADR-039). A single value here was a

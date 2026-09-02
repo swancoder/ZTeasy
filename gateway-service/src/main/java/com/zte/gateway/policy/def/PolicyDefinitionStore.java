@@ -65,6 +65,41 @@ public class PolicyDefinitionStore {
         return current.get();
     }
 
+    /**
+     * Re-reads the policy file on a timer so that every instance converges on what is
+     * actually on disk (ADR-039).
+     *
+     * <p>{@link #reload()} only reloads the instance that served the request, and this
+     * deployment runs two gateways behind two front doors (ADR-028): pressing "Reload
+     * Policies" in the console reloaded the browser-facing one while the agent-facing
+     * one — the instance that decides MCP calls — kept the old document. Observed live:
+     * a freshly granted rule had no effect on a chat tool call until the second
+     * instance was reloaded by hand.
+     *
+     * <p>Same shape as the ADR-032 overlay refresh, and the same honest caveat: this is
+     * polling, not invalidation. An edit takes effect on every instance within one
+     * interval, and the explicit endpoint stays for when that wait is too long.
+     */
+    @org.springframework.scheduling.annotation.Scheduled(
+            fixedDelayString = "${zte.policy.file-refresh-ms:30000}",
+            initialDelayString = "${zte.policy.file-refresh-ms:30000}")
+    void refreshFromFile() {
+        synchronized (reloadLock) {
+            try {
+                PolicyDocument next = loadAndValidateOrThrow();
+                if (!next.equals(current.get())) {
+                    current.set(next);
+                    log.info("[ZTE-POLICY] picked up an edited policy file: {} rule(s)",
+                            next.allRules().size());
+                }
+            } catch (RuntimeException e) {
+                // A half-written or invalid file must never replace a working policy set —
+                // same rule the explicit reload follows.
+                log.warn("[ZTE-POLICY] scheduled re-read failed, keeping the loaded policy: {}", e.toString());
+            }
+        }
+    }
+
     /** Re-reads and re-validates the configured file, off the Netty event loop, atomically swapping on success. */
     public Mono<PolicyReloadResult> reload() {
         return Mono.fromCallable(this::doReload)

@@ -24,13 +24,21 @@ class ChatService(
     private val llm: LlmClient,
     private val mcp: McpClient,
     private val mapper: ObjectMapper,
-    @Value("\${zte.chat.max-tool-rounds:4}") private val maxRounds: Int
+    @Value("\${zte.chat.max-tool-rounds:4}") private val maxRounds: Int,
+    @Value("\${zte.chat.superseded-tools:get_contacts=read_contacts,get_deals=read_deals,update_deal_stage=update_deal,export_all_data=read_contacts}")
+    private val superseded: String
 ) {
     private val log = LoggerFactory.getLogger(ChatService::class.java)
 
     private val system = """
         You are a CRM assistant inside ZTeasy, a Zero Trust gateway demo.
         You have CRM tools available. Use them when the user asks for CRM data or actions.
+
+        Prefer the scoped tools: read_contacts, read_deals, read_activities, draft_followup,
+        send_email. The older get_contacts / get_deals / update_deal_stage / export_all_data
+        tools are still advertised by the backend but are not covered by the scope profiles
+        this gateway enforces, so they are refused. If you catch yourself reaching for one,
+        use the read_* equivalent and pass the territory and the specific fields you need.
 
         Some calls will be refused by policy, or held for a human approval. When that
         happens, tell the user plainly what was refused and the reason the system gave.
@@ -134,13 +142,29 @@ class ChatService(
         result.path("content").filter { it.path("type").asText() == "text" }
             .joinToString("\n") { it.path("text").asText() }
 
-    /** Anthropic tool schema from the MCP tools/list result. */
+    /**
+     * Anthropic tool schema from the MCP tools/list result.
+     *
+     * <p>Superseded tools are **annotated, not removed**. Filtering them out would
+     * hide the governance the console exists to show — and a model that never sees a
+     * forbidden tool never demonstrates being refused one. But a model picks a tool
+     * by reading its description, so that is where the warning belongs: telling it in
+     * the system prompt and leaving the menu unmarked was advice in the wrong place,
+     * and it went on choosing `get_contacts` for "show me my clients" (ADR-039).
+     */
     private fun toolSchema(rpc: JsonNode): ArrayNode {
         val tools = mapper.createArrayNode()
         for (tool in rpc.path("result").path("tools")) {
+            val name = tool.path("name").asText()
+            val replacement = supersededBy[name]
+            val description = tool.path("description").asText("").let {
+                if (replacement == null) it
+                else "DEPRECATED — this tool is not covered by ZTeasy's scope profiles and every " +
+                        "call to it is refused by policy. Use `$replacement` instead. ($it)"
+            }
             (mapper.createObjectNode() as ObjectNode).apply {
-                put("name", tool.path("name").asText())
-                put("description", tool.path("description").asText(""))
+                put("name", name)
+                put("description", description)
                 set<JsonNode>("input_schema", tool.path("inputSchema").let {
                     if (it.isMissingNode || it.isNull) mapper.createObjectNode().put("type", "object") else it
                 })
@@ -149,6 +173,17 @@ class ChatService(
         }
         return tools
     }
+
+    /**
+     * The pre-ACAP tool surface the backend still advertises, mapped to what replaced
+     * it. Configured rather than hard-coded so a deployment fronting a different
+     * backend can describe its own legacy names.
+     */
+    private val supersededBy: Map<String, String> = superseded.split(",")
+        .mapNotNull { entry ->
+            val parts = entry.split("=")
+            if (parts.size == 2 && parts[0].isNotBlank()) parts[0].trim() to parts[1].trim() else null
+        }.toMap()
 
     /** One thing the assistant did, for the trace panel next to the conversation. */
     data class Step(val kind: String, val name: String, val detail: String)

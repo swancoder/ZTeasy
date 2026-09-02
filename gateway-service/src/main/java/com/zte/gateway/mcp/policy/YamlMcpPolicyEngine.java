@@ -116,8 +116,11 @@ public class YamlMcpPolicyEngine implements McpPolicyEngine {
             case ALLOWED -> checkHold(sources, toolName);
             case NO_MATCH -> policyDefaults.getDefaultEffect() == RuleEffect.ALLOW
                     ? checkHold(sources, toolName)
-                    : PolicyDecision.deny(
-                            "No policy grants agent '" + agentId + "' access to tool '" + toolName + "'");
+                    // ADR-039: say "user" for a person. "No policy grants agent 'zte-admin'"
+                    // reads like a system fault to the human it is refusing, and the whole
+                    // value of a refusal is that the person it lands on understands it.
+                    : PolicyDecision.deny("No policy grants " + (caller.human() ? "user" : "agent")
+                            + " '" + agentId + "' access to tool '" + toolName + "'");
         };
 
         return tightenViaAcapProfile(annotateInactive(decision, detailed.inactiveMatches()), caller, toolName, arguments);
