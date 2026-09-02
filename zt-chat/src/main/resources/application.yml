@@ -1,0 +1,55 @@
+# ADR-037: no secret has a default here. ADR-039: this service holds no model
+# credential at all — it calls the gateway, which holds it.
+spring:
+  application:
+    name: zt-chat
+  main:
+    web-application-type: reactive
+  security:
+    oauth2:
+      resourceserver:
+        jwt:
+          issuer-uri: ${KEYCLOAK_ISSUER_URI:http://localhost:8180/realms/zte-realm}
+          jwk-set-uri: ${KEYCLOAK_JWKS_URI:http://localhost:8180/realms/zte-realm/protocol/openid-connect/certs}
+
+server:
+  port: ${SERVER_PORT:8084}
+  ssl:
+    # Same posture as service-a/service-b (ADR-018): this service is reachable only
+    # through the gateway, and it still requires a client certificate to be reached.
+    enabled: ${ZTE_CHAT_SSL_ENABLED:true}
+    key-store: file:${ZTE_CERTS_DIR:./certs}/service-a.p12
+    key-store-password: ${ZTE_KEY_PASSWORD}
+    key-store-type: PKCS12
+    client-auth: need
+    trust-store: file:${ZTE_CERTS_DIR:./certs}/truststore.p12
+    trust-store-password: ${ZTE_KEY_PASSWORD}
+    trust-store-type: PKCS12
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health, info
+
+zte:
+  gateway:
+    uri: ${ZTE_GATEWAY_URI:https://localhost:8080}
+    timeout-seconds: ${ZTE_GATEWAY_TIMEOUT_SECONDS:180}
+  mtls:
+    certs-dir: ${ZTE_CERTS_DIR:./certs}
+    key-password: ${ZTE_KEY_PASSWORD}
+  mcp:
+    timeout-seconds: ${ZTE_MCP_TIMEOUT_SECONDS:60}
+  llm:
+    model: ${ZTE_CHAT_MODEL:claude-sonnet-4-6}
+    max-tokens: ${ZTE_CHAT_MAX_TOKENS:2048}
+  chat:
+    # Every round is a metered model call, so the loop is bounded rather than
+    # trusted to terminate.
+    max-tool-rounds: ${ZTE_CHAT_MAX_TOOL_ROUNDS:4}
+
+logging:
+  level:
+    root: INFO
+    com.zte.chat: DEBUG

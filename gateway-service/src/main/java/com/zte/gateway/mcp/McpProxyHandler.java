@@ -133,6 +133,21 @@ public class McpProxyHandler {
         String agentId = identity.agentId();
         String toolName = rpc.toolName();
         String argumentsJson = serializeArguments(rpc.toolArguments());
+
+        // ADR-039: "which tools exist" is not "call this tool". A caller that cannot
+        // discover the menu cannot be refused a dish in a way anybody understands —
+        // and for the chat console the refusal IS the demonstration, so the model is
+        // shown every tool and finds out from the gate which ones it may use. The
+        // listing is forwarded and audited; nothing about it reveals data, and every
+        // actual call still goes through the decision below.
+        if (rpc.toolName() == null && "tools/list".equals(rpc.method())) {
+            log.debug("MCP LIST sessionId={} caller={}", sessionId, agentId);
+            auditService.record(new McpAuditEvent(PROCESS_ID, agentId, "tools/list", "ALLOWED", Instant.now(),
+                    sessionId, "Tool discovery", httpContext.traceId(), httpContext.clientIp(),
+                    httpContext.userAgent(), identity.displayIdentity(), null));
+            return forwardService.execute(agentId, rpc).flatMap(response -> emit(sessionId, response));
+        }
+
         PolicyDecision decision = policyEngine.evaluate(identity.caller(), toolName, rpc.toolArguments());
 
         return switch (decision.outcome()) {

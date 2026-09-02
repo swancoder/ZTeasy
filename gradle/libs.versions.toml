@@ -56,6 +56,9 @@ springdoc-openapi-webflux-ui = { module = "org.springdoc:springdoc-openapi-start
 spring-test               = { module = "org.springframework.boot:spring-boot-starter-test" }
 spring-security-test      = { module = "org.springframework.security:spring-security-test" }
 reactor-test              = { module = "io.projectreactor:reactor-test" }
+# Kotlin-friendly Mockito (ADR-039): stubbing a suspendless reactive port from
+# Kotlin with the Java API needs casts everywhere; this keeps the tests readable.
+mockito-kotlin            = { module = "org.mockito.kotlin:mockito-kotlin", version = "5.4.0" }
 testcontainers-junit5     = { module = "org.testcontainers:junit-jupiter" }
 testcontainers-postgresql = { module = "org.testcontainers:postgresql" }
 keycloak-testcontainers   = { module = "com.github.dasniko:testcontainers-keycloak", version.ref = "keycloak-testcontainers" }

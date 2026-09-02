@@ -15,5 +15,7 @@ include(
     "auth-library",
     "service-a",
     "service-b",
-    "zt-agents"
+    "zt-agents",
+    // ADR-039: the chat console's backend — the tool-calling loop, run for a person
+    "zt-chat"
 )

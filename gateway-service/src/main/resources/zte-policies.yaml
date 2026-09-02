@@ -123,6 +123,14 @@ users2service:
 # (ADR-015) — matches an OIDC client id synced into idp_identities, same as
 # the bare form still does for backward compatibility.
   # ── ADR-039: the chat application's users ────────────────────────────────
+  # Reaching the chat backend at all is a decision: the role is what grants it.
+  - id: u2s-chat-user-chat-api
+    effect: ALLOW
+    source: CHAT_USER
+    target: chat
+    pathPattern: "/api/v1/chat/**"
+    methods: "POST"
+    priority: 0
   # A model call is a policy decision like any other — this is the rule that
   # makes spending money on tokens something a person is granted rather than
   # something an application can simply do.

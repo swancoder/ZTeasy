@@ -1,6 +1,6 @@
 # ADR-039 — A chat console: governing a person the way we governed an agent
 
-**Status:** Accepted · 2026-09-02 · **Phase A of 4 implemented**
+**Status:** Accepted · 2026-09-02 · **Phases A and B of 4 implemented**
 **Context:** Stage 39 · builds on ADR-010 (agent identity), ADR-020 (ACAP scope), ADR-029 (metering)
 
 ## Context
@@ -103,3 +103,47 @@ stream of tokens but a stream of decisions.
   the person.** For MCP calls made by a human that is now their username; for
   older rows it is an agent id, so a user sees nothing from before this stage
   rather than something wrong.
+
+## Phase B — the backend that runs the loop
+
+`zt-chat` is a separate module and a separate container, and its shape is chosen
+by what it must *not* be able to do.
+
+- **It holds no model credential.** It posts to the gateway's egress endpoint,
+  which injects the key. A compromised chat backend leaks nothing about the
+  vendor account and cannot spend a token the perimeter did not count.
+- **It is not given the ADR-038 hop certificate.** It holds the shared perimeter
+  identity (`client.p12`), which lets it reach the gate and — by design — nothing
+  past it. A chat backend able to call the MCP backend directly would be exactly
+  the bypass ADR-038 closed.
+- **It has no identity that can call a tool.** Every hop is made with the user's
+  own bearer token, relayed per request. Without a user, the service can do
+  nothing: the policy decision, the ACAP scope and the token bill are all about
+  the person, and there is no fallback identity to fall back to.
+- **It speaks the agent's transport**, `GET /sse` + `POST /message` with the
+  result correlated off the event stream (ADR-009). A synchronous convenience path
+  would have been less code and a second door into the same room.
+
+### Tool discovery is not tool use
+
+`tools/list` has no `params.name`, so the policy engine answered "Missing tool
+name" — a caller could not discover the menu at all. It now passes through,
+audited, unfiltered.
+
+Filtering the list to what this person may call was the obvious alternative and is
+the wrong choice here. The refusal *is* the demonstration: the model is shown
+every tool, tries one it should not, and is told by the gate — in front of the
+person who asked for it. Filtering would also teach a model that whatever it can
+see it may do, which is a bad thing for a model to learn.
+
+The system prompt tells the assistant that a refusal is an answer: report it, do
+not retry with different arguments, do not reach for another tool that gets the
+same data. Tests pin the rendering — a denial arrives as
+`REFUSED BY ZTEASY POLICY: <reason>`, a hold as `HELD FOR HUMAN APPROVAL`, and
+neither can be mistaken for an empty result.
+
+### Bounded
+
+Four tool rounds per message, then the assistant says it stopped. Every round is a
+metered model call, so an unbounded loop spends real money; "the model will stop"
+is not a budget.
