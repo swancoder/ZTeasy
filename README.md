@@ -960,8 +960,9 @@ python3 deploy/azure/make-cloud-realm.py --local
 #    starting something with a published password.
 docker compose up -d
 
-# 6. Set Keycloak user passwords (first time only) — values come from .env
-./scripts/set-keycloak-password.sh
+# 6. (Only if you need to reset a password without re-importing the realm —
+#    step 4 already baked every demo user's password in from .env)
+#    ./scripts/set-keycloak-password.sh
 
 # 7. Start services (each in a separate terminal). They read .env through
 #    spring-dotenv; without it they fail at startup naming the missing property.
