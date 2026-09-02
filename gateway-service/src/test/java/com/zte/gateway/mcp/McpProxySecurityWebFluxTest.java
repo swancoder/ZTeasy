@@ -70,7 +70,7 @@ import static org.springframework.security.test.web.reactive.server.SecurityMock
  * way {@code application-it.yml} disables it for the same reason.
  */
 @WebFluxTest(controllers = McpProxyHandler.class)
-@Import({McpRouterConfig.class, SecurityConfig.class})
+@Import({McpRouterConfig.class, SecurityConfig.class, McpProxySecurityWebFluxTest.PolicyDefaults.class})
 @TestPropertySource(properties = "zte.mtls.enabled=false")
 class McpProxySecurityWebFluxTest {
 
@@ -79,6 +79,19 @@ class McpProxySecurityWebFluxTest {
 
     @Autowired
     private ObjectMapper objectMapper;
+
+    /**
+     * ADR-039: the handler asks this whether a token's client carries a person. A
+     * real instance rather than a mock, because its defaults ARE the behaviour under
+     * test here — an agent's client-credentials identity must not be read as a human.
+     */
+    @org.springframework.boot.test.context.TestConfiguration
+    static class PolicyDefaults {
+        @org.springframework.context.annotation.Bean
+        com.zte.gateway.policy.def.PolicyDefaultsProperties policyDefaultsProperties() {
+            return new com.zte.gateway.policy.def.PolicyDefaultsProperties();
+        }
+    }
 
     @MockBean
     private McpSessionManager sessionManager;

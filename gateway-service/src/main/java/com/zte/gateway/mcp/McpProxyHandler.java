@@ -59,6 +59,7 @@ public class McpProxyHandler {
     private final McpPolicyEngine policyEngine;
     private final McpAuditService auditService;
     private final McpForwardService forwardService;
+    private final com.zte.gateway.policy.def.PolicyDefaultsProperties policyDefaults;
     private final PendingApprovalService pendingApprovalService;
     private final ObjectMapper objectMapper;
 
@@ -66,12 +67,14 @@ public class McpProxyHandler {
                             McpPolicyEngine policyEngine,
                             McpAuditService auditService,
                             McpForwardService forwardService,
+                            com.zte.gateway.policy.def.PolicyDefaultsProperties policyDefaults,
                             PendingApprovalService pendingApprovalService,
                             ObjectMapper objectMapper) {
         this.sessionManager = sessionManager;
         this.policyEngine = policyEngine;
         this.auditService = auditService;
         this.forwardService = forwardService;
+        this.policyDefaults = policyDefaults;
         this.pendingApprovalService = pendingApprovalService;
         this.objectMapper = objectMapper;
     }
@@ -230,12 +233,14 @@ public class McpProxyHandler {
                     String clientId = jwt.getClaimAsString("azp");
                     String preferredUsername = jwt.getClaimAsString("preferred_username");
 
-                    // ADR-039: a token carrying preferred_username is a person, and the
-                    // decision is made about the person — their username and roles — with
-                    // the application they came through offered as an additional source.
-                    // A client-credentials token has no such claim and stays an agent, so
-                    // every existing rule keeps matching exactly as before.
-                    if (preferredUsername != null && !preferredUsername.isBlank()) {
+                    // ADR-039: a person is recognised by the CLIENT their token came from,
+                    // not by the presence of preferred_username — Keycloak puts that claim on
+                    // service-account tokens too ("service-account-<client>"), so the first
+                    // version of this check classified every agent as a human and silently
+                    // dropped its ACAP profile. Same rule as ZteAuthorizationFilter uses, on
+                    // purpose: one definition of "person" for the whole gateway.
+                    if (policyDefaults.isUserClient(clientId)
+                            && preferredUsername != null && !preferredUsername.isBlank()) {
                         McpCaller caller = McpCaller.user(preferredUsername, realmRoles(jwt), clientId);
                         return new CallerIdentity(caller.id(), preferredUsername, caller);
                     }

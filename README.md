@@ -338,6 +338,47 @@ and both consoles show whether the last contact was the original announcement or
 reminder. Both gateway apps run this sweep; each stage is claimed in the database
 before the message goes out, so they produce one reminder rather than two.
 
+### Chat Console (ADR-039) — a person using the agents' tools
+
+`https://demo.zteasy.tech/chat/index.html` (locally
+`https://localhost:8080/chat/index.html`) — a third SPA with its own Keycloak
+client `zte-chat-ui` and its own realm role `CHAT_USER`, held in the dev realm by
+`zte-admin`, `zte-test-user` and `zte-ceo`.
+
+Left panel: a chat assistant with the CRM tools the demo's agent has. Right panel:
+every decision the gateway made about *you*, polled live, scoped to you in SQL.
+The header carries your own token spend for the day.
+
+What makes it more than a chat window:
+
+- **The decision is about the person.** An MCP call from here is evaluated against
+  `user:<name>` and `role:<r>` (ADR-039), and tightened by the ACAP profile keyed
+  to the role — `role:CHAT_USER`: EMEA only, a named field list, no writes. The
+  same shape the CRM agent gets; nothing is softer because a human is typing.
+- **The model is reached through the gateway**, which holds the vendor key, meters
+  the tokens out of the vendor's own response and bills them to the person. The
+  chat backend holds no model credential at all.
+- **The tool list is deliberately unfiltered**, so the assistant can try something
+  it may not do — and be refused in front of the person who asked.
+
+Three things to try, in order:
+
+```bash
+# 1. "How many contacts do we have in EMEA?"
+#    The model picks the fields it wants. If they are not on the profile's list,
+#    ACAP denies the call and the assistant reports the refusal and its reason.
+# 2. "List EMEA contacts showing only name, company and lifecycle_stage."
+#    Allowed — the data comes back.
+# 3. "Email rep@nordwind.example about the renewal."
+#    Held, routed to role:APPROVER, waiting in the Approval Center. Sign in there
+#    as zte-dpo to decide it.
+```
+
+Run it locally with `./gradlew :zt-chat:bootRun` alongside the gateway; the
+gateway needs `ZTE_LLM_API_KEY` set to an Anthropic key (it, not the chat backend,
+is what talks to the vendor).
+
+
 ```bash
 # Try it: log in as the USER-role account (scripts/set-keycloak-password.sh
 # sets the local dev passwords; cloud credentials live only in the gitignored

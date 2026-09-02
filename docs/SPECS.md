@@ -189,6 +189,8 @@ native `--import-realm`). See `docker-compose.yml`.
 | `gateway-service` | Java 21 | ZT entry point: JWT validation, YAML policy enforcement, OBO issuance, mTLS (inbound + outbound), MCP proxy, Admin Console API + static hosting, unified async audit trail | 8080 |
 | `service-a` | Java 21 (WebFlux) | First protected downstream; calls service-b | 8081 (mTLS), 9081 (mgmt) |
 | `service-b` | Java 21 (WebFlux) | Deepest downstream; validates OBO token | 8082 (mTLS), 9082 (mgmt) |
+| `zt-chat` | Kotlin 21 | Chat Console backend (ADR-039) — runs the tool-calling loop for a person, using that person's own token for every hop; holds no model credential and no MCP hop certificate | 8084 (mTLS API) |
+| `zt-chat-ui` | TypeScript | Chat Console SPA — conversation plus that person's own ZTeasy trace; served by the gateway at `/chat/` | — (static) |
 | `zt-agents` | Kotlin (WebFlux) | AI security copilot — Policy Auditor Agent | 8083 |
 | `zt-admin-ui` | TypeScript (Vite/React) | Admin Console SPA — built and packaged by `gateway-service`'s Gradle build, not run standalone | — (served by 8080) |
 | `certs` | shell | Dev cert generation (ZTE-CA, PKCS12 + PEM) | — |

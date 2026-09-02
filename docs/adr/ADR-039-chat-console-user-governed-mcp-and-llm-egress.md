@@ -204,3 +204,48 @@ the field list in a policy file stopped it. That is the product working.
 - **`tools/list` is unfiltered by design** (phase B) — worth re-stating here,
   because the demo now depends on it: the model is shown tools it may not use so
   that the refusal happens in front of the person.
+
+## Amendment (2026-09-02) — two defects the browser found that my verification could not
+
+The console was reported working after phase D. It was not, and the way it failed
+is more useful than the fix.
+
+**1. I verified the wrong path.** Every check I ran took a token from the
+`zte-gateway` client, because that client permits the password grant and a script
+can therefore get one. The browser uses `zte-chat-ui`, which correctly refuses it.
+So the path I exercised was never the path a person uses — and the difference
+mattered: `zte.policy.user-client-id` was a *single* client id, so every other
+`azp` — including all three browser consoles — was classified as a service
+principal and sent down the service-to-service path, where a human's roles are
+never consulted. The chat console got `DENY` on `/api/v1/chat`.
+
+This had been latent since the Admin Console shipped. It stayed invisible because
+the Admin Console and Approval Center only call gateway-local paths, which
+`AdminAuthorizationFilter` decides. The chat console is the first SPA to call a
+*routed* path, and it was refused for being a machine.
+
+Fixed with `zte.policy.user-client-ids`, a list. Membership means "tokens from
+this client identify a human"; it grants nothing on its own, since the person's
+roles still have to match a rule.
+
+**2. "Person" was defined by a claim that machines also carry.** The first version
+recognised a human by the presence of `preferred_username`. Keycloak puts that
+claim on *service-account* tokens too (`service-account-<client>`), so every agent
+was classified as a person — and, being a person, was looked up for an ACAP
+profile by username and role, found none, and lost its scope tightening entirely.
+Three integration tests caught it: calls that ADR-020 denies on territory, field
+list and read-only scope were forwarded to the backend instead.
+
+That is the more serious of the two. A governance system that silently stops
+applying scope to agents has failed at its one job, and the failure would have
+looked like the demo working. Both places now share one definition — the client
+the token came from — because two definitions of "who is a person" is one too many.
+
+**3. The trace panel audited its own polling.** Two rows every three seconds,
+burying the decisions the panel exists to show. `/api/v1/me/` is now on the same
+audit-exclusion list `/api/v1/admin/` has been on since ADR-013.
+
+The general lesson, and it is not a new one for this project: a check that uses a
+different credential, client or path than the real caller does is not a check of
+the real caller. It was a curl with the convenient client id, and it certified
+something that had never worked.

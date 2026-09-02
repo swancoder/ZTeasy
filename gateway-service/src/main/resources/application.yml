@@ -146,6 +146,10 @@ zte:
     overlay-refresh-ms: ${ZTE_POLICY_OVERLAY_REFRESH_MS:20000}
     default-effect: ${ZTE_POLICY_DEFAULT_EFFECT:DENY}
     user-client-id: ${ZTE_POLICY_USER_CLIENT_ID:zte-gateway}
+    # Every client whose tokens carry a person (ADR-039). A single value here was a
+    # latent bug: the browser SPAs were classified as service principals, which only
+    # went unnoticed while none of them called a routed path.
+    user-client-ids: ${ZTE_POLICY_USER_CLIENT_IDS:zte-gateway,zte-admin-ui,zte-approver-ui,zte-chat-ui}
 
   # ── Internal endpoints (/api/v1/internal/**) shared secret (ADR-027
   #    amendment). Blank = open, matching the original "reachable only on the
@@ -256,6 +260,9 @@ zte:
                             # generates more audit trail)
       - /approver/         # Approval Center SPA assets (ADR-026) — same class as /admin/
       - /chat/             # Chat Console SPA assets (ADR-039) — same class again
+      - /api/v1/me/        # A person's own trace panel polls this every few seconds
+                            # (ADR-039). Auditing it makes the panel show mostly itself —
+                            # two rows per poll, burying the decisions it exists to show.
       - /api/v1/dashboard/ # Executive dashboard reads (ADR-029) — pure reporting over
                             # data that is itself already audited
       - /api/v1/approver/  # Approval Center API — the decision itself is already audited

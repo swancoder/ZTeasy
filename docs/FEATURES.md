@@ -85,6 +85,7 @@ what it produces flows the other way.
 | [FEAT-14](features/FEAT-14-ai-policy-auditor.md) | AI Policy Auditor | An LLM reviews the active policy set and reports weaknesses | Demo-grade |
 | [FEAT-15](features/FEAT-15-deployment-operations.md) | Deployment & Operations | Reproducible cloud deployment, custom domain, stop/start, one perimeter | Working |
 | [FEAT-16](features/FEAT-16-perimeter-hardening.md) | Perimeter Hardening | Internal endpoints, IdP admin surface and credentials are closed by construction | Working |
+| [FEAT-17](features/FEAT-17-chat-console.md) | Chat Console | A person uses the agents' CRM tools from a chat window, and every call is a policy decision about them — with their own trace and their own token bill beside it | Working, no budget enforcement |
 
 ---
 

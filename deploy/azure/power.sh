@@ -29,7 +29,10 @@ AZ="${AZ:-az}"
 RG="${RG:-zteasy-demo-rg}"
 
 # Dependency order for start; stop walks it backwards.
-APPS=(postgres keycloak service-b service-a mcp-bridge zt-agents gateway gateway-web)
+# chat sits with the other downstream services: it must be up before the
+# gateways route to it, and it must be stopped with everything else — an app
+# left out of this list keeps billing all night while looking parked (ADR-039).
+APPS=(postgres keycloak service-b service-a chat mcp-bridge zt-agents gateway gateway-web)
 
 latest_revision() {
   $AZ containerapp revision list -n "$1" -g "$RG" \

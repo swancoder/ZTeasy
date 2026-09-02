@@ -147,7 +147,10 @@ public class ZteAuthorizationFilter implements GlobalFilter, Ordered {
     /** {@code true} when the JWT's {@code azp} identifies a service/agent client rather than the interactive user client. */
     private boolean isServicePrincipal(JwtAuthenticationToken jwtAuth) {
         String azp = jwtAuth.getToken().getClaimAsString("azp");
-        return azp != null && !azp.equals(policyDefaults.getUserClientId());
+        // ADR-039: a browser SPA is not a service principal. Agents authenticate with
+        // client credentials and are absent from this list; people arrive through one
+        // of the consoles and are decided on their own roles.
+        return azp != null && !policyDefaults.isUserClient(azp);
     }
 
     /**
