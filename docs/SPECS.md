@@ -79,7 +79,8 @@ auditable — the opposite of a mesh's "hide it in the sidecar" approach. See
 | 33 | Demo durability and cloud-only configuration: `db-backup` job (`pg_dump` → Azure Files share) with the same share mounted read-only at `/docker-entrypoint-initdb.d` so the official Postgres image restores it on every start, `power.sh stop` backing up first and aborting on failure, R2DBC validation-on-borrow so a restarted database no longer 500s the gateway, `ZTE_GATEWAY_CA_CERT` (metering had never reported: the property was read but never set), `ZTE_POLICY_FILE` on the share (makes Reload Policies re-read an editable document), `attach-volume.sh` | [033](adr/ADR-033-demo-durability-and-cloud-configuration.md) |
 | 34 | Approval routing, entitlement and expiry: `routeTo` on agentMcpToolHolds rules carried through `PolicyDecision` into the approval row (the V13 column nothing ever wrote), per-viewer `canDecide`/`refusalReason`/`secondsRemaining` on both approval surfaces with 403 enforcement in the service, `expires_at` + `EXPIRED` terminal state swept on a timer and re-checked on the decision path, expiry audited as DENY/408 | [034](adr/ADR-034-approval-routing-and-expiry.md) |
 | 35 | Approval notifications: `addressedToYou` separate from `canDecide` (an unrouted call is decidable by anyone but addressed to `zte.approvals.default-notify`, `role:APPROVER` by default, resolved to people from the identity cache), "N for you" badge plus opt-in desktop notification on both surfaces, outbound webhook whose payload deliberately omits the call arguments, and `approval_notifications` recording every attempt including `SKIPPED` | [035](adr/ADR-035-approval-notifications.md) |
-| 36+ | Backlog (rate limiting, ABAC…) | see §9 |
+| 36 | Reminders before the deadline: thresholds as fractions of each item's own lifetime (`zte.approvals.reminder-fractions`, default `0.5`), and claim-then-send under `UNIQUE (approval_id, stage) WHERE kind = 'REMINDER'` so two gateway instances produce one message — expiry defends itself by changing status, a reminder changes nothing | [036](adr/ADR-036-approval-reminders.md) |
+| 37+ | Backlog (rate limiting, ABAC…) | see §9 |
 
 **Testing:** `./gradlew test` (unit — every package below has direct
 coverage for its pure decision logic; I/O-calling code that has no
@@ -396,7 +397,11 @@ HTTP+SSE transport needs `POST /message` to inject its result into an
    deliberately excludes the call's arguments, and every attempt lands in
    `approval_notifications`. Both consoles show a per-viewer `addressedToYou`
    badge — distinct from `canDecide`, since an unrouted call is decidable by
-   anyone yet still owned by someone.
+   anyone yet still owned by someone. `ApprovalReminderSweeper` (ADR-036) then
+   nudges the same audience once per configured fraction of the item's lifetime
+   (`zte.approvals.reminder-fractions`, `ZTE_APPROVALS_REMINDER_FRACTIONS`,
+   default `0.5`), claiming each stage in the database before sending so the two
+   gateway apps cannot both deliver it.
 5. **Allow** → `McpForwardService.execute(rpc)` (wraps
    `McpBackendClient.forward` + `DataMaskingFilter`, currently a pass-through
    stub) — shared with the Hold-then-approve path above so masking can't
@@ -771,8 +776,9 @@ target_id, relation_type)`.
 | `channel` | `VARCHAR(16)` + `CHECK` | `WEBHOOK` today; the in-app badge is derived per request and has nothing to record |
 | `audience` | `VARCHAR(128)`, nullable | The URN it was addressed to — the call's `routeTo`, or `zte.approvals.default-notify` |
 | `recipients` | `TEXT`, nullable | Usernames that URN resolved to **at send time** (from `idp_identity_relations`); a point-in-time record, never contact details |
-| `status` | `VARCHAR(10)` + `CHECK` | `SENT` / `FAILED` / `SKIPPED`. `SKIPPED` is stored, not omitted: "no channel configured" and "this role has no holders" are answers, and an empty table would read as a system that tried nothing |
+| `status` | `VARCHAR(10)` + `CHECK` | `CLAIMED` / `SENT` / `FAILED` / `SKIPPED`. `SKIPPED` is stored, not omitted: "no channel configured" and "this role has no holders" are answers, and an empty table would read as a system that tried nothing. `CLAIMED` (ADR-036) is the window between winning the right to send and recording the outcome — a row left there is a crash, not a delivery |
 | `detail` | `TEXT`, nullable | HTTP status, or the failure/skip reason shown in both consoles |
+| `kind` / `stage` | `VARCHAR(16)` + `CHECK`, `VARCHAR(16)` nullable | `RAISED` when the call was first held, `REMINDER` for a nudge (ADR-036); `stage` names the configured fraction that triggered it (`0.5`). `UNIQUE (approval_id, stage) WHERE kind = 'REMINDER'` is what makes two gateway instances produce one reminder — the row is inserted *before* the message is sent, so the loser of that race sends nothing |
 
 ---
 
@@ -972,10 +978,11 @@ did this documents exactly what was investigated and found.
   telemetry's exact-name-match requirement.
 - Code-split `zt-admin-ui`'s bundle (`swagger-ui-react` roughly tripled it).
 
-**Approvals** (ADR-034 closed routing/entitlement/expiry; ADR-035 closed
-notification): still open — retry for a failed delivery, a reminder before the
-deadline, per-audience channels, a four-eyes rule, delegation, and group-based
-routing (blocked on group claims reaching the token at all).
+**Approvals** (ADR-034 closed routing/entitlement/expiry; ADR-035 notification;
+ADR-036 reminders): still open — retry for a failed delivery, reaping `CLAIMED`
+rows left by an instance that died mid-send, escalation to a different audience,
+per-audience channels, a four-eyes rule, delegation, and group-based routing
+(blocked on group claims reaching the token at all).
 
 **Cloud durability** (ADR-033): the demo database is dumped to an Azure Files
 share by the `db-backup` job and restored automatically on start; a crash
@@ -1074,6 +1081,7 @@ automatically instead of needing its own `WebFilter` (ADR-012).
 | [033](adr/ADR-033-demo-durability-and-cloud-configuration.md) | Demo Durability and the Cloud-Only Configuration (amends ADR-027) |
 | [034](adr/ADR-034-approval-routing-and-expiry.md) | Approval Routing, Entitlement and Expiry (extends ADR-019/ADR-026) |
 | [035](adr/ADR-035-approval-notifications.md) | Approval Notifications — Addressing, Channels and Delivery Evidence |
+| [036](adr/ADR-036-approval-reminders.md) | Reminding Before the Deadline (claim-then-send across instances) |
 
 ---
 

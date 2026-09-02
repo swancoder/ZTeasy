@@ -212,6 +212,7 @@ zte-lightweight/
 | [ADR-033](docs/adr/ADR-033-demo-durability-and-cloud-configuration.md) | Demo Durability and the Cloud-Only Configuration (amends ADR-027) | Accepted |
 | [ADR-034](docs/adr/ADR-034-approval-routing-and-expiry.md) | Approval Routing, Entitlement and Expiry (extends ADR-019) | Accepted |
 | [ADR-035](docs/adr/ADR-035-approval-notifications.md) | Approval Notifications — Addressing, Channels and Delivery Evidence | Accepted |
+| [ADR-036](docs/adr/ADR-036-approval-reminders.md) | Reminding Before the Deadline (claim-then-send across instances) | Accepted |
 
 ---
 
@@ -326,6 +327,13 @@ deliberately **omits the call's arguments**, which are the sensitive part and
 stay behind a login. Every attempt is recorded in `approval_notifications` as
 `SENT`/`FAILED`/`SKIPPED` and shown per item, so "was anyone told?" is
 answerable — including when the answer is "no channel is configured".
+
+An undecided item is nudged again as its deadline nears (ADR-036):
+`ZTE_APPROVALS_REMINDER_FRACTIONS` (default `0.5`) lists fractions of each item's
+own lifetime — a fixed "an hour before" would be meaningless at a one-minute TTL —
+and both consoles show whether the last contact was the original announcement or a
+reminder. Both gateway apps run this sweep; each stage is claimed in the database
+before the message goes out, so they produce one reminder rather than two.
 
 ```bash
 # Try it: log in as the USER-role account (scripts/set-keycloak-password.sh

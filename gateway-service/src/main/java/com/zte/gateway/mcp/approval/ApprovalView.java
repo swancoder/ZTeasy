@@ -35,7 +35,11 @@ public record ApprovalView(
         String addressedTo,
         boolean addressedToYou,
         String notificationStatus,
-        Instant notifiedAt
+        Instant notifiedAt,
+        // Which contact this was (ADR-036): a bare timestamp cannot tell an
+        // operator whether anyone has been nudged since the item was raised.
+        String notificationKind,
+        String notificationStage
 ) {
 
     public static ApprovalView of(PendingApproval a, ApprovalEntitlement entitlement, ApprovalAudience audience,
@@ -51,6 +55,8 @@ public record ApprovalView(
                 refusal == null && !expired, expired ? "This approval has expired" : refusal, remaining,
                 addressedTo, entitlement.matches(addressedTo, decider),
                 notification == null ? null : notification.status(),
-                notification == null ? null : notification.createdAt());
+                notification == null ? null : notification.createdAt(),
+                notification == null ? null : notification.kind(),
+                notification == null ? null : notification.stage());
     }
 }

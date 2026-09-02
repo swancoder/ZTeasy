@@ -3,6 +3,7 @@ package com.zte.gateway.mcp.approval;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.dao.DuplicateKeyException;
 import org.springframework.http.MediaType;
 import org.springframework.stereotype.Component;
 import org.springframework.web.reactive.function.client.WebClient;
@@ -63,6 +64,66 @@ public class ApprovalNotifier {
     /** Fire-and-forget: returns immediately, the caller's held call does not wait on a chat server. */
     public void notifyRaised(PendingApproval approval) {
         deliver(approval).subscribe();
+    }
+
+    /**
+     * A reminder for an approval that is running out of time (ADR-036).
+     *
+     * <p>Claim first, send second. Both gateway apps run the reminder scheduler, and
+     * unlike expiry — which defends itself by changing the approval's status — a
+     * reminder leaves the approval untouched, so nothing would stop two instances
+     * from each sending, once per interval, until the deadline. The claim row is
+     * written under a unique index; the instance that loses that race gets a
+     * duplicate-key error and stops, having sent nothing.
+     */
+    Mono<ApprovalNotification> remind(PendingApproval approval, String stage, long secondsRemaining) {
+        return audience.resolve(approval).flatMap(aud -> {
+            String recipients = String.join(",", aud.members());
+            return notifications.save(ApprovalNotification.reminderClaim(approval.id(), stage, aud.urn(), recipients))
+                    .onErrorResume(DuplicateKeyException.class, e -> {
+                        log.debug("[ZTE-APPROVAL] reminder {} for {} already claimed elsewhere", stage, approval.id());
+                        return Mono.empty();
+                    })
+                    .flatMap(claim -> send(approval, aud, claim, secondsRemaining));
+        });
+    }
+
+    private Mono<ApprovalNotification> send(PendingApproval approval, ApprovalAudience.Audience aud,
+                                             ApprovalNotification claim, long secondsRemaining) {
+        if (webhookUrl.isEmpty()) {
+            return notifications.save(claim.settled(ApprovalNotification.Status.SKIPPED,
+                    "no zte.approvals.webhook.url configured"));
+        }
+        if (!aud.deliverable()) {
+            return notifications.save(claim.settled(ApprovalNotification.Status.SKIPPED,
+                    "audience '" + aud.urn() + "' resolves to nobody"));
+        }
+        return webClient.post()
+                .uri(webhookUrl)
+                .contentType(MediaType.APPLICATION_JSON)
+                .bodyValue(reminderBody(approval, aud, secondsRemaining))
+                .retrieve()
+                .toBodilessEntity()
+                .timeout(timeout)
+                .flatMap(r -> notifications.save(claim.settled(ApprovalNotification.Status.SENT,
+                        "HTTP " + r.getStatusCode().value())))
+                .onErrorResume(e -> {
+                    log.warn("[ZTE-APPROVAL] reminder for {} failed: {}", approval.id(), e.toString());
+                    return notifications.save(claim.settled(ApprovalNotification.Status.FAILED, e.toString()));
+                });
+    }
+
+    /** Same discipline as {@link #body} — no arguments — with the time pressure made explicit. */
+    Map<String, Object> reminderBody(PendingApproval approval, ApprovalAudience.Audience aud,
+                                      long secondsRemaining) {
+        Map<String, Object> body = body(approval, aud);
+        long minutes = Math.max(0, secondsRemaining / 60);
+        body.put("text", "Reminder — still undecided with " + minutes + " min left: " + body.get("text"));
+        @SuppressWarnings("unchecked")
+        Map<String, Object> detail = (Map<String, Object>) body.get("approval");
+        detail.put("reminder", true);
+        detail.put("secondsRemaining", secondsRemaining);
+        return body;
     }
 
     Mono<ApprovalNotification> deliver(PendingApproval approval) {

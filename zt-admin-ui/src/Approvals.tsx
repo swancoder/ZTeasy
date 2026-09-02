@@ -173,7 +173,9 @@ export default function Approvals({ accessToken }: Props) {
                         }}
                       >
                         {approval.notificationStatus === 'SENT'
-                          ? new Date(approval.notifiedAt!).toLocaleTimeString()
+                          ? `${new Date(approval.notifiedAt!).toLocaleTimeString()}${
+                              approval.notificationKind === 'REMINDER' ? ' ↻' : ''
+                            }`
                           : (approval.notificationStatus?.toLowerCase() ?? 'no record')}
                       </span>
                     </Tooltip>

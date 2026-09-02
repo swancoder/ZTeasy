@@ -148,6 +148,59 @@ class ApprovalNotifierTest {
         assertThat(saved.detail()).contains("role:NOBODY_HOLDS_THIS").contains("nobody");
     }
 
+    /**
+     * The claim is written before anything is sent, so the instance that loses the
+     * unique-index race sends nothing at all. Without this, both gateway apps would
+     * remind the same person every interval until the deadline — expiry is safe
+     * from that only because sweeping changes the approval's status, and a reminder
+     * changes nothing.
+     */
+    @Test
+    void reminder_losingTheClaimRace_sendsNothing() {
+        when(audience.resolve(any())).thenReturn(Mono.just(
+                new ApprovalAudience.Audience("role:APPROVER", List.of("zte-dpo"), true)));
+        when(notifications.save(any()))
+                .thenReturn(Mono.error(new org.springframework.dao.DuplicateKeyException("already claimed")));
+        WebClient.Builder mustNotBeUsed = WebClient.builder()
+                .exchangeFunction(req -> Mono.error(new AssertionError("a lost claim must not send")));
+
+        StepVerifier.create(new ApprovalNotifier(audience, notifications, mustNotBeUsed,
+                        "https://hooks.example/abc", 5000, "").remind(approval(), "0.5", 3600))
+                .verifyComplete();
+    }
+
+    @Test
+    void reminder_claimsThenSends_andSettlesTheSameRow() {
+        when(audience.resolve(any())).thenReturn(Mono.just(
+                new ApprovalAudience.Audience("role:APPROVER", List.of("zte-dpo"), true)));
+        when(notifications.save(any())).thenAnswer(inv -> Mono.just(inv.getArgument(0)));
+
+        StepVerifier.create(notifier("https://hooks.example/abc", respondingWith(HttpStatus.OK))
+                        .remind(approval(), "0.5", 1800)
+                        .map(ApprovalNotification::status))
+                .expectNext("SENT")
+                .verifyComplete();
+
+        ArgumentCaptor<ApprovalNotification> saved = ArgumentCaptor.forClass(ApprovalNotification.class);
+        verify(notifications, times(2)).save(saved.capture());
+        assertThat(saved.getAllValues().get(0).status()).isEqualTo("CLAIMED");
+        assertThat(saved.getAllValues().get(0).stage()).isEqualTo("0.5");
+        assertThat(saved.getAllValues().get(1).status()).isEqualTo("SENT");
+    }
+
+    /** A reminder is still a message leaving the perimeter: same omissions apply. */
+    @Test
+    void reminderPayload_saysHowLongIsLeft_andStillHidesTheArguments() {
+        Map<String, Object> body = notifier("https://hooks.example/abc", WebClient.builder())
+                .reminderBody(approval(),
+                        new ApprovalAudience.Audience("role:APPROVER", List.of("zte-dpo"), true), 1800);
+
+        assertThat((String) body.get("text")).startsWith("Reminder").contains("30 min left");
+        assertThat(body.toString())
+                .doesNotContain("rep@nordwind.example")
+                .doesNotContain("Your contract expires");
+    }
+
     @Test
     void timeoutIsBounded() {
         when(audience.resolve(any())).thenReturn(Mono.just(

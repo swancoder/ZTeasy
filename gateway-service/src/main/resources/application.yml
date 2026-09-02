@@ -181,6 +181,15 @@ zte:
     # interactive user), while the message gets a named addressee, because an
     # item addressed to everyone is an item addressed to no one.
     default-notify: ${ZTE_APPROVALS_DEFAULT_NOTIFY:role:APPROVER}
+    # When to nudge about an item nobody has decided (ADR-036), as fractions of
+    # that item's own lifetime — "halfway" is meaningful at any TTL, while a fixed
+    # "an hour before" is nonsense for a one-minute one. Comma-separated for more
+    # than one nudge (e.g. 0.5,0.9); blank disables reminders.
+    #
+    # Precision is bounded by reminder-interval-ms: a short-lived item can pass a
+    # threshold and expire between two sweeps, and then only the expiry is recorded.
+    reminder-fractions: ${ZTE_APPROVALS_REMINDER_FRACTIONS:0.5}
+    reminder-interval-ms: ${ZTE_APPROVALS_REMINDER_INTERVAL_MS:60000}
     # Base URL used to build the link in a notification (e.g. https://demo.zteasy.tech).
     # Blank means the message carries no link — a wrong link is worse than none.
     link-base: ${ZTE_APPROVALS_LINK_BASE:}

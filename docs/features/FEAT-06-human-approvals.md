@@ -1,6 +1,6 @@
 # FEAT-06 — Human-in-the-Loop Approvals
 
-**Maturity:** Working. Routing and expiry landed in ADR-034 (a hold rule may name `role:APPROVER`, enforced with a 403; items carry a deadline and expire into an audited terminal state). Notification landed in ADR-035: a per-viewer badge, an opt-in desktop notification and an outbound webhook, with every delivery attempt recorded. No retry and no reminder before the deadline yet.
+**Maturity:** Working. Routing and expiry landed in ADR-034 (a hold rule may name `role:APPROVER`, enforced with a 403; items carry a deadline and expire into an audited terminal state). Notification landed in ADR-035: a per-viewer badge, an opt-in desktop notification and an outbound webhook, with every delivery attempt recorded. Reminders before the deadline landed in ADR-036. Still no retry for a failed delivery.
 **Depends on:** FEAT-04 (produces holds), FEAT-02 (who may decide)
 **Feeds:** FEAT-07 (decisions are audited), FEAT-10/11 (queue depth, refusals)
 **Detail:** [SPECS §5.4](../SPECS.md) · [ADR-019](../adr/ADR-019-hold-decision-and-approval-queue.md), [ADR-026](../adr/ADR-026-standalone-approver-ui.md)
@@ -59,9 +59,14 @@ hold no realm role, so an agent can never approve its own call.
 - **A failed delivery is never retried** (ADR-035). The attempt is recorded as
   `FAILED` and nothing tries again, so a transient outage at the chat provider
   loses that notification permanently.
-- **No reminder before the deadline.** An item notified once when raised gets no
-  second chance to be seen before it expires — the natural pair to ADR-034's
-  expiry, deliberately out of scope for ADR-035.
+- **A reminder only amplifies the channel that exists** (ADR-036): with no
+  webhook configured it records a second `SKIPPED` — another entry about silence,
+  not another chance to be seen. Its precision is bounded by the sweep interval,
+  so a short-lived item can pass a threshold and expire between two sweeps.
+- **No escalation**: a reminder goes to the same audience. Calling in a different
+  one is a separate decision, with a different cost when it is wrong.
+- A `CLAIMED` row left by an instance that died mid-send permanently consumes
+  that reminder stage — visible in the console, not repaired automatically.
 - One webhook URL for every audience: `role:FINANCE` cannot be sent somewhere
   different from `role:APPROVER`.
 - **Expiry is swept on a timer**, so an item can read as PENDING for up to one

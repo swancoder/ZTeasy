@@ -255,7 +255,9 @@ function ApprovalQueue({ accessToken, username, onSignOut }: QueueProps) {
                   )}
                   <Typography variant="body2" color="text.secondary">
                     Notified: {approval.notificationStatus === 'SENT'
-                      ? `${approval.addressedTo} at ${new Date(approval.notifiedAt!).toLocaleTimeString()}`
+                      ? `${approval.addressedTo} at ${new Date(approval.notifiedAt!).toLocaleTimeString()}${
+                          approval.notificationKind === 'REMINDER' ? ' (reminder)' : ''
+                        }`
                       : approval.notificationStatus === 'FAILED'
                         ? `delivery to ${approval.addressedTo} failed`
                         : approval.notificationStatus === 'SKIPPED'

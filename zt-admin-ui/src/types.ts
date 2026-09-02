@@ -78,6 +78,8 @@ export interface PendingApproval {
   addressedToYou: boolean
   notificationStatus: 'SENT' | 'FAILED' | 'SKIPPED' | null
   notifiedAt: string | null
+  notificationKind: 'RAISED' | 'REMINDER' | null
+  notificationStage: string | null
   decidedAt: string | null
   decidedBy: string | null
   traceId: string | null
