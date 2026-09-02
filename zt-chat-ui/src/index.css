@@ -1,0 +1,18 @@
+/* Minimal reset only — everything visual now comes from the MUI theme
+   (src/theme.ts, Stage 29 / ADR-029). The previous file carried a fixed
+   1126px centred column and its own dark-mode palette, which fought the
+   theme's light dashboard surfaces and clipped wide tables. */
+:root {
+  color-scheme: light;
+  font-family: system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+body {
+  margin: 0;
+}
+
+#root {
+  min-height: 100svh;
+}

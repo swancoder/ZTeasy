@@ -46,14 +46,39 @@ val buildApproverUi by tasks.registering(com.github.gradle.node.npm.task.NpmTask
     outputs.dir(file("${rootDir}/zt-approver-ui/dist"))
 }
 
+// ── Chat Console (ADR-039) — a third independent npm project. Same pattern
+// again: its own bundle because it has its own Keycloak client and its own realm
+// role, and the people who use it have no business in the other two.
+val npmInstallChatUi by tasks.registering(com.github.gradle.node.npm.task.NpmTask::class) {
+    description = "Installs zt-chat-ui npm dependencies"
+    workingDir.set(file("${rootDir}/zt-chat-ui"))
+    args.set(listOf("install"))
+    inputs.file(file("${rootDir}/zt-chat-ui/package.json"))
+    outputs.dir(file("${rootDir}/zt-chat-ui/node_modules"))
+}
+
+val buildChatUi by tasks.registering(com.github.gradle.node.npm.task.NpmTask::class) {
+    description = "Builds the Chat Console SPA (zt-chat-ui) via npm run build"
+    dependsOn(npmInstallChatUi)
+    workingDir.set(file("${rootDir}/zt-chat-ui"))
+    args.set(listOf("run", "build"))
+    inputs.dir(file("${rootDir}/zt-chat-ui/src"))
+    inputs.file(file("${rootDir}/zt-chat-ui/package.json"))
+    outputs.dir(file("${rootDir}/zt-chat-ui/dist"))
+}
+
 tasks.named<ProcessResources>("processResources") {
     dependsOn(buildAdminUi)
     dependsOn(buildApproverUi)
+    dependsOn(buildChatUi)
     from(file("${rootDir}/zt-admin-ui/dist")) {
         into("static/admin")
     }
     from(file("${rootDir}/zt-approver-ui/dist")) {
         into("static/approver")
+    }
+    from(file("${rootDir}/zt-chat-ui/dist")) {
+        into("static/chat")
     }
 }
 

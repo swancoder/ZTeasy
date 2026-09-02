@@ -113,7 +113,16 @@ public class MtlsEnforcementWebFilter implements WebFilter, Ordered {
         // /api/v1/approver/ (ADR-026): browser traffic from the Approval Center
         // SPA — cert-free for the same reason /api/v1/admin/ is.
         if (path.startsWith("/api/v1/admin/") || path.startsWith("/api/v1/internal/")
-                || path.startsWith("/api/v1/approver/") || path.startsWith("/api/v1/dashboard/")) {
+                || path.startsWith("/api/v1/approver/") || path.startsWith("/api/v1/dashboard/")
+                // ADR-039: browsers reach the chat console, the model egress and their own
+                // event feed without a client certificate — they authenticate with a token,
+                // and the agent paths (/sse, /message) still demand both.
+                || path.startsWith("/api/v1/llm/") || path.startsWith("/api/v1/me/")
+                // The chat API is routed to zt-chat, and the browser calling it holds no
+                // certificate. The hop that does carry one is the gateway's own outbound
+                // leg to that service, which still requires it (client-auth: need) — so
+                // "only the gateway may reach the chat backend" is unchanged.
+                || path.startsWith("/api/v1/chat")) {
             return false;
         }
         return path.startsWith("/api/v1/");
