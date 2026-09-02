@@ -75,8 +75,12 @@ public class AdminAuthorizationFilter implements WebFilter {
         // API surface needing users2service enforcement — same GlobalFilter
         // caveat as /api/v1/admin/** (see class Javadoc), same filter, its own
         // YAML rules (u2s-approver-api-*: USER or ADMIN, vs. admin's ADMIN-only).
+        // ADR-039 adds /api/v1/llm/ and /api/v1/me/: a model call and a person's own
+        // event feed are gateway-local APIs like the others, and must be decided by
+        // the same YAML rules rather than by being merely authenticated.
         if (!path.startsWith("/api/v1/admin/") && !path.startsWith("/api/v1/approver/")
-                && !path.startsWith("/api/v1/dashboard/")) {
+                && !path.startsWith("/api/v1/dashboard/") && !path.startsWith("/api/v1/llm/")
+                && !path.startsWith("/api/v1/me/")) {
             return chain.filter(exchange);
         }
 

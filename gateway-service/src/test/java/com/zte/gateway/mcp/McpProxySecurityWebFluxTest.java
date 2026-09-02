@@ -169,7 +169,7 @@ class McpProxySecurityWebFluxTest {
     @Test
     void message_deniedByPolicy_emitsDenial_neverCallsBackend() {
         when(sessionManager.exists("session-1")).thenReturn(true);
-        when(policyEngine.evaluate(eq("agent-a"), eq("delete_deal"), any()))
+        when(policyEngine.evaluate(any(com.zte.gateway.mcp.policy.McpCaller.class), eq("delete_deal"), any()))
                 .thenReturn(PolicyDecision.deny("denied by test policy"));
 
         webTestClient.mutateWith(mockJwt().jwt(jwt -> jwt.claim("azp", "agent-a")))
@@ -194,7 +194,7 @@ class McpProxySecurityWebFluxTest {
     @Test
     void message_allowedByPolicy_forwardsToBackend_emitsResult() {
         when(sessionManager.exists("session-1")).thenReturn(true);
-        when(policyEngine.evaluate(eq("agent-a"), eq("get_deals"), any()))
+        when(policyEngine.evaluate(any(com.zte.gateway.mcp.policy.McpCaller.class), eq("get_deals"), any()))
                 .thenReturn(PolicyDecision.allow());
         JsonRpcResponse backendResponse = JsonRpcResponse.success(7, Map.of("content", "3 deals"));
         when(forwardService.execute(anyString(), any())).thenReturn(Mono.just(backendResponse));
@@ -220,7 +220,7 @@ class McpProxySecurityWebFluxTest {
     @Test
     void message_heldByPolicy_persistsApproval_emitsHeldStatus_neverCallsBackend() {
         when(sessionManager.exists("session-1")).thenReturn(true);
-        when(policyEngine.evaluate(eq("crm-account-health-emea-01"), eq("send_email"), any()))
+        when(policyEngine.evaluate(any(com.zte.gateway.mcp.policy.McpCaller.class), eq("send_email"), any()))
                 .thenReturn(PolicyDecision.hold("held by test policy"));
         PendingApproval approval = new PendingApproval(UUID.fromString("11111111-1111-1111-1111-111111111111"),
                 "session-1", "crm-account-health-emea-01", "send_email", "7", "{}", null, "held by test policy",

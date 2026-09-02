@@ -8,6 +8,7 @@ import com.zte.gateway.mcp.audit.McpAuditService;
 import com.zte.gateway.mcp.model.JsonRpcRequest;
 import com.zte.gateway.mcp.model.JsonRpcResponse;
 import com.zte.gateway.mcp.policy.McpPolicyEngine;
+import com.zte.gateway.mcp.policy.McpCaller;
 import com.zte.gateway.mcp.policy.PolicyDecision;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -132,7 +133,7 @@ public class McpProxyHandler {
         String agentId = identity.agentId();
         String toolName = rpc.toolName();
         String argumentsJson = serializeArguments(rpc.toolArguments());
-        PolicyDecision decision = policyEngine.evaluate(agentId, toolName, rpc.toolArguments());
+        PolicyDecision decision = policyEngine.evaluate(identity.caller(), toolName, rpc.toolArguments());
 
         return switch (decision.outcome()) {
             case DENY -> {
@@ -212,14 +213,31 @@ public class McpProxyHandler {
                 .map(auth -> {
                     var jwt = auth.getToken();
                     String clientId = jwt.getClaimAsString("azp");
-                    String agentId = clientId != null ? clientId : jwt.getSubject();
                     String preferredUsername = jwt.getClaimAsString("preferred_username");
-                    String displayIdentity = preferredUsername != null ? preferredUsername : jwt.getSubject();
-                    return new CallerIdentity(agentId, displayIdentity);
+
+                    // ADR-039: a token carrying preferred_username is a person, and the
+                    // decision is made about the person — their username and roles — with
+                    // the application they came through offered as an additional source.
+                    // A client-credentials token has no such claim and stays an agent, so
+                    // every existing rule keeps matching exactly as before.
+                    if (preferredUsername != null && !preferredUsername.isBlank()) {
+                        McpCaller caller = McpCaller.user(preferredUsername, realmRoles(jwt), clientId);
+                        return new CallerIdentity(caller.id(), preferredUsername, caller);
+                    }
+                    String agentId = clientId != null ? clientId : jwt.getSubject();
+                    return new CallerIdentity(agentId, agentId, McpCaller.client(agentId));
                 });
     }
 
-    private record CallerIdentity(String agentId, String displayIdentity) {}
+    @SuppressWarnings("unchecked")
+    private static java.util.List<String> realmRoles(org.springframework.security.oauth2.jwt.Jwt jwt) {
+        java.util.Map<String, Object> realmAccess = jwt.getClaimAsMap("realm_access");
+        return realmAccess == null ? java.util.List.of()
+                : (java.util.List<String>) realmAccess.getOrDefault("roles", java.util.List.of());
+    }
+
+    private record CallerIdentity(String agentId, String displayIdentity,
+                                   com.zte.gateway.mcp.policy.McpCaller caller) {}
 
     /**
      * The HTTP context an audited MCP event carries — {@code clientIp} via the

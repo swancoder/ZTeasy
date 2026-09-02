@@ -208,6 +208,17 @@ zte:
       url: ${ZTE_APPROVALS_WEBHOOK_URL:}
       timeout-ms: ${ZTE_APPROVALS_WEBHOOK_TIMEOUT_MS:5000}
 
+  # ── Model egress (Stage 39 / ADR-039) ──
+  # The gateway is the perimeter's exit to a language model: it holds the vendor
+  # credential so no application has to, and it reads token counts out of the
+  # vendor's own response instead of trusting each caller's self-report. No
+  # default for the key (ADR-037) — unset means model calls are refused, loudly.
+  llm:
+    base-uri: ${ZTE_LLM_BASE_URI:https://api.anthropic.com}
+    api-key: ${ZTE_LLM_API_KEY:}
+    anthropic-version: ${ZTE_LLM_ANTHROPIC_VERSION:2023-06-01}
+    timeout-seconds: ${ZTE_LLM_TIMEOUT_SECONDS:120}
+
   # ── ACAP per-agent scope profiles (Stage 3 / ADR-020) — additive, opt-in ──
   # tightening on top of agentMcpToolCalls/agentMcpToolHolds above. Unlike
   # policy.file, a location matching zero files is normal, not an error.

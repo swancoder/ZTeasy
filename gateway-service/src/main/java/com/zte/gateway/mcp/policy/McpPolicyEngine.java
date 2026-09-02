@@ -14,4 +14,13 @@ import java.util.Map;
 public interface McpPolicyEngine {
 
     PolicyDecision evaluate(String agentId, String toolName, Map<String, Object> arguments);
+
+    /**
+     * The same decision for a caller that may be a person rather than an agent
+     * (ADR-039). The agent form above delegates here, so there is one decision
+     * path regardless of who is calling.
+     */
+    default PolicyDecision evaluate(McpCaller caller, String toolName, Map<String, Object> arguments) {
+        return evaluate(caller.id(), toolName, arguments);
+    }
 }

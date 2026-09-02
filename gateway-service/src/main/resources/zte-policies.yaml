@@ -122,6 +122,41 @@ users2service:
 # When adding a rule, prefer the client:<clientId> URN form for source
 # (ADR-015) — matches an OIDC client id synced into idp_identities, same as
 # the bare form still does for backward compatibility.
+  # ── ADR-039: the chat application's users ────────────────────────────────
+  # A model call is a policy decision like any other — this is the rule that
+  # makes spending money on tokens something a person is granted rather than
+  # something an application can simply do.
+  - id: u2s-chat-user-llm
+    effect: ALLOW
+    source: CHAT_USER
+    target: llm
+    pathPattern: "/api/v1/llm/**"
+    methods: "POST"
+    priority: 0
+  # Everyone interactive may read their OWN trail; the query is scoped to them
+  # in SQL, so this rule grants a view of oneself, not of the audit trail.
+  - id: u2s-user-own-events
+    effect: ALLOW
+    source: USER
+    target: me
+    pathPattern: "/api/v1/me/**"
+    methods: "GET"
+    priority: 0
+  - id: u2s-chat-user-own-events
+    effect: ALLOW
+    source: CHAT_USER
+    target: me
+    pathPattern: "/api/v1/me/**"
+    methods: "GET"
+    priority: 0
+  - id: u2s-admin-own-events
+    effect: ALLOW
+    source: ADMIN
+    target: me
+    pathPattern: "/api/v1/me/**"
+    methods: "GET"
+    priority: 0
+
 service2service:
   # ADR-017 — the 'service-a' Keycloak client (a machine identity for
   # exercising this filter specifically; NOT the real service-a app's own

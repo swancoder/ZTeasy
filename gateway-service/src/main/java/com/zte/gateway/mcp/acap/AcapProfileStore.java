@@ -40,6 +40,25 @@ public class AcapProfileStore {
         return Optional.ofNullable(current.get().get(agentId));
     }
 
+    /**
+     * First profile matching any of {@code keys}, in order (ADR-039). A person is
+     * looked up by username first and then by each of their roles, so scope can be
+     * authored once for "sales in EMEA" rather than per employee — while a
+     * personal profile still wins where one exists.
+     */
+    public Optional<AcapProfile> find(java.util.List<String> keys) {
+        return findKey(keys).map(k -> current.get().get(k));
+    }
+
+    /** Which of {@code keys} a profile was found under — the lifecycle is keyed by it too. */
+    public Optional<String> findKey(java.util.List<String> keys) {
+        if (keys == null) {
+            return Optional.empty();
+        }
+        var profiles = current.get();
+        return keys.stream().filter(profiles::containsKey).findFirst();
+    }
+
     public List<AcapProfile> all() {
         return List.copyOf(current.get().values());
     }

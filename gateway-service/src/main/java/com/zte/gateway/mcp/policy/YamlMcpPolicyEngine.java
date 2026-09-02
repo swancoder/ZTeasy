@@ -66,20 +66,43 @@ public class YamlMcpPolicyEngine implements McpPolicyEngine {
         if (agentId == null || agentId.isBlank()) {
             return PolicyDecision.deny("Unknown agent");
         }
+        return evaluate(McpCaller.client(agentId), toolName, arguments);
+    }
+
+    @Override
+    public PolicyDecision evaluate(McpCaller caller, String toolName, Map<String, Object> arguments) {
+        if (caller == null || caller.id() == null || caller.id().isBlank()) {
+            return PolicyDecision.deny("Unknown caller");
+        }
         if (toolName == null || toolName.isBlank()) {
             return PolicyDecision.deny("Missing tool name");
         }
+        String agentId = caller.id();
 
         // Stage 32 (ADR-032): lifecycle gate before any rule work — a
         // suspended or retired agent is denied outright, with the state named
         // so the refusal is attributable to an operator's decision, not policy.
-        String lifecycleStatus = lifecycleStore.status(agentId);
-        if (!AcapLifecycleState.ACTIVE.equals(lifecycleStatus)) {
-            return PolicyDecision.deny("Agent '" + agentId + "' is " + lifecycleStatus.toLowerCase()
-                    + " (ACAP lifecycle) — every call is refused until an operator reactivates it");
+        //
+        // Stage 39 (ADR-039): the lifecycle belongs to whichever ACAP profile
+        // governs this caller, which for a person is found by role — so a
+        // suspended "role:SALES_EMEA" profile stops every human it covers, and a
+        // caller with no profile at all has no lifecycle to be suspended.
+        // An agent's lifecycle is keyed by its own id, exactly as before. A person's
+        // is keyed by whichever profile covers them — usually a role — so suspending
+        // "role:SALES_EMEA" stops everyone it governs, and a person no profile covers
+        // has no lifecycle to suspend.
+        String lifecycleKey = caller.human()
+                ? acapProfileStore.findKey(caller.acapKeys()).orElse(null)
+                : agentId;
+        if (lifecycleKey != null) {
+            String lifecycleStatus = lifecycleStore.status(lifecycleKey);
+            if (!AcapLifecycleState.ACTIVE.equals(lifecycleStatus)) {
+                return PolicyDecision.deny("Agent '" + lifecycleKey + "' is " + lifecycleStatus.toLowerCase()
+                        + " (ACAP lifecycle) — every call is refused until an operator reactivates it");
+            }
         }
 
-        List<String> sources = IdentitySources.enrichClient(agentId);
+        List<String> sources = caller.sources();
         // Stage 31 (ADR-031): evaluated over the ACTIVE subset; disabled rules
         // that would have matched are logged and annotated onto the decision's
         // reason so the audit row records why the outcome differs from the file.
@@ -97,7 +120,7 @@ public class YamlMcpPolicyEngine implements McpPolicyEngine {
                             "No policy grants agent '" + agentId + "' access to tool '" + toolName + "'");
         };
 
-        return tightenViaAcapProfile(annotateInactive(decision, detailed.inactiveMatches()), agentId, toolName, arguments);
+        return tightenViaAcapProfile(annotateInactive(decision, detailed.inactiveMatches()), caller, toolName, arguments);
     }
 
     /**
@@ -129,12 +152,17 @@ public class YamlMcpPolicyEngine implements McpPolicyEngine {
      * DENY, a per-agent-per-metric usage threshold may still escalate an
      * ALLOW to HOLD ({@code followup_drafts_per_day}-style limits).
      */
-    private PolicyDecision tightenViaAcapProfile(PolicyDecision decision, String agentId, String toolName,
+    private PolicyDecision tightenViaAcapProfile(PolicyDecision decision, McpCaller caller, String toolName,
                                                   Map<String, Object> arguments) {
         if (decision.outcome() == PolicyDecision.Outcome.DENY) {
             return decision;
         }
-        Optional<AcapProfile> profile = acapProfileStore.find(agentId);
+        String agentId = caller.id();
+        // Single-key lookup for an agent keeps that path byte-for-byte what ADR-020
+        // specified; the ordered lookup is only reached for a person.
+        Optional<AcapProfile> profile = caller.human()
+                ? acapProfileStore.find(caller.acapKeys())
+                : acapProfileStore.find(agentId);
         if (profile.isEmpty()) {
             return decision;
         }

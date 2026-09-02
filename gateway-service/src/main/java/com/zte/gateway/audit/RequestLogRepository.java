@@ -1,5 +1,7 @@
 package com.zte.gateway.audit;
 
+import org.springframework.data.r2dbc.repository.Query;
+import org.springframework.data.repository.query.Param;
 import org.springframework.data.repository.reactive.ReactiveCrudRepository;
 import org.springframework.stereotype.Repository;
 import reactor.core.publisher.Flux;
@@ -34,4 +36,22 @@ public interface RequestLogRepository extends ReactiveCrudRepository<RequestLog,
      * distinct from the Audit Trail tab's REST+MCP-wide view.
      */
     Flux<RequestLog> findTop50ByAgentIdIsNotNullAndDecisionEffectOrderByTimestampDesc(String decisionEffect);
+
+    /**
+     * One person's own trail (ADR-039): everything the gateway decided where they
+     * were the subject — as the MCP caller ({@code agent_id}, which for a human is
+     * their username) or as the human behind a service call
+     * ({@code original_user_obo}).
+     *
+     * <p>Deliberately scoped in the query rather than filtered after reading: a
+     * "my events" endpoint that fetches everyone's rows and then hides most of
+     * them is one bug away from showing them.
+     */
+    @Query("""
+            SELECT * FROM request_logs
+             WHERE agent_id = :who OR original_user_obo = :who
+             ORDER BY timestamp DESC
+             LIMIT :limit
+            """)
+    Flux<RequestLog> findOwnEvents(@Param("who") String who, @Param("limit") int limit);
 }
